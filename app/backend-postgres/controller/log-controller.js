@@ -2452,6 +2452,7 @@ export const get_process_activity_logs = async (req, res) => {
         processStepInstanceId: stepInstanceId || null,
         stepName: stepInstance?.workflowStep?.stepName || "All Steps",
         recirculationCycle: stepInstance?.recirculationCycle || 0,
+        processStoragePath: process.processStoragePath || "N/A",
         workflow: enrichedWorkflow,
         activities: sortedActivities,
       },

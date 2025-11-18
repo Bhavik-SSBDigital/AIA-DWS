@@ -4022,7 +4022,7 @@ export const reopen_process = async (req, res) => {
 
     const result = await prisma.$transaction(async (tx) => {
       const process = await tx.processInstance.findUnique({
-        where: { id: processId, initiatorId: userData.id, status: "COMPLETED" },
+        where: { id: processId, initiatorId: userData.id },
         include: {
           workflow: {
             include: {
@@ -4059,6 +4059,9 @@ export const reopen_process = async (req, res) => {
         newDocumentId,
         reasonOfSupersed,
         issueNo,
+        description,
+        tags,
+        partNumber,
       } of supersededDocuments) {
         const oldDoc = await tx.document.findUnique({
           where: { id: parseInt(oldDocumentId) },
@@ -4086,6 +4089,9 @@ export const reopen_process = async (req, res) => {
             issueNo: issueNo || null,
             replacedDocumentId: parseInt(oldDocumentId),
             reopenCycle: updatedProcess.reopenCycle,
+            description: description || null,
+            tags: tags || null,
+            partNumber: partNumber || null,
           },
         });
 
