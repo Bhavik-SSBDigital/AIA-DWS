@@ -1024,9 +1024,8 @@ const Timeline = ({
                 <p>{detail.value}</p>
               </div>
             ))}
-
-            {process?.documentVersioning && DocumentsCycle(process)}
           </div>
+          {process?.documentVersioning && DocumentsCycle(process)}
         </CustomCard>
         <TimelineLegend />
         <CustomCard className="transition-all duration-300 ease-in-out">
