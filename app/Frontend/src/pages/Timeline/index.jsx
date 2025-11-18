@@ -988,7 +988,7 @@ const Timeline = ({
                             <CustomButton
                               className="px-2"
                               click={() =>
-                                handleViewFile(
+                                handleView(
                                   doc.name,
                                   doc.path,
                                   doc.id,
