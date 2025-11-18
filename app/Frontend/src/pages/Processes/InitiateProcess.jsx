@@ -22,6 +22,7 @@ import CustomCard from '../../CustomComponents/CustomCard';
 import Title from '../../CustomComponents/Title';
 
 export default function InitiateProcess() {
+  console.log("called")
   const navigate = useNavigate();
   const [workflowData, setWorkflowData] = useState([]);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
@@ -83,6 +84,7 @@ export default function InitiateProcess() {
   };
 
   useEffect(() => {
+    console.log("called")
     const getWorkflowsData = async () => {
       try {
         const response = await GetWorkflows();
@@ -173,8 +175,8 @@ export default function InitiateProcess() {
     }
     setActionsLoading(true);
     try {
-      // const res = await ProcessInitiate(data);
-      // toast.success(res?.data?.message);
+      const res = await ProcessInitiate(data);
+      toast.success(res?.data?.message);
       console.log(data);
       navigate('/processes/work');
     } catch (error) {
