@@ -18,6 +18,7 @@ import {
   IconChevronDown,
   IconFileArrowRight,
   IconArrowLeft,
+  IconEye,
 } from '@tabler/icons-react';
 import TimelineLegend from './TimelineLegend';
 import CustomButton from '../../CustomComponents/CustomButton';
