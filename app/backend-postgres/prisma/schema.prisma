@@ -299,6 +299,7 @@ model ProcessInstance {
   name             String
   workflowId       String
   description      String?
+  issueNo          String?
   initiatorId      Int
   currentStepId    String?
   status           ProcessStatus @default(PENDING)
@@ -398,6 +399,7 @@ model ProcessDocument {
   processId        String
   description      String?
   reasonOfSupersed String?
+  issueNo          String?
   partNumber       String?
   preApproved      Boolean   @default(false)
   tags                  String[]  @default([])
@@ -407,6 +409,7 @@ model ProcessDocument {
   replacedDocumentId Int?
   rejectedById     Int?
   reopenCycle      Int       @default(0)
+  SOPIssueNo String?
   process          ProcessInstance @relation("ProcessDocumentRelation", fields: [processId], references: [id], onDelete: Cascade)
   document         Document  @relation("ProcessDocumentRelation", fields: [documentId], references: [id], onDelete: Cascade)
   replacedDocument Document? @relation("ReplacedDocument", fields: [replacedDocumentId], references: [id], onDelete: Cascade)
