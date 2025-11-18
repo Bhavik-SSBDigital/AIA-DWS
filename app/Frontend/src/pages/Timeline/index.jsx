@@ -26,6 +26,7 @@ import ViewFile from '../view/View';
 import CustomCard from '../../CustomComponents/CustomCard';
 import Show from '../workflows/Show';
 import { useNavigate } from 'react-router-dom';
+import { ImageConfig } from '../../config/ImageConfig';
 
 const iconMap = {
   PROCESS_INITIATED: <IconInfoCircle size={20} className="text-blue-600" />,
