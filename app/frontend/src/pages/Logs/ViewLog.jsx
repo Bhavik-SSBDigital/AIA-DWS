@@ -105,6 +105,7 @@ const ViewLog = () => {
           setActionsLoading={setActionsLoading}
           workflow={data?.workflow?.steps}
           process={data}
+          reOpen={data?.isInitiator}
         />
       </div>
     </div>

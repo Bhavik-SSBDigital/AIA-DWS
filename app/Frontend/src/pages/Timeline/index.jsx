@@ -28,6 +28,8 @@ import CustomCard from '../../CustomComponents/CustomCard';
 import Show from '../workflows/Show';
 import { useNavigate } from 'react-router-dom';
 import { ImageConfig } from '../../config/ImageConfig';
+import ReOpenProcessModal from '../Processes/Actions/ReOpenProcessModal';
+import CustomModal from '../../CustomComponents/CustomModal';
 
 const iconMap = {
   PROCESS_INITIATED: <IconInfoCircle size={20} className="text-blue-600" />,
@@ -53,6 +55,7 @@ const Timeline = ({
   print,
   id,
   process,
+  reOpen,
 }) => {
   const navigate = useNavigate();
 
@@ -820,6 +823,7 @@ const Timeline = ({
 
   //   states
   const [fileView, setFileView] = useState(null);
+  const [openModal, setOpenModal] = useState('');
   const [expanded, setExpanded] = useState(false);
   // handlers
   const handleView = async (name, path, fileId, type, isEditing) => {
@@ -841,11 +845,9 @@ const Timeline = ({
   function extractDocumentsByReopenCycle(processData) {
     const { documentVersioning } = processData;
 
-    // Get all unique reopen cycles and sort them
     const allReopenCycles = new Set();
     const documentLineage = new Map();
 
-    // First, get the original document order from cycle 0
     const originalOrder = [];
     const originalDocumentsMap = new Map();
 
@@ -854,9 +856,9 @@ const Timeline = ({
       const versions = docGroup.versions.sort(
         (a, b) => a.reopenCycle - b.reopenCycle,
       );
+
       documentLineage.set(docGroup.latestDocumentId, versions);
 
-      // Find the original version (cycle 0) to establish order
       const originalVersion = versions.find((v) => v.reopenCycle === 0);
       if (originalVersion) {
         originalOrder.push(originalVersion.id);
@@ -870,15 +872,12 @@ const Timeline = ({
 
     const reopenCycles = Array.from(allReopenCycles).sort((a, b) => a - b);
 
-    // Build result for each cycle
     const result = reopenCycles.map((currentCycle) => {
       const cycleDocuments = [];
 
-      // Process documents in the original order
       originalOrder.forEach((originalDocId) => {
         const versions = originalDocumentsMap.get(originalDocId);
         if (versions) {
-          // Find the latest version that exists at or before current cycle
           let appropriateVersion = null;
 
           for (let i = versions.length - 1; i >= 0; i--) {
@@ -894,8 +893,26 @@ const Timeline = ({
         }
       });
 
+      // ---------------------------
+      // NEW: SOPIssueNo = version matching the reopenCycle
+      // ---------------------------
+      let sopIssueNo = null;
+
+      for (const doc of cycleDocuments) {
+        if (doc.reopenCycle === currentCycle) {
+          sopIssueNo = doc.SOPIssueNo;
+          break;
+        }
+      }
+
+      // Fallback to first doc if no exact match
+      if (!sopIssueNo && cycleDocuments.length > 0) {
+        sopIssueNo = cycleDocuments[0].SOPIssueNo;
+      }
+
       return {
         reopenCycle: currentCycle,
+        SOPIssueNo: sopIssueNo,
         documents: cycleDocuments,
       };
     });
@@ -921,6 +938,7 @@ const Timeline = ({
             <thead className="bg-gray-100">
               <tr>
                 <th className="py-2 px-4 border">SOP</th>
+                <th className="py-2 px-4 border">Process SOP</th>
                 {Array.from({ length: maxDocs }).map((_, idx) => (
                   <th key={idx} className="py-2 px-4 border">
                     Document {idx + 1}
@@ -933,6 +951,9 @@ const Timeline = ({
                 <tr key={cycle.reopenCycle}>
                   <td className="py-2 px-4 border font-medium">
                     {cycle.reopenCycle}
+                  </td>
+                  <td className="py-2 px-4 border font-medium">
+                    {cycle.SOPIssueNo || '--'}
                   </td>
 
                   {Array.from({ length: maxDocs }).map((_, idx) => {
@@ -1002,6 +1023,14 @@ const Timeline = ({
       <div className="space-y-5 mt-2">
         <CustomCard>
           <div className="flex justify-end flex-row gap-2 flex-wrap">
+            <CustomButton
+              variant={'primary'}
+              text={'Re-Open'}
+              className={'min-w-[150px]'}
+              click={() => setOpenModal('re-open')}
+              disabled={actionsLoading || !reOpen}
+            />
+
             <CustomButton
               variant={'none'}
               text={
@@ -1097,6 +1126,24 @@ const Timeline = ({
           })}
         </div>
       </div>
+
+      <CustomModal
+        isOpen={openModal == 're-open'}
+        onClose={() => {
+          setOpenModal('');
+        }}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+      >
+        <ReOpenProcessModal
+          workflowId={process?.workflow?.id}
+          processId={process.processId}
+          storagePath={process.processStoragePath}
+          close={() => {
+            setOpenModal('');
+          }}
+          documents={process.documents}
+        />
+      </CustomModal>
       {/* View File Modal */}
       {fileView && (
         <ViewFile
