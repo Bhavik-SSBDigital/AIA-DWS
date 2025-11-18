@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import {
   uploadDocumentInProcess,
@@ -37,6 +37,8 @@ export default function ReOpenProcessModal({
           uploadedFileName: '',
           reasonOfSupersed: '',
           issueNo: '',
+          partNumber: '',
+          fileDescription: '',
         },
       ],
     },
@@ -47,6 +49,8 @@ export default function ReOpenProcessModal({
     name: 'supersededDocuments',
   });
   const navigate = useNavigate();
+  const [tags, setTags] = useState([]);
+  const [newTag, setNewTag] = useState();
 
   const handleUpload = async (file, index, replacedDocId) => {
     if (!file) return;
@@ -109,6 +113,9 @@ export default function ReOpenProcessModal({
           newDocumentId: d.newDocumentId,
           reasonOfSupersed: d.reasonOfSupersed,
           issueNo: d.issueNo,
+          partNumber: d.partNumber,
+          fileDescription: d.fileDescription,
+          tags: tags,
         })),
       });
 
@@ -165,6 +172,25 @@ export default function ReOpenProcessModal({
                 {...register(`supersededDocuments.${index}.oldDocumentId`)}
                 required
                 className="w-full border p-2 rounded text-sm"
+                onChange={(e) => {
+                  const value = e.target.value;
+
+                  // RHF update
+                  register(
+                    `supersededDocuments.${index}.oldDocumentId`,
+                  ).onChange(e);
+                  setValue(`supersededDocuments.${index}.oldDocumentId`, value);
+
+                  // find selected document
+                  const selectedDoc = documents.find(
+                    (doc) => String(doc.id) === value,
+                  );
+
+                  // 🔥 update tags (ONLY this is added)
+                  if (selectedDoc?.tags) {
+                    setTags(selectedDoc.tags);
+                  }
+                }}
               >
                 <option value="">-- Select Document --</option>
                 {documents
@@ -215,6 +241,74 @@ export default function ReOpenProcessModal({
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">
+                Document Description
+              </label>
+              <input
+                type="text"
+                {...register(`supersededDocuments.${index}.partNumber`)}
+                className="w-full border p-2 rounded text-sm"
+                placeholder="Enter Description"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Part Number
+              </label>
+              <input
+                type="text"
+                {...register(`supersededDocuments.${index}.fileDescription`)}
+                className="w-full border p-2 rounded text-sm"
+                placeholder="Enter Part Number"
+              />
+            </div>
+            {/* Tag Input */}
+            <div className="mt-4">
+              <label className="text-sm font-medium text-gray-700">Tags</label>
+              <div className="flex gap-2 mt-2">
+                <input
+                  type="text"
+                  value={newTag}
+                  onChange={(e) => {
+                    const sanitizedValue = e.target.value.replace(
+                      /[^a-zA-Z0-9 ]/g,
+                      '',
+                    );
+                    setNewTag(sanitizedValue);
+                  }}
+                  className="border border-gray-300 p-2 rounded-md w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter tag..."
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (newTag.trim()) {
+                      setTags((prev) => [...prev, newTag.trim()]);
+                      setNewTag('');
+                    }
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition"
+                >
+                  Add
+                </button>
+              </div>
+              {tags.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {tags.map((tag, index) => (
+                    <span
+                      key={index}
+                      className="bg-purple-600 text-white px-3 py-1 text-sm rounded-full flex items-center gap-1 cursor-pointer hover:bg-purple-700 transition"
+                      onClick={() =>
+                        setTags((prev) => prev.filter((_, i) => i !== index))
+                      }
+                    >
+                      {tag} <span className="text-lg">&times;</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
                 Enter Document Issue No/Revision No
               </label>
               <input
@@ -246,6 +340,8 @@ export default function ReOpenProcessModal({
             newDocumentId: '',
             uploadedFileName: '',
             reasonOfSupersed: '',
+            partNumber: '',
+            fileDescription: '',
           })
         }
         className={'mx-auto block'}
