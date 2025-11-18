@@ -70,6 +70,7 @@ const ViewProcess = () => {
   const processDetails = [
     { label: 'Process ID', value: process?.processId },
     { label: 'Process Name', value: process?.processName || 'N/A' },
+    { label: 'Process SOP', value: process?.issueNo || 'N/A' },
     { label: 'Description', value: process?.description || 'N/A' },
     { label: 'Initiator Name', value: process?.initiatorName || 'Unknown' },
     {
@@ -319,11 +320,9 @@ const ViewProcess = () => {
   function extractDocumentsByReopenCycle(processData) {
     const { documentVersioning } = processData;
 
-    // Get all unique reopen cycles and sort them
     const allReopenCycles = new Set();
     const documentLineage = new Map();
 
-    // First, get the original document order from cycle 0
     const originalOrder = [];
     const originalDocumentsMap = new Map();
 
@@ -332,9 +331,9 @@ const ViewProcess = () => {
       const versions = docGroup.versions.sort(
         (a, b) => a.reopenCycle - b.reopenCycle,
       );
+
       documentLineage.set(docGroup.latestDocumentId, versions);
 
-      // Find the original version (cycle 0) to establish order
       const originalVersion = versions.find((v) => v.reopenCycle === 0);
       if (originalVersion) {
         originalOrder.push(originalVersion.id);
@@ -348,15 +347,12 @@ const ViewProcess = () => {
 
     const reopenCycles = Array.from(allReopenCycles).sort((a, b) => a - b);
 
-    // Build result for each cycle
     const result = reopenCycles.map((currentCycle) => {
       const cycleDocuments = [];
 
-      // Process documents in the original order
       originalOrder.forEach((originalDocId) => {
         const versions = originalDocumentsMap.get(originalDocId);
         if (versions) {
-          // Find the latest version that exists at or before current cycle
           let appropriateVersion = null;
 
           for (let i = versions.length - 1; i >= 0; i--) {
@@ -372,8 +368,26 @@ const ViewProcess = () => {
         }
       });
 
+      // ---------------------------
+      // NEW: SOPIssueNo = version matching the reopenCycle
+      // ---------------------------
+      let sopIssueNo = null;
+
+      for (const doc of cycleDocuments) {
+        if (doc.reopenCycle === currentCycle) {
+          sopIssueNo = doc.SOPIssueNo;
+          break;
+        }
+      }
+
+      // Fallback to first doc if no exact match
+      if (!sopIssueNo && cycleDocuments.length > 0) {
+        sopIssueNo = cycleDocuments[0].SOPIssueNo;
+      }
+
       return {
         reopenCycle: currentCycle,
+        SOPIssueNo: sopIssueNo,
         documents: cycleDocuments,
       };
     });
@@ -399,6 +413,7 @@ const ViewProcess = () => {
             <thead className="bg-gray-100">
               <tr>
                 <th className="py-2 px-4 border">SOP</th>
+                <th className="py-2 px-4 border">Process SOP</th>
                 {Array.from({ length: maxDocs }).map((_, idx) => (
                   <th key={idx} className="py-2 px-4 border">
                     Document {idx + 1}
@@ -411,6 +426,9 @@ const ViewProcess = () => {
                 <tr key={cycle.reopenCycle}>
                   <td className="py-2 px-4 border font-medium">
                     {cycle.reopenCycle}
+                  </td>
+                  <td className="py-2 px-4 border font-medium">
+                    {cycle.SOPIssueNo || "--"}
                   </td>
 
                   {Array.from({ length: maxDocs }).map((_, idx) => {
