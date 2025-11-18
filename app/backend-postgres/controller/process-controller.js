@@ -327,7 +327,7 @@ export const initiate_process = async (req, res, next) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
-    const { description, workflowId } = req.body;
+    const { description, workflowId, issueNo } = req.body;
 
     const processName = await generate_unique_process_name(workflowId);
 
@@ -417,6 +417,7 @@ export const initiate_process = async (req, res, next) => {
           name: processName,
           status: "IN_PROGRESS",
           description: description,
+          issueNo: issueNo,
           currentStepId: null,
           reopenCycle: 0,
           storagePath: `../${workflowName}/${processName}`,
@@ -428,10 +429,12 @@ export const initiate_process = async (req, res, next) => {
           processId: process_.id,
           documentId: documentIds[index],
           reopenCycle: 0,
+          SOPIssueNo: issueNo || null,
           preApproved: item.preApproved || false,
           tags: item.tags || [],
           partNumber: item.partNumber || null,
           description: item.description || null,
+          issueNo: item.issueNo || null,
         })) || [];
 
       await tx.processDocument.createMany({
@@ -1428,11 +1431,15 @@ export const view_process = async (req, res) => {
           break;
         }
 
+        console.log("process doc", processDoc);
+
         versions.unshift({
           id: processDoc.document.id,
           name: processDoc.document.name,
           path: processDoc.document.path.split("/").slice(0, -1).join("/"),
           type: processDoc.document.type,
+          issueNo: processDoc.issueNo || null,
+          SOPIssueNo: processDoc.SOPIssueNo || null,
           tags: processDoc.tags,
           preApproved: processDoc.preApproved,
           reasonOfSupersed: processDoc.reasonOfSupersed,
@@ -1532,6 +1539,8 @@ export const view_process = async (req, res) => {
                       .slice(0, -1)
                       .join("/")
                   : "",
+                issueNo: lastDocBeforeCycleChange.issueNo || null,
+                SOPIssueNo: lastDocBeforeCycleChange.SOPIssueNo || null,
                 type: lastDocBeforeCycleChange.document.type || "",
                 tags: lastDocBeforeCycleChange.tags || [],
                 reasonOfSupersed:
@@ -1574,6 +1583,7 @@ export const view_process = async (req, res) => {
                   .join("/")
               : "",
             type: lastDocBeforeCycleChange.document.type || "",
+            issueNo: lastDocBeforeCycleChange.document.issueNo || null,
             tags: lastDocBeforeCycleChange.tags || [],
             active:
               lastDocBeforeCycleChange.document.id ===
@@ -1604,6 +1614,8 @@ export const view_process = async (req, res) => {
               description: documentWhichSuperseded.description || "",
               preApproved: documentWhichSuperseded.preApproved || false,
               tags: documentWhichSuperseded.tags || [],
+              issueNo: documentWhichSuperseded.issueNo || null,
+              SOPIssueNo: documentWhichSuperseded.SOPIssueNo || null,
               reasonOfSupersed:
                 documentWhichSuperseded.reasonOfSupersed || null,
               description: documentWhichSuperseded.description || null,
@@ -1678,6 +1690,8 @@ export const view_process = async (req, res) => {
           reasonOfSupersed: doc.reasonOfSupersed,
           description: doc.description,
           partNumber: doc.partNumber,
+          issueNo: doc.issueNo,
+          SOPIssueNo: doc.SOPIssueNo,
           active: true,
         };
       });
@@ -1963,6 +1977,7 @@ export const view_process = async (req, res) => {
         initiatorName: process.initiator.username,
         status: process.status,
         createdAt: process.createdAt,
+        issueNo: process.issueNo,
         processId: process.id,
         reopenCycle: process.reopenCycle,
         versions: versions,
@@ -3992,6 +4007,8 @@ export const reopen_process = async (req, res) => {
 
     const { processId, supersededDocuments } = req.body;
 
+    const SOPIssueNo = req.body.issueNo;
+
     if (
       !processId ||
       !supersededDocuments ||
@@ -4041,6 +4058,7 @@ export const reopen_process = async (req, res) => {
         oldDocumentId,
         newDocumentId,
         reasonOfSupersed,
+        issueNo,
       } of supersededDocuments) {
         const oldDoc = await tx.document.findUnique({
           where: { id: parseInt(oldDocumentId) },
@@ -4064,6 +4082,8 @@ export const reopen_process = async (req, res) => {
             preApproved: false,
             reasonOfSupersed: reasonOfSupersed || "No reason provided",
             superseding: true,
+            SOPIssueNo: SOPIssueNo || null,
+            issueNo: issueNo || null,
             replacedDocumentId: parseInt(oldDocumentId),
             reopenCycle: updatedProcess.reopenCycle,
           },
