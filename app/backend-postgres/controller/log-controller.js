@@ -176,6 +176,7 @@ export const get_user_activity_log = async (req, res) => {
       select: {
         id: true,
         name: true,
+        initiatorId: true,
         workflowId: true,
         workflow: {
           select: {
@@ -195,6 +196,282 @@ export const get_user_activity_log = async (req, res) => {
         },
       });
     }
+
+    // Helper function to get document versioning (similar to view_process)
+    const getDocumentVersioning = async (processId) => {
+      const processDocuments = await prisma.processDocument.findMany({
+        where: { processId },
+        include: {
+          document: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              path: true,
+            },
+          },
+          replacedDocument: {
+            select: {
+              id: true,
+              name: true,
+              path: true,
+            },
+          },
+        },
+      });
+
+      // Identify replaced and superseded document IDs
+      const replacedDocumentIds = new Set(
+        processDocuments
+          .filter((pd) => pd.replacedDocumentId)
+          .map((pd) => pd.replacedDocumentId)
+      );
+
+      const supersededDocumentIds = new Set(
+        processDocuments
+          .filter((pd) => pd.superseding)
+          .map((pd) => pd.replacedDocumentId)
+      );
+
+      // Find the latest document (neither replaced nor superseded)
+      let latestDocument = processDocuments.find(
+        (pd) =>
+          !replacedDocumentIds.has(pd.documentId) &&
+          !supersededDocumentIds.has(pd.documentId)
+      );
+
+      // If no such document exists, take the latest non-replaced document
+      if (!latestDocument) {
+        latestDocument = processDocuments
+          .filter((pd) => !replacedDocumentIds.has(pd.documentId))
+          .sort((a, b) => b.document.id - a.document.id)[0];
+      }
+
+      // Build documentVersioning
+      const documentVersioning = [];
+      const allProcessDocuments = processDocuments;
+
+      // Create maps for quick lookups
+      const docIdToProcessDoc = new Map(
+        allProcessDocuments.map((d) => [d.documentId, d])
+      );
+      const replacedToReplacer = new Map(
+        allProcessDocuments
+          .filter((d) => d.replacedDocumentId)
+          .map((d) => [d.replacedDocumentId, d.documentId])
+      );
+
+      // Find all terminal documents (not replaced by any other)
+      const terminalDocumentIds = allProcessDocuments
+        .filter((d) => !replacedToReplacer.has(d.documentId))
+        .map((d) => d.documentId);
+
+      // For each terminal document, build its complete chain
+      for (const terminalDocId of terminalDocumentIds) {
+        const versions = [];
+        let currentDocId = terminalDocId;
+        const visitedDocIds = new Set(); // Track visited document IDs to detect cycles
+
+        while (currentDocId) {
+          // Check for cycle
+          if (visitedDocIds.has(currentDocId)) {
+            console.warn(
+              `Cycle detected at docId: ${currentDocId}. Breaking loop.`
+            );
+            break;
+          }
+          visitedDocIds.add(currentDocId);
+
+          const processDoc = docIdToProcessDoc.get(currentDocId);
+
+          if (!processDoc) {
+            console.log("No processDoc found for docId:", currentDocId);
+            break;
+          }
+
+          versions.unshift({
+            id: processDoc.document.id,
+            name: processDoc.document.name,
+            path: processDoc.document.path.split("/").slice(0, -1).join("/"),
+            type: processDoc.document.type,
+            issueNo: processDoc.issueNo || null,
+            SOPIssueNo: processDoc.SOPIssueNo || null,
+            tags: processDoc.tags,
+            preApproved: processDoc.preApproved,
+            reasonOfSupersed: processDoc.reasonOfSupersed,
+            description: processDoc.description,
+            partNumber: processDoc.partNumber,
+            active: processDoc.document.id === latestDocument?.document?.id,
+            isReplacement: processDoc.isReplacement,
+            superseding: processDoc.superseding,
+            reopenCycle: processDoc.reopenCycle,
+          });
+
+          currentDocId = processDoc.replacedDocumentId;
+        }
+
+        if (versions.length > 0) {
+          documentVersioning.push({
+            latestDocumentId: terminalDocId,
+            versions: versions,
+          });
+        }
+      }
+
+      // Handle any documents not included in chains
+      const includedDocIds = new Set(
+        documentVersioning.flatMap((chain) => chain.versions.map((v) => v.id))
+      );
+      const missingDocs = allProcessDocuments.filter(
+        (d) => !includedDocIds.has(d.documentId)
+      );
+
+      for (const doc of missingDocs) {
+        documentVersioning.push({
+          latestDocumentId: doc.documentId,
+          versions: [
+            {
+              id: doc.document.id,
+              name: doc.document.name,
+              path: doc.document.path.split("/").slice(0, -1).join("/"),
+              type: doc.document.type,
+              tags: doc.tags,
+              reasonOfSupersed: doc.reasonOfSupersed,
+              description: doc.description,
+              partNumber: doc.partNumber,
+              active: doc.document.id === latestDocument?.document?.id,
+              isReplacement: doc.isReplacement,
+              superseding: doc.superseding,
+              reopenCycle: doc.reopenCycle,
+              preApproved: doc.preApproved,
+            },
+          ],
+        });
+      }
+
+      return documentVersioning;
+    };
+
+    // Helper function to get transformed documents (similar to view_process)
+    const getTransformedDocuments = async (processId) => {
+      const processDocuments = await prisma.processDocument.findMany({
+        where: { processId },
+        include: {
+          document: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              path: true,
+            },
+          },
+          replacedDocument: {
+            select: {
+              id: true,
+              name: true,
+              path: true,
+            },
+          },
+          signatures: {
+            include: { user: { select: { id: true, username: true } } },
+          },
+          rejections: {
+            include: { user: { select: { id: true, username: true } } },
+          },
+          documentHistory: {
+            include: {
+              user: { select: { id: true, name: true, username: true } },
+              replacedDocument: {
+                select: { id: true, name: true, path: true },
+              },
+            },
+          },
+        },
+      });
+
+      // Identify replaced and superseded document IDs
+      const replacedDocumentIds = new Set(
+        processDocuments
+          .filter((pd) => pd.replacedDocumentId)
+          .map((pd) => pd.replacedDocumentId)
+      );
+
+      const supersededDocumentIds = new Set(
+        processDocuments
+          .filter((pd) => pd.superseding)
+          .map((pd) => pd.replacedDocumentId)
+      );
+
+      // Transform documents for response
+      const transformedDocuments = processDocuments
+        .filter(
+          (doc) =>
+            (!replacedDocumentIds.has(doc.documentId) ||
+              (doc.replacedDocument &&
+                doc.document.id === doc.replacedDocument.id)) &&
+            !supersededDocumentIds.has(doc.documentId)
+        )
+        .map((doc) => {
+          const signedBy =
+            doc?.signatures.map((sig) => ({
+              signedBy: sig.user.username,
+              signedAt: sig.signedAt ? sig.signedAt.toISOString() : null,
+              remarks: sig.reason || null,
+              byRecommender: sig.byRecommender,
+              isAttachedWithRecommendation: sig.isAttachedWithRecommendation,
+            })) || [];
+
+          const rejectionDetails =
+            doc?.rejections.length > 0
+              ? {
+                  rejectedBy: doc.rejections[0].user.username,
+                  rejectionReason: doc.rejections[0].reason || null,
+                  rejectedAt: doc.rejections[0].rejectedAt
+                    ? doc.rejections[0].rejectedAt.toISOString()
+                    : null,
+                  byRecommender: doc.rejections[0].byRecommender,
+                  isAttachedWithRecommendation:
+                    doc.rejections[0].isAttachedWithRecommendation,
+                }
+              : null;
+
+          const parts = doc.document.path.split("/");
+          parts.pop();
+          const updatedPath = parts.join("/");
+          return {
+            id: doc.document.id,
+            name: doc.document.name,
+            type: doc.document.type,
+            path: updatedPath,
+            tags: doc.tags,
+            signedBy,
+            rejectionDetails,
+            isRecirculationTrigger:
+              doc?.documentHistory.some(
+                (history) => history.isRecirculationTrigger
+              ) || false,
+            approvalCount: signedBy.length,
+            isReplacement: doc.isReplacement,
+            superseding: doc.superseding,
+            preApproved: doc.preApproved,
+            reopenCycle: doc.reopenCycle,
+            description: doc.description,
+            reasonOfSupersed: doc.reasonOfSupersed,
+            partNumber: doc.partNumber,
+            issueNo: doc.issueNo,
+            SOPIssueNo: doc.SOPIssueNo,
+            active: true,
+          };
+        });
+
+      return transformedDocuments;
+    };
+
+    // Get document versioning and transformed documents
+    const [documentVersioning, documents] = await Promise.all([
+      getDocumentVersioning(processId),
+      getTransformedDocuments(processId),
+    ]);
 
     // Fetch workflow details
     const workflow = await prisma.workflow.findUnique({
@@ -935,6 +1212,9 @@ export const get_user_activity_log = async (req, res) => {
         recirculationCycle: stepInstance?.recirculationCycle || 0,
         workflow: enrichedWorkflow,
         activities: sortedActivities,
+        isInitiator: process.initiatorId === userData.id,
+        documentVersioning,
+        documents,
       },
     });
   } catch (error) {
