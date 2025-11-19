@@ -147,6 +147,8 @@ import {
   reopen_process,
   generateDocumentNameController,
   get_process_documents,
+  upload_documents_in_process,
+  delete_document_in_process,
 } from "../controller/process-controller.js";
 import { pick_process_step } from "../controller/process-step-claim.js";
 
@@ -398,5 +400,9 @@ router.post("/logout", logout);
 router.get("/downloadLoginLogs", download_login_logs);
 
 router.get("/exportFileLogs", export_file_logs);
+
+router.post("/uploadDocumentsInProcess", upload_documents_in_process);
+
+router.post("/deleteDocumentInProcess", delete_document_in_process);
 
 export default router;

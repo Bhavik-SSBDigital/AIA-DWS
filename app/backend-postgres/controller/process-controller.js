@@ -4255,7 +4255,7 @@ export const get_completed_initiator_processes = async (req, res) => {
     const processes = await prisma.processInstance.findMany({
       where: {
         initiatorId: userData.id,
-        status: ProcessStatus.COMPLETED,
+        // status: ProcessStatus.COMPLETED,
       },
       include: {
         initiator: {
@@ -4885,4 +4885,643 @@ export const get_process_documents = async (req, res) => {
   } finally {
     await prisma.$disconnect();
   }
+};
+
+export const upload_documents_in_process = async (req, res) => {
+  try {
+    const accessToken = req.headers["authorization"]?.substring(7);
+    const userData = await verifyUser(accessToken);
+
+    if (userData === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    const { processId, documents, issueNo } = req.body;
+
+    if (!processId || !documents || !Array.isArray(documents)) {
+      return res.status(400).json({
+        message: "Missing required fields: processId and documents (array)",
+      });
+    }
+
+    // Check if process exists and user has access
+    const process = await prisma.processInstance.findUnique({
+      where: { id: processId },
+      include: {
+        workflow: { select: { name: true } },
+        initiator: { select: { id: true } },
+      },
+    });
+
+    if (!process) {
+      return res.status(404).json({ message: "Process not found" });
+    }
+
+    // Check if user is initiator or has access to the process
+    const hasAccess = await checkUserProcessAccess(
+      process.initiatorId,
+      userData.id
+    );
+    if (!hasAccess && process.initiator.id !== userData.id) {
+      return res.status(403).json({
+        message:
+          "You don't have permission to upload documents to this process",
+      });
+    }
+
+    const workflowName = process.workflow.name;
+    const processName = process.name;
+
+    let documentIds = documents.map((item) => item.documentId) || [];
+    const copiedDocumentIds = [];
+
+    // Copy documents to process folder (similar to initiate_process)
+    for (const documentId of documentIds) {
+      const document = await prisma.document.findUnique({
+        where: { id: documentId },
+        select: { path: true, name: true, type: true },
+      });
+
+      if (document) {
+        const sourcePath = `./${document.path}`;
+        const destinationPath = `../${workflowName}/${processName}`;
+        const name = sourcePath.split("/").pop();
+
+        try {
+          const copyResult = await new Promise((resolve, reject) => {
+            file_copy(
+              {
+                headers: { authorization: `Bearer ${accessToken}` },
+                body: { sourcePath, destinationPath, name },
+              },
+              {
+                status: (code) => ({
+                  json: (data) => {
+                    if (code === 200) resolve(data);
+                    else reject(data);
+                  },
+                }),
+              }
+            );
+          });
+
+          if (copyResult.documentId) {
+            copiedDocumentIds.push(copyResult.documentId);
+          }
+
+          // Delete original document from workspace
+          await new Promise((resolve, reject) => {
+            delete_file(
+              {
+                headers: { authorization: `Bearer ${accessToken}` },
+                body: { documentId },
+              },
+              {
+                status: (code) => ({
+                  json: (data) => {
+                    if (code === 200) resolve(data);
+                    else reject(data);
+                  },
+                }),
+              }
+            );
+          });
+        } catch (error) {
+          console.error(`Error processing document ${documentId}:`, error);
+          // If copy fails, use original document ID
+          copiedDocumentIds.push(documentId);
+        }
+      }
+    }
+
+    documentIds = copiedDocumentIds;
+
+    if (documentIds.length === 0) {
+      return res.status(400).json({
+        message: "No documents were successfully uploaded",
+      });
+    }
+
+    // Create processDocument entries
+    const processDocumentData = documents.map((item, index) => ({
+      processId: processId,
+      documentId: documentIds[index],
+      reopenCycle: process.reopenCycle || 0,
+      SOPIssueNo: issueNo || null,
+      preApproved: item.preApproved || false,
+      tags: item.tags || [],
+      partNumber: item.partNumber || null,
+      description: item.description || null,
+      issueNo: item.issueNo || null,
+      isReplacement: item.isReplacement || false,
+      superseding: item.superseding || false,
+      reasonOfSupersed: item.reasonOfSupersed || null,
+    }));
+
+    await prisma.processDocument.createMany({
+      data: processDocumentData,
+    });
+
+    // Create document history for uploaded documents
+    for (let i = 0; i < documents.length; i++) {
+      await prisma.documentHistory.create({
+        data: {
+          documentId: documentIds[i],
+          processId: processId,
+          userId: userData.id,
+          actionType: "UPLOADED",
+          actionDetails: {
+            uploadType: "ADDITIONAL_DOCUMENT",
+            reopenCycle: process.reopenCycle || 0,
+          },
+          createdAt: new Date(),
+        },
+      });
+    }
+
+    // Get updated document arrays (using the same logic as view_process)
+    const { documentVersioning, sededDocuments, transformedDocuments } =
+      await getProcessDocumentArrays(processId);
+
+    return res.status(200).json({
+      message: "Documents uploaded successfully to the process",
+      documentVersioning,
+      sededDocuments,
+      documents: transformedDocuments,
+    });
+  } catch (error) {
+    console.error("Error uploading documents to process:", error);
+    return res.status(500).json({
+      message: "Error uploading documents to process",
+      error: error.message,
+    });
+  }
+};
+
+export const delete_document_in_process = async (req, res) => {
+  try {
+    const accessToken = req.headers["authorization"]?.substring(7);
+    const userData = await verifyUser(accessToken);
+
+    if (userData === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    const { processId, documentId } = req.body;
+
+    if (!processId || !documentId) {
+      return res.status(400).json({
+        message: "Missing required fields: processId and documentId",
+      });
+    }
+
+    // Check if process exists and user has access
+    const process = await prisma.processInstance.findUnique({
+      where: { id: processId },
+      include: {
+        initiator: { select: { id: true } },
+      },
+    });
+
+    if (!process) {
+      return res.status(404).json({ message: "Process not found" });
+    }
+
+    // Check if user is initiator or has access to the process
+    const hasAccess = await checkUserProcessAccess(
+      process.initiatorId,
+      userData.id
+    );
+    if (!hasAccess && process.initiator.id !== userData.id) {
+      return res.status(403).json({
+        message:
+          "You don't have permission to delete documents from this process",
+      });
+    }
+
+    // Check if document exists in process
+    const processDocument = await prisma.processDocument.findFirst({
+      where: {
+        processId: processId,
+        documentId: parseInt(documentId),
+      },
+      include: {
+        signatures: true,
+        rejections: true,
+      },
+    });
+
+    if (!processDocument) {
+      return res.status(404).json({
+        message: "Document not found in the specified process",
+      });
+    }
+
+    // Check if document has signatures or rejections (prevent deletion if signed/rejected)
+    if (
+      processDocument.signatures.length > 0 ||
+      processDocument.rejections.length > 0
+    ) {
+      return res.status(400).json({
+        message: "Cannot delete document that has been signed or rejected",
+      });
+    }
+
+    // Check if this document is referenced as a replaced document
+    const isReferenced = await prisma.processDocument.findFirst({
+      where: {
+        replacedDocumentId: parseInt(documentId),
+      },
+    });
+
+    if (isReferenced) {
+      return res.status(400).json({
+        message:
+          "Cannot delete document that is referenced by other documents in version chain",
+      });
+    }
+
+    // Delete the process document association
+    await prisma.processDocument.delete({
+      where: {
+        id: processDocument.id,
+      },
+    });
+
+    // Create document history for deletion
+    await prisma.documentHistory.create({
+      data: {
+        documentId: parseInt(documentId),
+        processId: processId,
+        userId: userData.id,
+        actionType: "DELETED",
+        actionDetails: {
+          deletionReason: "User requested deletion",
+          reopenCycle: process.reopenCycle || 0,
+        },
+        createdAt: new Date(),
+      },
+    });
+
+    // Check if this is the last reference to the document, then delete the document itself
+    const otherReferences = await prisma.processDocument.findFirst({
+      where: {
+        documentId: parseInt(documentId),
+        id: { not: processDocument.id },
+      },
+    });
+
+    if (!otherReferences) {
+      // Delete the actual document
+      await new Promise((resolve, reject) => {
+        delete_file(
+          {
+            headers: { authorization: `Bearer ${accessToken}` },
+            body: { documentId: parseInt(documentId) },
+          },
+          {
+            status: (code) => ({
+              json: (data) => {
+                if (code === 200) resolve(data);
+                else reject(data);
+              },
+            }),
+          }
+        );
+      });
+    }
+
+    // Get updated document arrays
+    const { documentVersioning, sededDocuments, transformedDocuments } =
+      await getProcessDocumentArrays(processId);
+
+    return res.status(200).json({
+      message: "Document deleted successfully from process",
+      documentVersioning,
+      sededDocuments,
+      documents: transformedDocuments,
+    });
+  } catch (error) {
+    console.error("Error deleting document from process:", error);
+    return res.status(500).json({
+      message: "Error deleting document from process",
+      error: error.message,
+    });
+  }
+};
+
+// Helper function to get document arrays (extracted from view_process logic)
+const getProcessDocumentArrays = async (processId) => {
+  const processDocuments = await prisma.processDocument.findMany({
+    where: { processId },
+    include: {
+      document: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          path: true,
+        },
+      },
+      replacedDocument: {
+        select: {
+          id: true,
+          name: true,
+          path: true,
+        },
+      },
+      signatures: {
+        include: { user: { select: { id: true, username: true } } },
+      },
+      rejections: {
+        include: { user: { select: { id: true, username: true } } },
+      },
+      documentHistory: {
+        include: {
+          user: { select: { id: true, name: true, username: true } },
+          replacedDocument: {
+            select: { id: true, name: true, path: true },
+          },
+        },
+      },
+    },
+  });
+
+  // Identify replaced and superseded document IDs
+  const replacedDocumentIds = new Set(
+    processDocuments
+      .filter((pd) => pd.replacedDocumentId)
+      .map((pd) => pd.replacedDocumentId)
+  );
+
+  const supersededDocumentIds = new Set(
+    processDocuments
+      .filter((pd) => pd.superseding)
+      .map((pd) => pd.replacedDocumentId)
+  );
+
+  // Find the latest document
+  let latestDocument = processDocuments.find(
+    (pd) =>
+      !replacedDocumentIds.has(pd.documentId) &&
+      !supersededDocumentIds.has(pd.documentId)
+  );
+
+  if (!latestDocument) {
+    latestDocument = processDocuments
+      .filter((pd) => !replacedDocumentIds.has(pd.documentId))
+      .sort((a, b) => b.document.id - a.document.id)[0];
+  }
+
+  // Build documentVersioning (same logic as view_process)
+  const documentVersioning = [];
+  const allProcessDocuments = processDocuments;
+
+  const docIdToProcessDoc = new Map(
+    allProcessDocuments.map((d) => [d.documentId, d])
+  );
+  const replacedToReplacer = new Map(
+    allProcessDocuments
+      .filter((d) => d.replacedDocumentId)
+      .map((d) => [d.replacedDocumentId, d.documentId])
+  );
+
+  const terminalDocumentIds = allProcessDocuments
+    .filter((d) => !replacedToReplacer.has(d.documentId))
+    .map((d) => d.documentId);
+
+  for (const terminalDocId of terminalDocumentIds) {
+    const versions = [];
+    let currentDocId = terminalDocId;
+    const visitedDocIds = new Set();
+
+    while (currentDocId) {
+      if (visitedDocIds.has(currentDocId)) {
+        console.warn(
+          `Cycle detected at docId: ${currentDocId}. Breaking loop.`
+        );
+        break;
+      }
+      visitedDocIds.add(currentDocId);
+
+      const processDoc = docIdToProcessDoc.get(currentDocId);
+      if (!processDoc) break;
+
+      versions.unshift({
+        id: processDoc.document.id,
+        name: processDoc.document.name,
+        path: processDoc.document.path.split("/").slice(0, -1).join("/"),
+        type: processDoc.document.type,
+        issueNo: processDoc.issueNo || null,
+        SOPIssueNo: processDoc.SOPIssueNo || null,
+        tags: processDoc.tags,
+        preApproved: processDoc.preApproved,
+        reasonOfSupersed: processDoc.reasonOfSupersed,
+        description: processDoc.description,
+        partNumber: processDoc.partNumber,
+        active: processDoc.document.id === latestDocument?.document?.id,
+        isReplacement: processDoc.isReplacement,
+        superseding: processDoc.superseding,
+        reopenCycle: processDoc.reopenCycle,
+      });
+
+      currentDocId = processDoc.replacedDocumentId;
+    }
+
+    if (versions.length > 0) {
+      documentVersioning.push({
+        latestDocumentId: terminalDocId,
+        versions: versions,
+      });
+    }
+  }
+
+  // Build sededDocuments (same logic as view_process)
+  const sededDocuments = [];
+  if (processDocuments.length > 0) {
+    const allDocsSorted = [...processDocuments].sort(
+      (a, b) => a.document.id - b.document.id
+    );
+
+    const reopenCycle1Docs = allDocsSorted.filter(
+      (doc) => doc.reopenCycle === 1
+    );
+
+    reopenCycle1Docs.forEach((firstReopenCycle1Doc) => {
+      const documentWhichSuperseded = allDocsSorted.find(
+        (doc) => doc.documentId === firstReopenCycle1Doc.replacedDocumentId
+      );
+
+      const versions = [];
+      let currentDoc = firstReopenCycle1Doc;
+      let currentReopenCycle = 1;
+      let lastDocBeforeCycleChange = null;
+      const visitedDocIds = new Set();
+
+      while (currentDoc && !visitedDocIds.has(currentDoc.documentId)) {
+        visitedDocIds.add(currentDoc.documentId);
+
+        if (currentDoc.reopenCycle > currentReopenCycle) {
+          if (lastDocBeforeCycleChange) {
+            versions.push({
+              id: lastDocBeforeCycleChange.document.id,
+              name: lastDocBeforeCycleChange.document.name,
+              path: lastDocBeforeCycleChange.document.path
+                ? lastDocBeforeCycleChange.document.path
+                    .split("/")
+                    .slice(0, -1)
+                    .join("/")
+                : "",
+              issueNo: lastDocBeforeCycleChange.issueNo || null,
+              SOPIssueNo: lastDocBeforeCycleChange.SOPIssueNo || null,
+              type: lastDocBeforeCycleChange.document.type || "",
+              tags: lastDocBeforeCycleChange.tags || [],
+              reasonOfSupersed:
+                lastDocBeforeCycleChange.reasonOfSupersed || null,
+              description: lastDocBeforeCycleChange.description || null,
+              partNumber: lastDocBeforeCycleChange.partNumber || null,
+              active:
+                lastDocBeforeCycleChange.document.id ===
+                (latestDocument?.document?.id || null),
+              isReplacement: lastDocBeforeCycleChange.isReplacement || false,
+              superseding: lastDocBeforeCycleChange.superseding || false,
+              preApproved: lastDocBeforeCycleChange.preApproved || false,
+              reopenCycle: lastDocBeforeCycleChange.reopenCycle || 0,
+            });
+          }
+          currentReopenCycle = currentDoc.reopenCycle;
+        }
+
+        lastDocBeforeCycleChange = currentDoc;
+        currentDoc = allDocsSorted.find(
+          (d) => d.replacedDocumentId === currentDoc.documentId
+        );
+      }
+
+      if (
+        lastDocBeforeCycleChange &&
+        !versions.some((v) => v.id === lastDocBeforeCycleChange.document.id)
+      ) {
+        versions.push({
+          id: lastDocBeforeCycleChange.document.id,
+          name: lastDocBeforeCycleChange.document.name,
+          path: lastDocBeforeCycleChange.document.path
+            ? lastDocBeforeCycleChange.document.path
+                .split("/")
+                .slice(0, -1)
+                .join("/")
+            : "",
+          type: lastDocBeforeCycleChange.document.type || "",
+          issueNo: lastDocBeforeCycleChange.document.issueNo || null,
+          tags: lastDocBeforeCycleChange.tags || [],
+          active:
+            lastDocBeforeCycleChange.document.id ===
+            (latestDocument?.document?.id || null),
+          isReplacement: lastDocBeforeCycleChange.isReplacement || false,
+          superseding: lastDocBeforeCycleChange.superseding || false,
+          reopenCycle: lastDocBeforeCycleChange.reopenCycle || 0,
+          preApproved: lastDocBeforeCycleChange.preApproved || false,
+          reasonOfSupersed: lastDocBeforeCycleChange.reasonOfSupersed || null,
+          description: lastDocBeforeCycleChange.description || null,
+          partNumber: lastDocBeforeCycleChange.partNumber || null,
+        });
+      }
+
+      if (documentWhichSuperseded) {
+        sededDocuments.push({
+          documentWhichSuperseded: {
+            id: documentWhichSuperseded.document.id,
+            name: documentWhichSuperseded.document.name,
+            path: documentWhichSuperseded.document.path
+              ? documentWhichSuperseded.document.path
+                  .split("/")
+                  .slice(0, -1)
+                  .join("/")
+              : "",
+            type: documentWhichSuperseded.document.type || "",
+            description: documentWhichSuperseded.description || "",
+            preApproved: documentWhichSuperseded.preApproved || false,
+            tags: documentWhichSuperseded.tags || [],
+            issueNo: documentWhichSuperseded.issueNo || null,
+            SOPIssueNo: documentWhichSuperseded.SOPIssueNo || null,
+            reasonOfSupersed: documentWhichSuperseded.reasonOfSupersed || null,
+            description: documentWhichSuperseded.description || null,
+            partNumber: documentWhichSuperseded.partNumber || null,
+          },
+          latestDocumentId: latestDocument ? latestDocument.document.id : null,
+          versions: versions,
+        });
+      }
+    });
+  }
+
+  // Transform documents for response
+  const transformedDocuments = processDocuments
+    .filter(
+      (doc) =>
+        (!replacedDocumentIds.has(doc.documentId) ||
+          (doc.replacedDocument &&
+            doc.document.id === doc.replacedDocument.id)) &&
+        !supersededDocumentIds.has(doc.documentId)
+    )
+    .map((doc) => {
+      const signedBy =
+        doc?.signatures.map((sig) => ({
+          signedBy: sig.user.username,
+          signedAt: sig.signedAt ? sig.signedAt.toISOString() : null,
+          remarks: sig.reason || null,
+          byRecommender: sig.byRecommender,
+          isAttachedWithRecommendation: sig.isAttachedWithRecommendation,
+        })) || [];
+
+      const rejectionDetails =
+        doc?.rejections.length > 0
+          ? {
+              rejectedBy: doc.rejections[0].user.username,
+              rejectionReason: doc.rejections[0].reason || null,
+              rejectedAt: doc.rejections[0].rejectedAt
+                ? doc.rejections[0].rejectedAt.toISOString()
+                : null,
+              byRecommender: doc.rejections[0].byRecommender,
+              isAttachedWithRecommendation:
+                doc.rejections[0].isAttachedWithRecommendation,
+            }
+          : null;
+
+      const parts = doc.document.path.split("/");
+      parts.pop();
+      const updatedPath = parts.join("/");
+
+      return {
+        id: doc.document.id,
+        name: doc.document.name,
+        type: doc.document.type,
+        path: updatedPath,
+        tags: doc.tags,
+        signedBy,
+        rejectionDetails,
+        isRecirculationTrigger:
+          doc?.documentHistory.some(
+            (history) => history.isRecirculationTrigger
+          ) || false,
+        approvalCount: signedBy.length,
+        isReplacement: doc.isReplacement,
+        superseding: doc.superseding,
+        preApproved: doc.preApproved,
+        reopenCycle: doc.reopenCycle,
+        description: doc.description,
+        reasonOfSupersed: doc.reasonOfSupersed,
+        partNumber: doc.partNumber,
+        issueNo: doc.issueNo,
+        SOPIssueNo: doc.SOPIssueNo,
+        active: true,
+      };
+    });
+
+  return { documentVersioning, sededDocuments, transformedDocuments };
+};
+
+// Helper to check user access to process
+const checkUserProcessAccess = async (initiatorId, userId) => {
+  return initiatorId === userId;
 };
