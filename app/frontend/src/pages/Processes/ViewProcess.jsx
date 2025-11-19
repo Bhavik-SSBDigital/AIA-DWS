@@ -487,6 +487,19 @@ const ViewProcess = () => {
                                   <IconEye size={18} className="text-white" />
                                 }
                               />
+                              <CustomButton
+                                variant="info"
+                                className="px-2"
+                                click={() => setDocumentModalOpen(doc)}
+                                disabled={actionsLoading || isCompleted}
+                                title="Details"
+                                text={
+                                  <IconAlignBoxCenterMiddle
+                                    size={18}
+                                    className="text-white"
+                                  />
+                                }
+                              />
                             </div>
                           ) : (
                             <span className="text-gray-300">-</span>
@@ -988,6 +1001,21 @@ const ViewProcess = () => {
                         title="View Document"
                         text={<IconEye size={18} className="text-white" />}
                       />
+                      <CustomButton
+                        variant="info"
+                        className="px-2"
+                        click={() =>
+                          setDocumentModalOpen(docGroup.documentWhichSuperseded)
+                        }
+                        disabled={actionsLoading || isCompleted}
+                        title="Details"
+                        text={
+                          <IconAlignBoxCenterMiddle
+                            size={18}
+                            className="text-white"
+                          />
+                        }
+                      />
                       {/* <CustomButton
                         className="px-2"
                         variant="secondary"
@@ -1292,7 +1320,7 @@ const ViewProcess = () => {
                 value={documentModalOpen?.issueNo || '--'}
               />
               <DetailItem
-                label="Process Issue No"
+                label="Process SOP"
                 value={documentModalOpen?.SOPIssueNo || '--'}
               />
               <DetailItem
