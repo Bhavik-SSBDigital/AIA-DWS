@@ -5,6 +5,7 @@ import { file_copy, delete_file } from "./file-controller.js";
 import { createFolder } from "./file-controller.js";
 import { fileURLToPath } from "url";
 import { dirname, join, normalize, extname } from "path";
+import { file_delete } from "./file-controller.js";
 import { watermarkDocument } from "./watermark.js";
 import dotenv from "dotenv";
 
@@ -5088,10 +5089,7 @@ export const delete_document_in_process = async (req, res) => {
     }
 
     // Check if user is initiator or has access to the process
-    const hasAccess = await checkUserProcessAccess(
-      process.initiatorId,
-      userData.id
-    );
+    const hasAccess = await checkUserProcessAccess(processId, userData.id);
     if (!hasAccess && process.initiator.id !== userData.id) {
       return res.status(403).json({
         message:
@@ -5108,6 +5106,13 @@ export const delete_document_in_process = async (req, res) => {
       include: {
         signatures: true,
         rejections: true,
+        document: {
+          select: {
+            id: true,
+            path: true,
+            name: true,
+          },
+        },
       },
     });
 
@@ -5148,22 +5153,7 @@ export const delete_document_in_process = async (req, res) => {
       },
     });
 
-    // Create document history for deletion
-    await prisma.documentHistory.create({
-      data: {
-        documentId: parseInt(documentId),
-        processId: processId,
-        userId: userData.id,
-        actionType: "DELETED",
-        actionDetails: {
-          deletionReason: "User requested deletion",
-          reopenCycle: process.reopenCycle || 0,
-        },
-        createdAt: new Date(),
-      },
-    });
-
-    // Check if this is the last reference to the document, then delete the document itself
+    // Check if this is the last reference to the document, then delete the document completely
     const otherReferences = await prisma.processDocument.findFirst({
       where: {
         documentId: parseInt(documentId),
@@ -5172,23 +5162,49 @@ export const delete_document_in_process = async (req, res) => {
     });
 
     if (!otherReferences) {
-      // Delete the actual document
-      await new Promise((resolve, reject) => {
-        delete_file(
-          {
-            headers: { authorization: `Bearer ${accessToken}` },
-            body: { documentId: parseInt(documentId) },
-          },
-          {
-            status: (code) => ({
-              json: (data) => {
-                if (code === 200) resolve(data);
-                else reject(data);
-              },
-            }),
-          }
+      // Use the file_delete function to permanently delete the file from drive
+      try {
+        await new Promise((resolve, reject) => {
+          file_delete(
+            {
+              headers: { authorization: `Bearer ${accessToken}` },
+              body: { documentId: parseInt(documentId) },
+            },
+            {
+              status: (code) => ({
+                json: (data) => {
+                  if (code === 200) {
+                    console.log(
+                      `Document ${documentId} permanently deleted from drive`
+                    );
+                    resolve(data);
+                  } else {
+                    console.error(
+                      `Failed to delete document from drive:`,
+                      data
+                    );
+                    reject(
+                      new Error(
+                        data.message || "Failed to delete file from drive"
+                      )
+                    );
+                  }
+                },
+              }),
+            }
+          );
+        });
+      } catch (fileDeleteError) {
+        console.error(
+          `Error deleting file from drive for document ${documentId}:`,
+          fileDeleteError
         );
-      });
+        // Even if file deletion fails, we continue since the process document association is already removed
+      }
+    } else {
+      console.log(
+        `Document ${documentId} not deleted from drive as it has other process references`
+      );
     }
 
     // Get updated document arrays
