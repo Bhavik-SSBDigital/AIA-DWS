@@ -155,6 +155,15 @@ export const uploadDocumentInProcess = async (
     : await upload(fileList, '../check', name, true, tags, documentId);
   return res;
 };
+export const uploadDocumentsInProcessFinal = async (data) => {
+  const res = await apiClient.post('/uploadDocumentsInProcess', data);
+  return res;
+};
+export const deleteDocumentInProcess = async (data) => {
+  const res = await apiClient.post('/deleteDocumentInProcess', data);
+  return res;
+};
+
 export const ViewDocument = async (name, path, ext, fileId, editing) => {
   const extensions = [
     'docx',

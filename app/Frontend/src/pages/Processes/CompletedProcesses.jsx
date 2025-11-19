@@ -34,7 +34,7 @@ export default function CompletedProcesses() {
   };
   const columns = [
     { field: 'processName', headerName: 'Process Name', width: 200 },
-    { field: 'initiatorName', headerName: 'Initiator', width: 200 },
+    { field: 'initiatorUsername', headerName: 'Initiator', width: 200 },
     {
       field: 'createdAt',
       headerName: 'Created At',
@@ -65,7 +65,7 @@ export default function CompletedProcesses() {
     id: index + 1,
     processId: item.processId,
     processName: item.processName,
-    initiatorUsername: item.initiatorName,
+    initiatorUsername: item.initiatorUsername,
     createdAt: item.createdAt,
     // actionType: item.actionType,
     // stepName: item.stepName,

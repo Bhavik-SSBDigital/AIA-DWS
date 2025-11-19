@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ClaimProcess,
   CompleteProcess,
+  deleteDocumentInProcess,
   DownloadFile,
   GetProcessData,
   getRecommendations,
@@ -24,6 +25,7 @@ import {
   IconDownload,
   IconMenu2,
   IconPencil,
+  IconTrash,
 } from '@tabler/icons-react';
 import CustomCard from '../../CustomComponents/CustomCard';
 import ComponentLoader from '../../common/Loader/ComponentLoader';
@@ -40,13 +42,13 @@ import axios from 'axios';
 import { ImageConfig } from '../../config/ImageConfig';
 import ReOpenProcessModal from './Actions/ReOpenProcessModal';
 import DocumentsVersionWise from './DocumentsVersionWise';
+import ProcessDocumentUpload from '../../CustomComponents/ProcessDocumentUpload';
 
 const ViewProcess = () => {
   const [selectedDocs, setSelectedDocs] = useState([]);
   const [searchParams] = useSearchParams();
   const isCompleted = searchParams.get('completed') === 'true';
   const username = sessionStorage.getItem('username');
-
   const [showActions, setShowActions] = useState(false);
   const menuRef = useRef();
   const { id } = useParams();
@@ -537,6 +539,24 @@ const ViewProcess = () => {
       console.error(error?.response?.data?.message || error?.message);
     }
   };
+  const DeleteDocument = async (data) => {
+    try {
+      const res = await deleteDocumentInProcess(data);
+      setProcess({
+        ...process,
+        documentVersioning: res?.data?.documentVersioning,
+        documents: res?.data?.documents,
+        sededDocuments: res?.data?.sededDocuments,
+      });
+      toast.success(res?.data?.message || 'Document Deleted');
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.message,
+      );
+    }
+  };
 
   useEffect(() => {
     fetchProcess();
@@ -575,6 +595,13 @@ const ViewProcess = () => {
             text={'Re-Open'}
             className={'min-w-[150px]'}
             click={() => setOpenModal('re-open')}
+            disabled={actionsLoading || !isCompleted || disableActions}
+          />
+          <CustomButton
+            variant={'primary'}
+            text={'Upload Document'}
+            className={'min-w-[150px]'}
+            click={() => setOpenModal('document-upload')}
             disabled={actionsLoading || !isCompleted || disableActions}
           />
           <CustomButton
@@ -790,6 +817,21 @@ const ViewProcess = () => {
                           className="text-white"
                         />
                       }
+                    />
+                    <CustomButton
+                      variant="danger"
+                      className="px-2"
+                      click={() =>
+                        DeleteDocument({
+                          documentId: doc.id,
+                          processId: process?.processId,
+                        })
+                      }
+                      disabled={
+                        actionsLoading || !isCompleted || disableActions
+                      }
+                      title="Delete"
+                      text={<IconTrash size={18} className="text-white" />}
                     />
                   </div>
                 </CustomCard>
@@ -1431,6 +1473,27 @@ const ViewProcess = () => {
         <DocumentsVersionWise
           processId={process.processId}
           close={() => setOpenModal('')}
+        />
+      </CustomModal>
+      <CustomModal
+        isOpen={openModal == 'document-upload'}
+        onClose={() => {
+          setOpenModal('');
+        }}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+      >
+        <ProcessDocumentUpload
+          processId={process.processId}
+          workflowId={process?.workflow?.id}
+          issueNo={process.issueNo}
+          onFinish={(data) =>
+            setProcess({
+              ...process,
+              documentVersioning: data.documentVersioning,
+              documents: data.documents,
+              sededDocuments: data.sededDocuments,
+            })
+          }
         />
       </CustomModal>
       <CustomModal
