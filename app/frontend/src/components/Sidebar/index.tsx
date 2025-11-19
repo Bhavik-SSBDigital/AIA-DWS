@@ -231,7 +231,7 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
       ),
       dropdown: [
         { path: '/processes/work', label: 'Pending Work' },
-        { path: '/processes/completed', label: 'Completed Processes' },
+        { path: '/processes/completed', label: 'Initiated Processes' },
 
         { path: '/processes/initiate', label: 'Initiate Process' },
       ],

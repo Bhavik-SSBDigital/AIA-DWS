@@ -34,7 +34,7 @@ export default function CompletedProcesses() {
   };
   const columns = [
     { field: 'processName', headerName: 'Process Name', width: 200 },
-    { field: 'initiatorUsername', headerName: 'Initiator', width: 200 },
+    { field: 'initiatorName', headerName: 'Initiator', width: 200 },
     {
       field: 'createdAt',
       headerName: 'Created At',
@@ -42,8 +42,8 @@ export default function CompletedProcesses() {
       valueGetter: (value) =>
         value ? moment(value).format('DD-MMM-YYYY hh:mm A') : '--',
     },
-    { field: 'actionType', headerName: 'Action Type', width: 150 },
-    { field: 'stepName', headerName: 'Step Name', width: 150 },
+    // { field: 'actionType', headerName: 'Action Type', width: 150 },
+    // { field: 'stepName', headerName: 'Step Name', width: 150 },
     {
       field: 'actions',
       headerName: 'Actions',
@@ -65,10 +65,10 @@ export default function CompletedProcesses() {
     id: index + 1,
     processId: item.processId,
     processName: item.processName,
-    initiatorUsername: item.initiatorUsername,
+    initiatorUsername: item.initiatorName,
     createdAt: item.createdAt,
-    actionType: item.actionType,
-    stepName: item.stepName,
+    // actionType: item.actionType,
+    // stepName: item.stepName,
   }));
 
   useEffect(() => {

@@ -408,12 +408,12 @@ const ViewProcess = () => {
           Documents by Reopen Cycle
         </h2>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-auto">
           <table className="min-w-full border border-gray-300">
             <thead className="bg-gray-100">
               <tr>
-                <th className="py-2 px-4 border">SOP</th>
-                <th className="py-2 px-4 border">Process SOP</th>
+                <th className="py-2 px-4 border">System SOP</th>
+                <th className="py-2 px-4 border">Manual SOP</th>
                 {Array.from({ length: maxDocs }).map((_, idx) => (
                   <th key={idx} className="py-2 px-4 border">
                     Document {idx + 1}
@@ -422,70 +422,81 @@ const ViewProcess = () => {
               </tr>
             </thead>
             <tbody>
-              {cycles.map((cycle) => (
-                <tr key={cycle.reopenCycle}>
-                  <td className="py-2 px-4 border font-medium">
-                    {cycle.reopenCycle}
-                  </td>
-                  <td className="py-2 px-4 border font-medium">
-                    {cycle.SOPIssueNo || "--"}
-                  </td>
+              {cycles.map((cycle, index) => {
+                const isLastRow = index === cycles.length - 1;
 
-                  {Array.from({ length: maxDocs }).map((_, idx) => {
-                    const doc = cycle.documents[idx];
+                return (
+                  <tr
+                    key={cycle.reopenCycle}
+                    className={isLastRow ? 'bg-green-100 font-semibold' : ''}
+                  >
+                    <td className="py-2 px-4 border font-medium">
+                      {cycle.reopenCycle}
+                    </td>
 
-                    return (
-                      <td key={idx} className="py-2 px-4 border">
-                        {doc ? (
-                          <div className="flex items-center space-x-2">
-                            {/* Document icon */}
-                            <img
-                              width={28}
-                              src={
-                                ImageConfig[doc.type] || ImageConfig['default']
-                              }
-                              alt={doc.type}
-                            />
-                            <div className="flex flex-col">
-                              {/* Document name */}
-                              <span
-                                title={doc.name}
-                                className={`truncate ${doc.active ? 'font-semibold' : 'text-gray-400'}`}
-                              >
-                                {doc.name}
-                              </span>
-                              {/* Highlight issueNo */}
+                    <td className="py-2 px-4 border font-medium">
+                      {cycle.SOPIssueNo || '--'}
+                    </td>
 
-                              <span className="text-sm text-blue-600 font-medium">
-                                Issue No: {doc?.issueNo || '--'}
-                              </span>
+                    {Array.from({ length: maxDocs }).map((_, idx) => {
+                      const doc = cycle.documents[idx];
+
+                      return (
+                        <td key={idx} className="py-2 px-4 border text-wrap">
+                          {doc ? (
+                            <div className="flex items-center space-x-2 mr-4">
+                              <img
+                                width={28}
+                                src={
+                                  ImageConfig[doc.type] ||
+                                  ImageConfig['default']
+                                }
+                                alt={doc.type}
+                              />
+                              <div className="flex flex-col">
+                                <span
+                                  title={doc.name}
+                                  className={`truncate ${
+                                    doc.active
+                                      ? 'font-semibold'
+                                      : 'text-gray-400'
+                                  }`}
+                                >
+                                  {doc.name}
+                                </span>
+
+                                <span className="text-sm text-blue-600 font-medium">
+                                  Issue No: {doc?.issueNo || '--'}
+                                </span>
+                              </div>
+
+                              <CustomButton
+                                className="px-2"
+                                click={() =>
+                                  handleViewFile(
+                                    doc.name,
+                                    doc.path,
+                                    doc.id,
+                                    doc.type,
+                                    false,
+                                  )
+                                }
+                                disabled={actionsLoading}
+                                title="View Document"
+                                text={
+                                  <IconEye size={18} className="text-white" />
+                                }
+                              />
                             </div>
-                            <CustomButton
-                              className="px-2"
-                              click={() =>
-                                handleViewFile(
-                                  doc.name,
-                                  doc.path,
-                                  doc.id,
-                                  doc.type,
-                                  false,
-                                )
-                              }
-                              disabled={actionsLoading}
-                              title="View Document"
-                              text={
-                                <IconEye size={18} className="text-white" />
-                              }
-                            />
-                          </div>
-                        ) : (
-                          <span className="text-gray-300">-</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                          ) : (
+                            <span className="text-gray-300">-</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1277,6 +1288,14 @@ const ViewProcess = () => {
                 value={documentModalOpen?.description || '--'}
               />
               <DetailItem
+                label="Issue No"
+                value={documentModalOpen?.issueNo || '--'}
+              />
+              <DetailItem
+                label="Process Issue No"
+                value={documentModalOpen?.SOPIssueNo || '--'}
+              />
+              <DetailItem
                 label="Prev-approved"
                 value={documentModalOpen?.preApproved ? 'Yes' : 'No'}
               />
@@ -1290,7 +1309,7 @@ const ViewProcess = () => {
                 value={documentModalOpen?.type?.toUpperCase() || '--'}
               />
               <DetailItem
-                label="Access"
+                label="Tags"
                 value={documentModalOpen?.tags?.flat()?.join(', ') || '--'}
               />
               <DetailItem
