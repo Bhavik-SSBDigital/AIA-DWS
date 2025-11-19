@@ -1245,6 +1245,7 @@ export const get_user_activity_logs = async (req, res) => {
       });
     }
 
+    // First, get all potential processes where user might have activities
     const [
       stepInstances,
       recommenderProcesses,
@@ -1308,10 +1309,7 @@ export const get_user_activity_logs = async (req, res) => {
 
         if (!process) return null;
 
-        const userSteps = stepInstances.filter(
-          (s) => s.processId === processId
-        );
-
+        // Check if user has ANY actual activities in this process
         const [
           signatureCount,
           rejectionCount,
@@ -1319,6 +1317,8 @@ export const get_user_activity_logs = async (req, res) => {
           queryCount,
           recommendationCount,
           initiated,
+          // Check if user has completed any steps (with decisionAt)
+          completedStepCount,
         ] = await Promise.all([
           prisma.documentSignature.count({
             where: {
@@ -1359,22 +1359,44 @@ export const get_user_activity_logs = async (req, res) => {
             where: { id: processId, initiatorId: userData.id },
             select: { id: true },
           }),
+          // Count only completed steps (with decisionAt)
+          prisma.processStepInstance.count({
+            where: {
+              processId,
+              assignedTo: userData.id,
+              decisionAt: { not: null }, // Only count steps that were actually completed
+            },
+          }),
         ]);
 
-        const hasActivity =
+        // Only include processes where user has actual recorded activities
+        const hasActualActivity =
           signatureCount > 0 ||
           rejectionCount > 0 ||
           documentCount > 0 ||
           queryCount > 0 ||
           recommendationCount > 0 ||
           initiated ||
-          userSteps.length > 0;
+          completedStepCount > 0; // Only count completed steps as activities
 
-        if (!hasActivity) return null;
+        if (!hasActualActivity) return null;
 
-        const steps = userSteps.length
+        // Get only completed steps for this process
+        const userCompletedSteps = await prisma.processStepInstance.findMany({
+          where: {
+            processId,
+            assignedTo: userData.id,
+            decisionAt: { not: null }, // Only get completed steps
+          },
+          include: {
+            process: { select: { id: true, name: true } },
+            workflowStep: { select: { stepName: true, stepNumber: true } },
+          },
+        });
+
+        const steps = userCompletedSteps.length
           ? await Promise.all(
-              userSteps.map(async (s) => {
+              userCompletedSteps.map(async (s) => {
                 const assignmentDetails = await getAssignmentDetails(
                   s.id,
                   processId
@@ -1445,6 +1467,16 @@ export const get_user_activity_logs = async (req, res) => {
             },
             select: { createdAt: true },
           }),
+          // Get last completed step activity
+          prisma.processStepInstance.findFirst({
+            where: {
+              processId,
+              assignedTo: userData.id,
+              decisionAt: { not: null },
+            },
+            orderBy: { decisionAt: "desc" },
+            select: { decisionAt: true },
+          }),
         ]);
 
         const timestamps = lastActivities
@@ -1455,7 +1487,8 @@ export const get_user_activity_logs = async (req, res) => {
                 activity.rejectedAt ||
                 (activity.document
                   ? activity.document.createdOn
-                  : activity.createdAt),
+                  : activity.createdAt) ||
+                activity.decisionAt,
             ].filter(Boolean);
           })
           .map((date) => new Date(date));
@@ -1478,6 +1511,7 @@ export const get_user_activity_logs = async (req, res) => {
             queries: queryCount,
             recommendations: recommendationCount,
             initiated: initiated ? 1 : 0,
+            completedSteps: completedStepCount,
           },
           lastActivityAt,
         };

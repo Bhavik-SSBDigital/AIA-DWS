@@ -68,6 +68,11 @@ const ViewProcess = () => {
     open: false,
   });
   const disableActions = process?.currentStepType != 'APPROVAL';
+  const [deleteConfirm, setDeleteConfirm] = useState({
+  open: false,
+  documentId: null,
+  documentName: null,
+});
 
   const processDetails = [
     { label: 'Process ID', value: process?.processId },
@@ -493,7 +498,7 @@ const ViewProcess = () => {
                                 variant="info"
                                 className="px-2"
                                 click={() => setDocumentModalOpen(doc)}
-                                disabled={actionsLoading || isCompleted}
+                                disabled={actionsLoading }
                                 title="Details"
                                 text={
                                   <IconAlignBoxCenterMiddle
@@ -809,7 +814,7 @@ const ViewProcess = () => {
                       variant="info"
                       className="px-2"
                       click={() => setDocumentModalOpen(doc)}
-                      disabled={actionsLoading || isCompleted}
+                      disabled={actionsLoading }
                       title="Details"
                       text={
                         <IconAlignBoxCenterMiddle
@@ -819,20 +824,19 @@ const ViewProcess = () => {
                       }
                     />
                     <CustomButton
-                      variant="danger"
-                      className="px-2"
-                      click={() =>
-                        DeleteDocument({
-                          documentId: doc.id,
-                          processId: process?.processId,
-                        })
-                      }
-                      disabled={
-                        actionsLoading || !isCompleted || disableActions
-                      }
-                      title="Delete"
-                      text={<IconTrash size={18} className="text-white" />}
-                    />
+  variant="danger"
+  className="px-2"
+  click={() =>
+    setDeleteConfirm({
+      open: true,
+      documentId: doc.id,
+      documentName: doc.name,
+    })
+  }
+  disabled={actionsLoading || !isCompleted || disableActions}
+  title="Delete"
+  text={<IconTrash size={18} className="text-white" />}
+/>
                   </div>
                 </CustomCard>
               );
@@ -842,6 +846,8 @@ const ViewProcess = () => {
       )}
 
       {process && DocumentsCycle(process)}
+
+      
 
       {/* {process?.documentVersioning?.length > 0 && (
         <div className="mt-12">
@@ -1049,7 +1055,7 @@ const ViewProcess = () => {
                         click={() =>
                           setDocumentModalOpen(docGroup.documentWhichSuperseded)
                         }
-                        disabled={actionsLoading || isCompleted}
+                        disabled={actionsLoading }
                         title="Details"
                         text={
                           <IconAlignBoxCenterMiddle
@@ -1134,7 +1140,7 @@ const ViewProcess = () => {
                                   variant="info"
                                   className="px-2"
                                   click={() => setDocumentModalOpen(ver)}
-                                  disabled={actionsLoading || isCompleted}
+                                  disabled={actionsLoading }
                                   title="Details"
                                   text={
                                     <IconAlignBoxCenterMiddle
@@ -1563,6 +1569,45 @@ const ViewProcess = () => {
         loading={actionsLoading}
         onSubmit={(remarks) => handleRejectDocument(remarks)}
       />
+
+      {/* Delete Confirmation Modal */}
+<CustomModal
+  isOpen={deleteConfirm.open}
+  onClose={() => setDeleteConfirm({ open: false, documentId: null, documentName: null })}
+  className="max-w-md"
+>
+  <div className="p-6">
+    <h3 className="text-lg font-semibold text-red-700 mb-4">
+      Permanently Delete Document?
+    </h3>
+    <p className="text-gray-700 mb-6">
+      You're going to <strong>permanently delete</strong> the document:
+      <br />
+      <span className="font-medium text-red-600">"{deleteConfirm.documentName}"</span>
+      <br /><br />
+      This action <strong>cannot be undone</strong>. Are you sure?
+    </p>
+    <div className="flex justify-end gap-3">
+      <CustomButton
+        variant="secondary"
+        text="Cancel"
+        click={() => setDeleteConfirm({ open: false, documentId: null, documentName: null })}
+      />
+      <CustomButton
+        variant="danger"
+        text="Yes, Delete Permanently"
+        loading={actionsLoading}
+        click={async () => {
+          await DeleteDocument({
+            documentId: deleteConfirm.documentId,
+            processId: process?.processId,
+          });
+          setDeleteConfirm({ open: false, documentId: null, documentName: null });
+        }}
+      />
+    </div>
+  </div>
+</CustomModal>
     </div>
   );
 };

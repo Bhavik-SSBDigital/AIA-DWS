@@ -56,7 +56,7 @@ const ReplacedDocumentsTable = ({
               <td className="px-4 py-2 flex gap-1 flex-wrap">
                 <CustomButton
                   disabled={actionsLoading}
-                  text={'Old'}
+                  text={'View New Doc'}
                   click={() =>
                     handleViewFile(
                       doc.replacedDocName,
@@ -68,7 +68,7 @@ const ReplacedDocumentsTable = ({
                 />
                 <CustomButton
                   disabled={actionsLoading}
-                  text={'New'}
+                  text={'View Old Doc'}
                   click={() =>
                     handleViewFile(
                       doc.replacesDocumentName,

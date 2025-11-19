@@ -332,17 +332,31 @@ export const getDetails = async (req, res) => {
             },
           },
         })
-        .then((signatures) =>
-          signatures.map((s) => ({
-            documentId: s.processDocument.document.id,
-            documentName: s.processDocument.document.name,
-            documentPath: formatDocumentPath(s.processDocument.document.path),
-            documentType: getDocType(s.processDocument.document.path),
-            processId: s.processDocument.process.id,
-            processName: s.processDocument.process.name,
-            signedAt: s.signedAt.toISOString(),
-          }))
-        ),
+        .then((signatures) => {
+          const uniqueSignatures = [];
+          const seenSignatures = new Set();
+
+          return signatures
+            .map((s) => ({
+              signatureId: s.id, // Add signature ID for uniqueness
+              documentId: s.processDocument.document.id,
+              documentName: s.processDocument.document.name,
+              documentPath: formatDocumentPath(s.processDocument.document.path),
+              documentType: getDocType(s.processDocument.document.path),
+              processId: s.processDocument.process.id,
+              processName: s.processDocument.process.name,
+              signedAt: s.signedAt.toISOString(),
+            }))
+            .filter((signature) => {
+              // Create a unique key combining documentId, processId, and signedAt
+              const uniqueKey = `${signature.documentId}-${signature.processId}-${signature.signedAt}`;
+              if (!seenSignatures.has(uniqueKey)) {
+                seenSignatures.add(uniqueKey);
+                return true;
+              }
+              return false;
+            });
+        }),
       // Rejected documents
       prisma.documentRejection
         .findMany({
@@ -358,17 +372,30 @@ export const getDetails = async (req, res) => {
             },
           },
         })
-        .then((rejections) =>
-          rejections.map((r) => ({
-            documentId: r.processDocument.document.id,
-            documentName: r.processDocument.document.name,
-            documentPath: formatDocumentPath(r.processDocument.document.path),
-            documentType: getDocType(r.processDocument.document.path),
-            processId: r.processDocument.process.id,
-            processName: r.processDocument.process.name,
-            rejectedAt: r.rejectedAt.toISOString(),
-          }))
-        ),
+        .then((rejections) => {
+          const seenRejections = new Set();
+
+          return rejections
+            .map((r) => ({
+              rejectionId: r.id, // Add rejection ID for uniqueness
+              documentId: r.processDocument.document.id,
+              documentName: r.processDocument.document.name,
+              documentPath: formatDocumentPath(r.processDocument.document.path),
+              documentType: getDocType(r.processDocument.document.path),
+              processId: r.processDocument.process.id,
+              processName: r.processDocument.process.name,
+              rejectedAt: r.rejectedAt.toISOString(),
+            }))
+            .filter((rejection) => {
+              // Create a unique key combining documentId, processId, and rejectedAt
+              const uniqueKey = `${rejection.documentId}-${rejection.processId}-${rejection.rejectedAt}`;
+              if (!seenRejections.has(uniqueKey)) {
+                seenRejections.add(uniqueKey);
+                return true;
+              }
+              return false;
+            });
+        }),
       // Replaced documents
       prisma.documentHistory
         .findMany({
@@ -382,20 +409,35 @@ export const getDetails = async (req, res) => {
             user: { select: { username: true } },
           },
         })
-        .then((histories) =>
-          histories.map((h) => ({
-            replacedDocumentId: h.document.id,
-            replacedDocName: h.document.name,
-            replacedDocumentPath: formatDocumentPath(h.document.path),
-            replacedDocumentType: getDocType(h.document.path),
-            replacesDocumentId: h.replacedDocument?.id || null,
-            replacesDocumentName: h.replacedDocument?.name || null,
-            replacesDocumentPath: formatDocumentPath(
-              h.replacedDocument?.path || ""
-            ),
-            replacedBy: h.user.username,
-          }))
-        ),
+        .then((histories) => {
+          const seenReplacements = new Set();
+
+          return histories
+            .map((h) => ({
+              historyId: h.id, // Add history ID for uniqueness
+              replacedDocumentId: h.document.id,
+              replacedDocName: h.document.name,
+              replacedDocumentPath: formatDocumentPath(h.document.path),
+              replacedDocumentType: getDocType(h.document.path),
+              replacesDocumentId: h.replacedDocument?.id || null,
+              replacesDocumentName: h.replacedDocument?.name || null,
+              replacesDocumentType: getDocType(h.replacedDocument?.path || ""),
+              replacesDocumentPath: formatDocumentPath(
+                h.replacedDocument?.path || ""
+              ),
+              replacedBy: h.user.username,
+              replacedAt: h.createdAt.toISOString(), // Added for better uniqueness
+            }))
+            .filter((replacement) => {
+              // Create a unique key combining replacedDocumentId, replacesDocumentId, and replacedAt
+              const uniqueKey = `${replacement.replacedDocumentId}-${replacement.replacesDocumentId}-${replacement.replacedAt}`;
+              if (!seenReplacements.has(uniqueKey)) {
+                seenReplacements.add(uniqueKey);
+                return true;
+              }
+              return false;
+            });
+        }),
     ]);
 
     return res.status(200).json({

@@ -1432,8 +1432,6 @@ export const view_process = async (req, res) => {
           break;
         }
 
-        console.log("process doc", processDoc);
-
         versions.unshift({
           id: processDoc.document.id,
           name: processDoc.document.name,
@@ -1696,8 +1694,6 @@ export const view_process = async (req, res) => {
           active: true,
         };
       });
-
-    console.log("process step instances", process.stepInstances);
 
     const queryStepInstances = await retry(() =>
       prisma.processStepInstance.findMany({
@@ -2007,7 +2003,7 @@ export const view_process = async (req, res) => {
         currentStepNumber:
           currentStepInstance?.workflowStep?.stepNumber || null,
         currentStepType:
-          process.status === "COMPLETED"
+          process.status === "COMPLETED" || process.initiator.id === userData.id
             ? "APPROVAL"
             : currentStepInstance?.workflowStep?.stepType,
       },
@@ -2638,7 +2634,10 @@ export const get_user_processes = async (req, res, next) => {
         workflowName: step.process?.workflow?.name || "Unknown Workflow",
         initiatorUsername: step.process?.initiator?.username || "System User",
         createdAt: step.createdAt,
-        actionType: step.workflowAssignment?.step?.stepType || "GENERAL",
+        actionType:
+          process.initiatorId === userData.id
+            ? "APPROVAL"
+            : step.workflowAssignment?.step?.stepType || "GENERAL",
         stepName: step.workflowAssignment?.step?.stepName || "Pending Step",
         currentStepAssignedAt: assignedAt,
         assignmentId: step.assignmentId,

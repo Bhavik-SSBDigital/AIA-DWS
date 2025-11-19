@@ -65,7 +65,7 @@ export default function CompletedProcesses() {
     id: index + 1,
     processId: item.processId,
     processName: item.processName,
-    initiatorUsername: item.initiatorUsername,
+    initiatorUsername: item.initiatorName,
     createdAt: item.createdAt,
     // actionType: item.actionType,
     // stepName: item.stepName,
