@@ -42,11 +42,11 @@ export default function Logs() {
       valueGetter: (value) =>
         value ? moment(value).format('DD-MMM-YYYY hh:mm A') : '--',
     },
-    {
-      field: 'stepName',
-      headerName: 'Step Name',
-      width: 150,
-    },
+    // {
+    //   field: 'stepName',
+    //   headerName: 'Step Name',
+    //   width: 150,
+    // },
     {
       field: 'actions',
       headerName: 'Actions',
@@ -70,7 +70,7 @@ export default function Logs() {
     processName: item.processName,
     initiatorName: item.initiatorName,
     createdAt: item.lastActivityAt || item.createdAt,
-    stepName: item.steps?.[0]?.stepName || '--',
+    // stepName: item.steps?.[0]?.stepName || '--',
   }));
 
   useEffect(() => {

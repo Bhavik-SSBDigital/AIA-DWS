@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import DropdownMessage from './DropdownMessage';
 import DropdownNotification from './DropdownNotification';
 import DropdownUser from './DropdownUser';
-import LogoIcon from '../../assets/images/ssbi-Logo1.png';
+import LogoIcon from '../../assets/images/ssbi-Logo.png';
 import smallLogo from '../../assets/images/logo.png';
 import sessionData from '../../Store';
 import { useEffect } from 'react';
