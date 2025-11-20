@@ -1367,8 +1367,9 @@ const ViewProcess = () => {
               <DetailItem
                 label="Created At"
                 value={
-                  moment(documentModalOpen?.createdAt).format('DD-MM-YYYY') ||
-                  '--'
+                  documentModalOpen?.createdAt
+                    ? new Date(documentModalOpen?.createdAt).toLocaleString()
+                    : '--'
                 }
               />
               <DetailItem
