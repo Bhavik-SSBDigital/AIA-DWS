@@ -43,7 +43,6 @@ import { ImageConfig } from '../../config/ImageConfig';
 import ReOpenProcessModal from './Actions/ReOpenProcessModal';
 import DocumentsVersionWise from './DocumentsVersionWise';
 import ProcessDocumentUpload from '../../CustomComponents/ProcessDocumentUpload';
-import moment from 'moment';
 
 const ViewProcess = () => {
   const [selectedDocs, setSelectedDocs] = useState([]);
