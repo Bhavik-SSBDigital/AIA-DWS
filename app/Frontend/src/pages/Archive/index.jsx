@@ -29,7 +29,6 @@ import CustomTextField from '../../CustomComponents/CustomTextField';
 const Archive = () => {
   const [loading, setLoading] = useState(false);
   const [archiveFiles, setArchiveFiles] = useState([]);
-  // const [filteredFiles, setFilteredFiles] = useState([]); // new state
   const [searchTerm, setSearchTerm] = useState(''); // new state
   const [selectedItem, setSelectedItem] = useState(null);
   const [actionsLoading, setActionsLoading] = useState(false);
