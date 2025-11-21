@@ -43,6 +43,7 @@ import { ImageConfig } from '../../config/ImageConfig';
 import ReOpenProcessModal from './Actions/ReOpenProcessModal';
 import DocumentsVersionWise from './DocumentsVersionWise';
 import ProcessDocumentUpload from '../../CustomComponents/ProcessDocumentUpload';
+import DeleteConfirmationModal from '../../CustomComponents/DeleteConfirmation';
 
 const ViewProcess = () => {
   const [selectedDocs, setSelectedDocs] = useState([]);
@@ -68,11 +69,6 @@ const ViewProcess = () => {
     open: false,
   });
   const disableActions = process?.currentStepType != 'APPROVAL';
-  const [deleteConfirm, setDeleteConfirm] = useState({
-    open: false,
-    documentId: null,
-    documentName: null,
-  });
 
   const processDetails = [
     { label: 'Process ID', value: process?.processId },
@@ -545,6 +541,7 @@ const ViewProcess = () => {
     }
   };
   const DeleteDocument = async (data) => {
+    setActionsLoading(true);
     try {
       const res = await deleteDocumentInProcess(data);
       setProcess({
@@ -554,12 +551,15 @@ const ViewProcess = () => {
         sededDocuments: res?.data?.sededDocuments,
       });
       toast.success(res?.data?.message || 'Document Deleted');
+      setOpenModal('');
     } catch (error) {
       toast.error(
         error?.response?.data?.message ||
           error?.response?.data?.error ||
           error?.message,
       );
+    } finally {
+      setActionsLoading(false);
     }
   };
 
@@ -827,10 +827,10 @@ const ViewProcess = () => {
                       variant="danger"
                       className="px-2"
                       click={() =>
-                        setDeleteConfirm({
-                          open: true,
+                        setOpenModal({
                           documentId: doc.id,
                           documentName: doc.name,
+                          modal: 'delete-confirmation',
                         })
                       }
                       disabled={
@@ -1579,62 +1579,20 @@ const ViewProcess = () => {
       />
 
       {/* Delete Confirmation Modal */}
-      <CustomModal
-        isOpen={deleteConfirm.open}
-        onClose={() =>
-          setDeleteConfirm({
-            open: false,
-            documentId: null,
-            documentName: null,
+      <DeleteConfirmationModal
+        isOpen={openModal.modal == 'delete-confirmation'}
+        onClose={() => setOpenModal('')}
+        onConfirm={() =>
+          DeleteDocument({
+            documentId: openModal.documentId,
+            processId: process?.processId,
           })
         }
-        className="max-w-md"
-      >
-        <div className="p-6">
-          <h3 className="text-lg font-semibold text-red-700 mb-4">
-            Permanently Delete Document?
-          </h3>
-          <p className="text-gray-700 mb-6">
-            You're going to <strong>permanently delete</strong> the document:
-            <br />
-            <span className="font-medium text-red-600">
-              "{deleteConfirm.documentName}"
-            </span>
-            <br />
-            <br />
-            This action <strong>cannot be undone</strong>. Are you sure?
-          </p>
-          <div className="flex justify-end gap-3">
-            <CustomButton
-              variant="secondary"
-              text="Cancel"
-              click={() =>
-                setDeleteConfirm({
-                  open: false,
-                  documentId: null,
-                  documentName: null,
-                })
-              }
-            />
-            <CustomButton
-              variant="danger"
-              text="Yes, Delete Permanently"
-              loading={actionsLoading}
-              click={async () => {
-                await DeleteDocument({
-                  documentId: deleteConfirm.documentId,
-                  processId: process?.processId,
-                });
-                setDeleteConfirm({
-                  open: false,
-                  documentId: null,
-                  documentName: null,
-                });
-              }}
-            />
-          </div>
-        </div>
-      </CustomModal>
+        isLoading={actionsLoading}
+        deactive={false}
+        documentName={openModal.documentName}
+      />
+     
     </div>
   );
 };

@@ -7,6 +7,7 @@ export default function DeleteConfirmationModal({
   onConfirm,
   isLoading,
   deactive,
+  documentName,
 }) {
   if (!isOpen) return null;
 
@@ -14,12 +15,16 @@ export default function DeleteConfirmationModal({
     <CustomModal isOpen={isOpen} className={'!p-2'} onClose={onClose}>
       <div className="bg-gray-800 bg-white p-6 rounded-lg w-full">
         <p className="text-lg font-semibold">
-          {deactive ? 'Confirm De-Activation' : 'Confirm Deletion'}
+          {deactive
+            ? 'Confirm De-Activation'
+            : documentName
+              ? `Confirm Document Deletion (${documentName})`
+              : `Confirm Deletion`}
         </p>
         <p className="text-gray-300 mt-2">
           {deactive
             ? 'Are you sure you want to de-active this item?'
-            : 'Are you sure you want to delete this item?'}
+            : `Are you sure you want to delete this item?`}
         </p>
         <div className="flex justify-end space-x-3 mt-5">
           <CustomButton
