@@ -401,6 +401,7 @@ const ViewProcess = () => {
   const DocumentsCycle = (process) => {
     // Extract cycles
     const cycles = extractDocumentsByReopenCycle(process);
+    console.log(cycles);
 
     // Maximum number of documents in any cycle
     const maxDocs = Math.max(...cycles?.map((cycle) => cycle.documents.length));
@@ -1500,14 +1501,15 @@ const ViewProcess = () => {
           processId={process.processId}
           workflowId={process?.workflow?.id}
           issueNo={process.issueNo}
-          onFinish={(data) =>
+          onFinish={(data) => {
             setProcess({
               ...process,
               documentVersioning: data.documentVersioning,
               documents: data.documents,
               sededDocuments: data.sededDocuments,
-            })
-          }
+            });
+            setOpenModal('');
+          }}
         />
       </CustomModal>
       <CustomModal
@@ -1592,7 +1594,6 @@ const ViewProcess = () => {
         deactive={false}
         documentName={openModal.documentName}
       />
-     
     </div>
   );
 };
