@@ -29,7 +29,7 @@ import CustomTextField from '../../CustomComponents/CustomTextField';
 const Archive = () => {
   const [loading, setLoading] = useState(false);
   const [archiveFiles, setArchiveFiles] = useState([]);
-  const [filteredFiles, setFilteredFiles] = useState([]); // new state
+  // const [filteredFiles, setFilteredFiles] = useState([]); // new state
   const [searchTerm, setSearchTerm] = useState(''); // new state
   const [selectedItem, setSelectedItem] = useState(null);
   const [actionsLoading, setActionsLoading] = useState(false);
@@ -99,18 +99,9 @@ const Archive = () => {
     getData(currentPath);
   }, [currentPath]);
 
-  // Filter files on search term
-  useEffect(() => {
-    if (searchTerm.trim()) {
-      setFilteredFiles(
-        archiveFiles.filter((file) =>
-          file.name.toLowerCase().includes(searchTerm.toLowerCase()),
-        ),
-      );
-    } else {
-      setFilteredFiles(archiveFiles);
-    }
-  }, [searchTerm, archiveFiles]);
+  const filteredFiles = archiveFiles.filter((file) =>
+    file.name.toLowerCase().includes(searchTerm.toLowerCase()),
+  );
 
   if (loading) return <ComponentLoader />;
 
