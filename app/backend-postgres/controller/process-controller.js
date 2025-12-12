@@ -1331,6 +1331,7 @@ export const view_process = async (req, res) => {
             name: true,
             type: true,
             path: true,
+            createdOn: true,
           },
         },
         replacedDocument: {
@@ -1381,6 +1382,7 @@ export const view_process = async (req, res) => {
             name: true,
             type: true,
             path: true,
+            createdOn: true,
           },
         },
         replacedDocument: {
@@ -1434,6 +1436,7 @@ export const view_process = async (req, res) => {
 
         versions.unshift({
           id: processDoc.document.id,
+          createdAt: processDoc.document.createdOn || null,
           name: processDoc.document.name,
           path: processDoc.document.path.split("/").slice(0, -1).join("/"),
           type: processDoc.document.type,
@@ -1478,6 +1481,7 @@ export const view_process = async (req, res) => {
           {
             id: doc.document.id,
             name: doc.document.name,
+            createdAt: doc.document.createdOn || null,
             path: doc.document.path.split("/").slice(0, -1).join("/"),
             type: doc.document.type,
             tags: doc.document.tags,
@@ -1531,6 +1535,7 @@ export const view_process = async (req, res) => {
             if (lastDocBeforeCycleChange) {
               versions.push({
                 id: lastDocBeforeCycleChange.document.id,
+                createdAt: lastDocBeforeCycleChange.document.createdOn || null,
                 name: lastDocBeforeCycleChange.document.name,
                 path: lastDocBeforeCycleChange.document.path
                   ? lastDocBeforeCycleChange.document.path
@@ -1575,6 +1580,7 @@ export const view_process = async (req, res) => {
           versions.push({
             id: lastDocBeforeCycleChange.document.id,
             name: lastDocBeforeCycleChange.document.name,
+            createdAt: lastDocBeforeCycleChange.document.createdOn || null,
             path: lastDocBeforeCycleChange.document.path
               ? lastDocBeforeCycleChange.document.path
                   .split("/")
@@ -1603,6 +1609,7 @@ export const view_process = async (req, res) => {
             documentWhichSuperseded: {
               id: documentWhichSuperseded.document.id,
               name: documentWhichSuperseded.document.name,
+              createdAt: documentWhichSuperseded.document.createdOn || null,
               path: documentWhichSuperseded.document.path
                 ? documentWhichSuperseded.document.path
                     .split("/")
@@ -1671,6 +1678,7 @@ export const view_process = async (req, res) => {
         return {
           id: doc.document.id,
           name: doc.document.name,
+          createdAt: doc.document.createdOn || null,
           type: doc.document.type,
           path: updatedPath,
           tags: doc.tags,

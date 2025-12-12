@@ -140,16 +140,6 @@ export const login = async (req, res) => {
     });
 
     if (!user) {
-      await prisma.loginLog.create({
-        data: {
-          username: username,
-          action: "LOGIN",
-          ipAddress: req.ip || req.connection.remoteAddress,
-          userAgent: req.get("User-Agent"),
-          success: false,
-          error: "User not found",
-        },
-      });
       return res.status(404).json({ message: "User not found" });
     }
 
