@@ -1747,3 +1747,41 @@ export const get_workflow_steps_with_assignments = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch workflow steps" });
   }
 };
+
+export const get_all_workflows_with_basics = async (req, res) => {
+  try {
+    // Verify user authorization
+    const accessToken = req.headers["authorization"]?.substring(7);
+    const userData = await verifyUser(accessToken);
+    if (userData === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    // Fetch all workflows with only the required fields
+    const workflows = await prisma.workflow.findMany({
+      select: {
+        id: true,
+        name: true,
+        description: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    // Format the response exactly as requested
+    const formattedWorkflows = workflows.map((workflow) => ({
+      workflowId: workflow.id,
+      workflowName: workflow.name,
+      workflowDescription: workflow.description,
+    }));
+
+    return res.status(200).json(formattedWorkflows);
+  } catch (error) {
+    console.error("Error fetching workflows:", error);
+    return res.status(500).json({
+      error: "Failed to fetch workflows",
+      details: error.message,
+    });
+  }
+};

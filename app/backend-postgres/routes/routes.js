@@ -31,6 +31,7 @@ import {
   upload_template_document,
   use_template_document,
   get_workflow_steps_with_assignments,
+  get_all_workflows_with_basics,
 } from "../controller/workflow-controller.js";
 
 // import {
@@ -246,7 +247,7 @@ router.put("/workflows/editWorkflow/:workflowId", edit_workflow); // Edit workfl
 router.get("/workflows/viewWorkflow/:workflowId", view_workflow); // View workflow details
 router.delete("/workflows/deleteWorkflow/:workflowId", delete_workflow); // Delete workflow
 router.get("/workflows/getWorkflows", get_workflows); // Get all workflows
-
+router.get("/workflows/getWorkflowsList", get_all_workflows_with_basics);
 router.post("/initiateProcess", initiate_process);
 
 router.get("/viewProcess/:processId", view_process);
