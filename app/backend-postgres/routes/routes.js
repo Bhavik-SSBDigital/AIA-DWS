@@ -30,6 +30,7 @@ import {
   get_workflow_templates,
   upload_template_document,
   use_template_document,
+  get_workflow_steps_with_assignments,
 } from "../controller/workflow-controller.js";
 
 // import {
@@ -236,6 +237,10 @@ router.get(
 router.get("/getUsers", get_users);
 router.get("/getUser/:userId", get_user);
 router.put("/editUser/:userId", edit_user);
+router.get(
+  "/workflows/:workflowId/getSteps",
+  get_workflow_steps_with_assignments
+);
 router.post("/workflows/addWorkflow", add_workflow); // Create a new workflow
 router.put("/workflows/editWorkflow/:workflowId", edit_workflow); // Edit workflow (new version)
 router.get("/workflows/viewWorkflow/:workflowId", view_workflow); // View workflow details

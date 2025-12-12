@@ -1412,3 +1412,338 @@ export const use_template_document = async (req, res) => {
     return res.status(500).json({ error: "Failed to use template document" });
   }
 };
+
+export const get_workflow_steps_with_assignments = async (req, res) => {
+  try {
+    const { workflowId } = req.params;
+
+    // Verify user authorization
+    const accessToken = req.headers["authorization"]?.substring(7);
+    const userData = await verifyUser(accessToken);
+    if (userData === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    // Fetch workflow with all necessary relations in a single query
+    const workflow = await prisma.workflow.findUnique({
+      where: { id: workflowId },
+      include: {
+        steps: {
+          orderBy: { stepNumber: "asc" },
+          include: {
+            assignments: {
+              include: {
+                departmentRoles: {
+                  include: {
+                    department: true,
+                    role: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!workflow) {
+      return res.status(404).json({ error: "Workflow not found" });
+    }
+
+    // Collect all IDs for batch queries
+    const userIds = new Set();
+    const roleIds = new Set();
+    const departmentIds = new Set();
+    const allRoleIdsForHierarchy = new Set();
+
+    workflow.steps.forEach((step) => {
+      step.assignments.forEach((assignment) => {
+        // Collect assignee IDs based on type
+        assignment.assigneeIds.forEach((id) => {
+          switch (assignment.assigneeType) {
+            case "USER":
+              userIds.add(id);
+              break;
+            case "ROLE":
+              roleIds.add(id);
+              allRoleIdsForHierarchy.add(id);
+              break;
+            case "DEPARTMENT":
+              departmentIds.add(id);
+              break;
+          }
+        });
+
+        // Collect role IDs from selectedRoles
+        if (
+          assignment.selectedRoles &&
+          Array.isArray(assignment.selectedRoles)
+        ) {
+          assignment.selectedRoles.forEach((roleId) => {
+            allRoleIdsForHierarchy.add(roleId);
+          });
+        }
+
+        // Collect role IDs from departmentRoles
+        assignment.departmentRoles.forEach((deptRole) => {
+          allRoleIdsForHierarchy.add(deptRole.roleId);
+        });
+      });
+    });
+
+    // Batch fetch all related data
+    const [
+      users,
+      roles,
+      departments,
+      userRoles,
+      allRolesForHierarchy,
+      roleHierarchies,
+    ] = await Promise.all([
+      // Fetch users with basic info
+      prisma.user.findMany({
+        where: { id: { in: Array.from(userIds) } },
+        select: { id: true, username: true },
+      }),
+
+      // Fetch roles for ROLE type assignments
+      prisma.role.findMany({
+        where: { id: { in: Array.from(roleIds) } },
+        include: {
+          branch: {
+            select: { name: true },
+          },
+        },
+      }),
+
+      // Fetch departments
+      prisma.department.findMany({
+        where: { id: { in: Array.from(departmentIds) } },
+      }),
+
+      // Fetch user-role relationships for all users
+      prisma.userRole.findMany({
+        where: { userId: { in: Array.from(userIds) } },
+        include: {
+          role: {
+            select: { role: true },
+          },
+        },
+      }),
+
+      // Fetch all roles needed for hierarchy building
+      prisma.role.findMany({
+        where: { id: { in: Array.from(allRoleIdsForHierarchy) } },
+        select: {
+          id: true,
+          role: true,
+          parentRoleId: true,
+          departmentId: true,
+        },
+      }),
+
+      // Fetch role hierarchies in bulk
+      prisma.role.findMany({
+        where: {
+          OR: [
+            { id: { in: Array.from(allRoleIdsForHierarchy) } },
+            { parentRoleId: { in: Array.from(allRoleIdsForHierarchy) } },
+          ],
+        },
+        select: { id: true, role: true, parentRoleId: true },
+      }),
+    ]);
+
+    // Create lookup maps for efficient access
+    const userMap = new Map(users.map((user) => [user.id, user]));
+    const roleMap = new Map(roles.map((role) => [role.id, role]));
+    const departmentMap = new Map(departments.map((dept) => [dept.id, dept]));
+    const userRoleMap = new Map();
+
+    // Organize user roles
+    userRoles.forEach((ur) => {
+      if (!userRoleMap.has(ur.userId)) {
+        userRoleMap.set(ur.userId, []);
+      }
+      userRoleMap.get(ur.userId).push(ur.role.role);
+    });
+
+    // Build role hierarchy map
+    const roleHierarchyMap = new Map();
+    roleHierarchies.forEach((role) => {
+      roleHierarchyMap.set(role.id, {
+        id: role.id,
+        name: role.role,
+        children: [],
+      });
+    });
+
+    // Build hierarchy trees
+    roleHierarchies.forEach((role) => {
+      if (role.parentRoleId && roleHierarchyMap.has(role.parentRoleId)) {
+        roleHierarchyMap
+          .get(role.parentRoleId)
+          .children.push(roleHierarchyMap.get(role.id));
+      }
+    });
+
+    // Get root roles (roles with no parent or where parent is not in our set)
+    const rootRoles = Array.from(roleHierarchyMap.values()).filter((role) => {
+      const roleData = allRolesForHierarchy.find((r) => r.id === role.id);
+      return (
+        !roleData?.parentRoleId || !roleHierarchyMap.has(roleData.parentRoleId)
+      );
+    });
+
+    // Function to format assignee based on type
+    const formatAssignee = (assigneeType, assigneeId) => {
+      switch (assigneeType) {
+        case "USER":
+          const user = userMap.get(assigneeId);
+          if (!user) return null;
+
+          return {
+            id: user.id,
+            username: user.username,
+            departments: [], // Add if you have user-department relationships
+            roles: userRoleMap.get(user.id) || [],
+          };
+
+        case "ROLE":
+          const role = roleMap.get(assigneeId);
+          if (!role) return null;
+
+          return {
+            id: role.id,
+            role: role.role,
+            isRootLevel: role.isRootLevel,
+            isDepartmentHead: role.isDepartmentHead,
+            departmentId: role.departmentId,
+            departmentName: role.branch?.name || null,
+            createdAt: role.createdAt,
+            updatedAt: role.updatedAt,
+            status: role.status,
+          };
+
+        case "DEPARTMENT":
+          const department = departmentMap.get(assigneeId);
+          if (!department) return null;
+
+          return {
+            id: department.id,
+            type: department.type,
+            code: department.code,
+            name: department.name,
+            status: department.status,
+            headId: department.headId,
+            adminId: department.adminId,
+            parentDepartmentId: department.parentDepartmentId,
+            createdAt: department.createdAt,
+            updatedAt: department.updatedAt,
+            createdById: department.createdById,
+          };
+
+        default:
+          return null;
+      }
+    };
+
+    // Function to get role tree for a specific role ID
+    const getRoleTree = (roleId) => {
+      const roleData = allRolesForHierarchy.find((r) => r.id === roleId);
+      if (!roleData) return null;
+
+      // Find the role in our hierarchy map
+      const roleInHierarchy = roleHierarchyMap.get(roleId);
+      if (roleInHierarchy) {
+        return {
+          id: roleInHierarchy.id,
+          name: roleInHierarchy.name,
+          children: roleInHierarchy.children
+            .map((child) => getRoleTree(child.id))
+            .filter(Boolean),
+        };
+      }
+
+      // If role not in hierarchy map, return basic info
+      return {
+        id: roleData.id,
+        name: roleData.role,
+        children: [],
+      };
+    };
+
+    // Format the response
+    const formattedSteps = workflow.steps.map((step) => {
+      const formattedAssignments = step.assignments.map((assignment) => {
+        // Format assigneeIds
+        const formattedAssigneeIds = assignment.assigneeIds
+          .map((id) => formatAssignee(assignment.assigneeType, id))
+          .filter(Boolean);
+
+        // Format selectedRoles
+        let formattedSelectedRoles = [];
+
+        if (assignment.assigneeType === "DEPARTMENT") {
+          // For DEPARTMENT assignments, group by department
+          const departmentRolesMap = new Map();
+
+          assignment.departmentRoles.forEach((deptRole) => {
+            if (!departmentRolesMap.has(deptRole.departmentId)) {
+              departmentRolesMap.set(deptRole.departmentId, {
+                department: deptRole.departmentId,
+                roles: [],
+                direction: assignment.direction,
+              });
+            }
+
+            const roleTree = getRoleTree(deptRole.roleId);
+            if (roleTree) {
+              departmentRolesMap
+                .get(deptRole.departmentId)
+                .roles.push(roleTree);
+            }
+          });
+
+          formattedSelectedRoles = Array.from(departmentRolesMap.values());
+        } else if (
+          assignment.selectedRoles &&
+          assignment.selectedRoles.length > 0
+        ) {
+          // For other assignment types, format selectedRoles as flat array
+          formattedSelectedRoles = assignment.selectedRoles
+            .map((roleId) => {
+              const role = allRolesForHierarchy.find((r) => r.id === roleId);
+              return role
+                ? {
+                    id: role.id,
+                    name: role.role,
+                    children: [],
+                  }
+                : null;
+            })
+            .filter(Boolean);
+        }
+
+        return {
+          assigneeType: assignment.assigneeType,
+          actionType: assignment.actionType,
+          assigneeIds: formattedAssigneeIds,
+          direction: assignment.direction,
+          selectedRoles: formattedSelectedRoles,
+        };
+      });
+
+      return {
+        stepName: step.stepName,
+        assignments: formattedAssignments,
+        id: step.id,
+      };
+    });
+
+    return res.status(200).json(formattedSteps);
+  } catch (error) {
+    console.error("Error fetching workflow steps:", error);
+    return res.status(500).json({ error: "Failed to fetch workflow steps" });
+  }
+};
