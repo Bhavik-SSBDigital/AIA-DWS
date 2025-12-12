@@ -12,12 +12,14 @@ import { useEffect, useState } from 'react';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { toast } from 'react-toastify';
 import {
+  CopyWorkflow,
   CreateWorkflow,
   EditWorkflow,
   GetAllRoles,
   getDepartments,
   getRolesHierarchyInDepartment,
   GetUsersWithDetails,
+  GetWorkflowsList,
 } from '../../common/Apis';
 import {
   Autocomplete,
@@ -38,6 +40,7 @@ export default function WorkflowForm({
   updateList,
 }) {
   const [selectedNodes, setSelectedNodes] = useState([]);
+  const [actionsLoading, setActionsLoading] = useState(false);
   const {
     register,
     handleSubmit,
@@ -60,10 +63,12 @@ export default function WorkflowForm({
     remove: removeStep,
     move: moveStep,
   } = useFieldArray({ control, name: 'steps' });
+  console.log(stepFields);
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(null);
   const [currentAssignmentIndex, setCurrentAssignmentIndex] = useState(null);
   const [editingAssignment, setEditingAssignment] = useState(null);
+  const [workflowsList, setWorkflowsList] = useState([]);
 
   const handleAddAssignment = (stepIndex) => {
     setCurrentStepIndex(stepIndex);
@@ -138,11 +143,42 @@ export default function WorkflowForm({
     setSelectedNodes(selectedRoles || []);
   };
 
+  const handleCopyWorkflow = async (id) => {
+    setActionsLoading(true);
+    try {
+      const response = await CopyWorkflow(id);
+      setValue('steps', response?.data);
+      toast.success(response?.data?.message || 'Workflow Steps Updated!');
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.message,
+      );
+    } finally {
+      setActionsLoading(false);
+    }
+  };
+  const getWorkflowsToCopy = async () => {
+    try {
+      const response = await GetWorkflowsList();
+      setWorkflowsList(response.data);
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.message ||
+          error?.response?.data?.message ||
+          error?.message,
+      );
+    }
+  };
   useEffect(() => {
     if (editData) {
       reset(editData);
     }
   }, [editData]);
+  useEffect(() => {
+    getWorkflowsToCopy();
+  }, []);
   return (
     <div className="mx-auto bg-white overflow-auto p-2">
       <h2 className="text-xl font-bold mb-4 text-center">Add Workflow</h2>
@@ -157,7 +193,7 @@ export default function WorkflowForm({
             {...register('name', {
               required: 'Workflow name is required',
               pattern: {
-                value: /^[a-zA-Z0-9\s_-]+$/, // letters, numbers, space, _ and -
+                value: /^[a-zA-Z0-9\s_-]+$/,
                 message: 'Special characters are not allowed',
               },
             })}
@@ -182,7 +218,51 @@ export default function WorkflowForm({
           />
         </div>
 
+        {/* ------------------------------------------------------------- */}
+        {/* WORKFLOW TEMPLATE DROPDOWN (NEW SECTION) */}
+        {/* ------------------------------------------------------------- */}
+
+        <div className="mb-6">
+          <label className="block text-sm font-semibold mb-2">
+            Choose From Existing Workflows :
+          </label>
+
+          <div className="border p-3 rounded-md bg-gray-50">
+            <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+              {workflowsList && workflowsList.length > 0 ? (
+                workflowsList.map((wf) => (
+                  <div
+                    key={wf.workflowId}
+                    className="flex justify-between items-center border p-2 rounded-md bg-white hover:bg-gray-100 transition"
+                  >
+                    <div>
+                      <p className="font-semibold text-sm">{wf.workflowName}</p>
+                      <p className="text-xs text-gray-600">
+                        {wf.workflowDescription}
+                      </p>
+                    </div>
+
+                    <CustomButton
+                      type="button"
+                      disabled={actionsLoading}
+                      click={() => handleCopyWorkflow(wf.workflowId)}
+                      text={'Use'}
+                    ></CustomButton>
+                  </div>
+                ))
+              ) : (
+                <p className="text-gray-500 text-sm italic">
+                  No workflows found.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ------------------------------------------------------------- */}
         {/* Steps Section */}
+        {/* ------------------------------------------------------------- */}
+
         <div>
           <h3 className="text-lg font-semibold mb-4">Workflow Steps :</h3>
 
@@ -195,24 +275,27 @@ export default function WorkflowForm({
                 <CustomButton
                   type="button"
                   click={() => handleMoveStepUp(stepIndex)}
-                  disabled={stepIndex === 0}
+                  disabled={stepIndex === 0 || actionsLoading}
                   title="Move Step Up"
                   text={<IconArrowUp size={20} />}
-                ></CustomButton>
+                />
                 <CustomButton
                   type="button"
                   click={() => handleMoveStepDown(stepIndex)}
-                  disabled={stepIndex === stepFields.length - 1}
+                  disabled={
+                    stepIndex === stepFields.length - 1 || actionsLoading
+                  }
                   title="Move Step Down"
                   text={<IconArrowDown size={20} />}
-                ></CustomButton>
+                />
                 <CustomButton
                   type="button"
                   click={() => removeStep(stepIndex)}
+                  disabled={actionsLoading}
                   title="Remove Step"
-                  variant={'danger'}
+                  variant="danger"
                   text={<IconTrash size={20} />}
-                ></CustomButton>
+                />
               </div>
 
               {/* Step Name */}
@@ -226,9 +309,10 @@ export default function WorkflowForm({
                 placeholder={`Step ${stepIndex + 1} Name`}
               />
 
-              {/* Assignments Section with Add Button */}
+              {/* Assignment Header */}
               <div className="flex justify-between items-center mt-4">
                 <h4 className="text-sm font-semibold">Assignments :</h4>
+
                 <button
                   type="button"
                   onClick={() => handleAddAssignment(stepIndex)}
@@ -238,47 +322,26 @@ export default function WorkflowForm({
                 </button>
               </div>
 
-              {/* Display Assignments */}
+              {/* Assignment List Table */}
               {step.assignments && step.assignments.length > 0 ? (
                 <div className="mt-2 border rounded-md">
-                  {/* Scrollable Container */}
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      {/* Table Head */}
                       <thead className="bg-gray-200 font-semibold">
                         <tr className="border-b">
-                          <th className="p-2 text-left whitespace-nowrap">
-                            Assignee Type
-                          </th>
-                          <th className="p-2 text-left whitespace-nowrap">
-                            Action Type
-                          </th>
-                          {/* <th className="p-2 text-left whitespace-nowrap">
-                            Access Type
-                          </th> */}
-                          <th className="p-2 text-left whitespace-nowrap">
-                            Assignees
-                          </th>
-                          <th className="p-2 text-left whitespace-nowrap">
-                            Action
-                          </th>
+                          <th className="p-2 text-left">Assignee Type</th>
+                          <th className="p-2 text-left">Action Type</th>
+                          <th className="p-2 text-left">Assignees</th>
+                          <th className="p-2 text-left">Action</th>
                         </tr>
                       </thead>
 
-                      {/* Table Body */}
                       <tbody>
                         {step.assignments.map((assignment, index) => (
                           <tr key={index} className="border-b">
-                            <td className="p-2 whitespace-nowrap">
-                              {assignment.assigneeType}
-                            </td>
-                            <td className="p-2 whitespace-nowrap">
-                              {assignment.actionType}
-                            </td>
-                            {/* <td className="p-2 whitespace-nowrap">
-                              {assignment.accessTypes?.join(', ') || 'N/A'}
-                            </td> */}
-                            <td className="p-2 whitespace-nowrap">
+                            <td className="p-2">{assignment.assigneeType}</td>
+                            <td className="p-2">{assignment.actionType}</td>
+                            <td className="p-2">
                               {assignment.assigneeIds
                                 .map(
                                   (item) =>
@@ -287,23 +350,24 @@ export default function WorkflowForm({
                                 .filter(Boolean)
                                 .join(', ') || 'N/A'}
                             </td>
-                            <td className="p-2 text-center gap-1 flex">
-                              {/* Remove Assignment Button (Trash Icon) */}
+
+                            {/* Actions */}
+                            <td className="p-2 flex gap-2">
                               <CustomButton
-                                type={'button'}
+                                type="button"
                                 click={() =>
                                   handleEditAssignment(
                                     stepIndex,
                                     index,
                                     assignment.selectedRoles,
                                   )
-                                } // Add edit handler
+                                }
                                 text={<IconEdit size={18} />}
-                                // click={}
                               />
+
                               <CustomButton
                                 type="button"
-                                variant={'danger'}
+                                variant="danger"
                                 click={() => {
                                   const updatedSteps = [...stepFields];
                                   updatedSteps[stepIndex].assignments.splice(
@@ -313,7 +377,7 @@ export default function WorkflowForm({
                                   setValue('steps', updatedSteps);
                                 }}
                                 text={<IconTrash size={18} />}
-                              ></CustomButton>
+                              />
                             </td>
                           </tr>
                         ))}
@@ -333,30 +397,31 @@ export default function WorkflowForm({
           <button
             type="button"
             onClick={() => appendStep({ stepName: '', assignments: [] })}
+            disabled={actionsLoading}
             className="bg-button-secondary-default hover:bg-button-secondary-hover text-white px-4 py-2 rounded-md flex items-center justify-center w-full"
           >
             <IconPlus className="mr-2" size={18} /> Add Step
           </button>
         </div>
 
-        {/* Submit & Close Buttons */}
-
+        {/* Submit Buttons */}
         <hr className="mt-15 border-t-2 border-gray-300" />
 
         <div className="flex flex-col sm:flex-row justify-end space-y-2 sm:space-y-0 sm:space-x-2 mt-4">
-          <button
-            type="button"
-            onClick={() => {
-              handleCloseForm();
-            }}
-            className="border flex-1 py-2 rounded-md"
-          >
-            Cancel
-          </button>
           <CustomButton
-            type={'submit'}
+            type="button"
+            click={() => handleCloseForm()}
+            disabled={actionsLoading}
+            text="Cancel"
+            variant="none"
+            className="flex-1"
+          />
+
+          <CustomButton
+            disabled={actionsLoading}
+            type="submit"
             text={editData ? 'Update' : 'Submit'}
-            className={'flex-1'}
+            className="flex-1"
           />
         </div>
       </form>
@@ -375,6 +440,8 @@ export default function WorkflowForm({
           selectedNodes={selectedNodes}
           editingAssignment={editingAssignment} // Pass the assignment to edit
           currentAssignmentIndex={currentAssignmentIndex} // Pass the assignment index
+          actionsLoading={actionsLoading}
+          setActionsLoading={setActionsLoading}
         />
       )}
     </div>
@@ -389,6 +456,8 @@ function AssignmentForm({
   selectedNodes,
   editingAssignment,
   currentAssignmentIndex,
+  actionsLoading,
+  setActionsLoading,
 }) {
   const onSubmitHandler = (data) => {
     if (editingAssignment && currentAssignmentIndex !== null) {
@@ -920,28 +989,29 @@ function AssignmentForm({
 
             {/* Submit & Cancel Buttons */}
             <div className="flex justify-end space-x-2">
-              <button
+              <CustomButton
                 type="button"
-                onClick={() => {
+                disabled={loading | actionsLoading}
+                click={() => {
                   onClose();
                 }}
-                className="border px-4 py-2 rounded-md bg-button-danger-default hover:bg-button-danger-hover text-white"
-              >
-                Cancel
-              </button>
-              <button
+                variant={'danger'}
+                text={'Cancel'}
+                className={'w-30'}
+              ></CustomButton>
+              <CustomButton
                 type="submit"
-                className="bg-button-primary-default hover:bg-button-primary-hover px-4 py-2 text-white rounded-md"
-              >
-                {editingAssignment ? 'Update' : 'Save'}
-              </button>
+                disabled={loading | actionsLoading}
+                className={'w-30'}
+                text={editingAssignment ? 'Update' : 'Save'}
+              ></CustomButton>
             </div>
           </form>
         </div>
       </div>
 
       {openWorkflows && currentDepartment && (
-        <CustomModal size='full' isOpen={openWorkflows && currentDepartment}>
+        <CustomModal size="full" isOpen={openWorkflows && currentDepartment}>
           <div className="p-3 w-full relative">
             <button
               onClick={() => {

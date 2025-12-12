@@ -138,6 +138,12 @@ export const GetWorkflows = async (fromAdmin) => {
     params: { fromAdmin: fromAdmin },
   });
 };
+export const GetWorkflowsList = async () => {
+  return apiClient.get('/workflows/getWorkflowsList');
+};
+export const CopyWorkflow = async (id) => {
+  return apiClient.get(`/workflows/${id}/getSteps`);
+};
 export const deleteWorkflow = async (id) => {
   return apiClient.delete(`/workflows/deleteWorkflow/${id}`);
 };
