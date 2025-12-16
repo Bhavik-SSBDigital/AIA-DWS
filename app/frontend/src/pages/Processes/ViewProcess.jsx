@@ -606,7 +606,7 @@ const ViewProcess = () => {
           <CustomButton
             variant={'primary'}
             text={'Upload Document'}
-            className={'min-w-[150px]'}
+            className={'min-w-[150px] hidden'}
             click={() => setOpenModal('document-upload')}
             disabled={actionsLoading || !isCompleted || disableActions}
           />
