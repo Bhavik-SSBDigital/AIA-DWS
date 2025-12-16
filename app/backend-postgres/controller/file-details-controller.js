@@ -680,6 +680,117 @@ export const search_documents = async (req, res) => {
   }
 
   try {
+    // Get user with roles and check if admin
+    const user = await prisma.user.findUnique({
+      where: { id: userData.id },
+      include: {
+        roles: {
+          include: {
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check if user is admin or special user
+    const isAdmin =
+      user.username === "admin" || user.isAdmin || user.specialUser;
+
+    // Function to get allowed document IDs for non-admin users
+    const getAllowedDocumentIds = async (userId, userRoles) => {
+      // Get all document accesses for the user
+      const userDocumentAccesses = await prisma.documentAccess.findMany({
+        where: {
+          OR: [
+            { userId: userId },
+            { roleId: { in: userRoles.map((r) => r.roleId) } },
+          ],
+        },
+      });
+
+      const allowedDocumentIds = new Set();
+
+      // Helper function to get parent IDs
+      const getParents = async (documentId) => {
+        const parents = [];
+        let currentDoc = await prisma.document.findUnique({
+          where: { id: documentId },
+          select: { id: true, parentId: true },
+        });
+
+        while (currentDoc && currentDoc.parentId) {
+          parents.push(currentDoc.parentId);
+          currentDoc = await prisma.document.findUnique({
+            where: { id: currentDoc.parentId },
+            select: { id: true, parentId: true },
+          });
+        }
+        return parents;
+      };
+
+      // Process each access
+      for (const access of userDocumentAccesses) {
+        if (access.accessLevel === "FULL") {
+          // For FULL access, add the document and all its children
+          allowedDocumentIds.add(access.documentId);
+
+          // Get all children of this document
+          const getAllChildren = async (parentId) => {
+            const children = await prisma.document.findMany({
+              where: { parentId: parentId },
+              select: { id: true },
+            });
+
+            for (const child of children) {
+              allowedDocumentIds.add(child.id);
+              await getAllChildren(child.id);
+            }
+          };
+
+          await getAllChildren(access.documentId);
+        } else if (
+          access.accessType.includes("READ") ||
+          access.accessType.includes("DOWNLOAD") ||
+          access.accessType.includes("EDIT")
+        ) {
+          // For STANDARD access with READ/DOWNLOAD/EDIT permission
+          allowedDocumentIds.add(access.documentId);
+
+          // Check if any parent has FULL access that grants access to this document
+          const parents = await getParents(access.documentId);
+          const hasFullAccessParent = userDocumentAccesses.some(
+            (parentAccess) =>
+              parentAccess.accessLevel === "FULL" &&
+              parents.includes(parentAccess.documentId)
+          );
+
+          if (hasFullAccessParent) {
+            allowedDocumentIds.add(access.documentId);
+          }
+        }
+      }
+
+      // Also add documents created by the user
+      const userDocuments = await prisma.document.findMany({
+        where: { createdById: userId },
+        select: { id: true },
+      });
+
+      userDocuments.forEach((doc) => allowedDocumentIds.add(doc.id));
+
+      return Array.from(allowedDocumentIds);
+    };
+
+    // Get allowed document IDs for non-admin users
+    let allowedDocumentIds = null;
+    if (!isAdmin) {
+      allowedDocumentIds = await getAllowedDocumentIds(user.id, user.roles);
+    }
+
     const {
       name,
       tags,
@@ -752,13 +863,14 @@ export const search_documents = async (req, res) => {
     if (hasContentSearch && hasMetadataSearch) {
       // Combined search: Run both content and metadata searches
       try {
-        // Content search
+        // Content search with access control
         const contentResults = await SearchIndexService.searchContent(content, {
           page: parsedPage,
           pageSize: parsedPageSize,
+          allowedDocumentIds: isAdmin ? null : allowedDocumentIds,
         });
 
-        // Metadata search
+        // Metadata search with access control
         const where = {
           AND: [
             name ? { name: { contains: name, mode: "insensitive" } } : {},
@@ -777,6 +889,8 @@ export const search_documents = async (req, res) => {
                   },
                 }
               : {},
+            // Add access control for non-admin users
+            !isAdmin ? { id: { in: allowedDocumentIds } } : {},
           ],
         };
 
@@ -883,7 +997,7 @@ export const search_documents = async (req, res) => {
         formattedResults = uniqueResults.sort(
           (a, b) => (b.searchScore || 0) - (a.searchScore || 0)
         );
-        totalCount = uniqueResults.length; // Approximate, as combining counts is complex
+        totalCount = uniqueResults.length;
         totalPages = Math.ceil(totalCount / parsedPageSize);
 
         // Log search history
@@ -921,6 +1035,7 @@ export const search_documents = async (req, res) => {
         const contentResults = await SearchIndexService.searchContent(content, {
           page: parsedPage,
           pageSize: parsedPageSize,
+          allowedDocumentIds: isAdmin ? null : allowedDocumentIds,
         });
 
         formattedResults = contentResults.results.map((result) => ({
@@ -986,6 +1101,8 @@ export const search_documents = async (req, res) => {
                 },
               }
             : {},
+          // Add access control for non-admin users
+          !isAdmin ? { id: { in: allowedDocumentIds } } : {},
         ],
       };
 

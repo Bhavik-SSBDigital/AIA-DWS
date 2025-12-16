@@ -125,10 +125,11 @@ export const getRootDocumentsWithAccess = async (req, res) => {
           const fileStats = await fs.stat(fileAbsolutePath);
           const access = documentAccessMap.get(doc.id) || {};
 
+          console.log("dpc path", doc.path);
           return {
             id: doc.id,
             name: doc.name,
-            path: `..${doc.path.substring(19)}`,
+            path: `..`,
             type: doc.type,
             createdOn: doc.createdOn,
             createdBy: doc.createdById,
@@ -284,7 +285,7 @@ export const getRootDocumentsForEdit = async (req, res) => {
           return {
             id: doc.id,
             name: doc.name,
-            path: `..${doc.path.substring(19)}/${doc.name}`,
+            path: `../${doc.name}`,
             type: doc.type,
             children: doc.children.map((child) => ({
               id: child.id,
