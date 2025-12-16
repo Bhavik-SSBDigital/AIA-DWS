@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import {
   uploadDocumentInProcess,
@@ -18,6 +18,7 @@ export default function ReOpenProcessModal({
   storagePath,
 }) {
   const navigate = useNavigate();
+  const fileInputRefs = useRef({});
 
   const {
     control,
@@ -54,6 +55,11 @@ export default function ReOpenProcessModal({
   });
 
   const [newTag, setNewTag] = useState('');
+  const resetFileInput = (index) => {
+    if (fileInputRefs.current[index]) {
+      fileInputRefs.current[index].value = '';
+    }
+  };
 
   /* ===================== UPLOAD HANDLER ===================== */
   const handleUpload = async (file, index) => {
@@ -68,6 +74,7 @@ export default function ReOpenProcessModal({
       if (row.preApproved) {
         if (!row.uploadedFileName) {
           toast.warning('Enter filename for pre-approved document');
+          resetFileInput(index); // ✅ CLEAR FILE
           return;
         }
         // Add extension if missing
@@ -254,6 +261,7 @@ export default function ReOpenProcessModal({
               </label>
               <input
                 type="file"
+                ref={(el) => (fileInputRefs.current[index] = el)}
                 onChange={(e) => handleUpload(e.target.files[0], index)}
               />
               {uploaded && (
@@ -400,8 +408,13 @@ export default function ReOpenProcessModal({
       />
 
       <div className="flex justify-end gap-2">
-        <CustomButton type="button" variant="danger" click={close} />
-        <CustomButton type="submit" disabled={isSubmitting} />
+        <CustomButton
+          type="button"
+          variant="danger"
+          click={close}
+          text={'Cancel'}
+        />
+        <CustomButton type="submit" disabled={isSubmitting} text={'Submit'} />
       </div>
     </form>
   );
