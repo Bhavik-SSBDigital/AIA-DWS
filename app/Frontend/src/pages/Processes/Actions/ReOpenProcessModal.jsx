@@ -17,14 +17,15 @@ export default function ReOpenProcessModal({
   close,
   storagePath,
 }) {
+  const navigate = useNavigate();
+
   const {
     control,
     handleSubmit,
     register,
-    getValues,
-    setValue,
-    reset,
     watch,
+    setValue,
+    getValues,
     formState: { isSubmitting },
   } = useForm({
     defaultValues: {
@@ -32,6 +33,8 @@ export default function ReOpenProcessModal({
       issueNo: '',
       supersededDocuments: [
         {
+          isNewDocument: false,
+          preApproved: false,
           oldDocumentId: '',
           newDocumentId: '',
           uploadedFileName: '',
@@ -39,6 +42,7 @@ export default function ReOpenProcessModal({
           issueNo: '',
           partNumber: '',
           fileDescription: '',
+          tags: [],
         },
       ],
     },
@@ -48,284 +52,325 @@ export default function ReOpenProcessModal({
     control,
     name: 'supersededDocuments',
   });
-  const navigate = useNavigate();
-  const [tags, setTags] = useState([]);
-  const [newTag, setNewTag] = useState();
 
-  const handleUpload = async (file, index, replacedDocId) => {
+  const [newTag, setNewTag] = useState('');
+
+  /* ===================== UPLOAD HANDLER ===================== */
+  const handleUpload = async (file, index) => {
     if (!file) return;
 
-    try {
-      // Optional: generate custom name
-      const generatedName = await GenerateDocumentName(
-        workflowId,
-        replacedDocId,
-        file.name.split('.').pop(),
-      );
+    const row = getValues(`supersededDocuments.${index}`);
+    const extension = file.name.split('.').pop();
 
-      // Upload the document (with or without name)
-      const response = await uploadDocumentInProcess(
+    try {
+      let finalFileName = '';
+
+      if (row.preApproved) {
+        if (!row.uploadedFileName) {
+          toast.warning('Enter filename for pre-approved document');
+          return;
+        }
+        // Add extension if missing
+        finalFileName = row.uploadedFileName.includes('.')
+          ? row.uploadedFileName
+          : `${row.uploadedFileName}.${extension}`;
+      } else {
+        const res = await GenerateDocumentName(
+          workflowId,
+          row.isNewDocument ? null : row.oldDocumentId,
+          extension,
+        );
+        finalFileName = res?.data?.documentName;
+        if (!finalFileName) {
+          toast.error('Failed to generate document name');
+          return;
+        }
+        setValue(
+          `supersededDocuments.${index}.uploadedFileName`,
+          finalFileName,
+        );
+      }
+
+      const uploadRes = await uploadDocumentInProcess(
         [file],
-        generatedName?.data?.documentName,
+        finalFileName,
         [],
         storagePath,
       );
 
-      if (!response || !response.length || !response[0]) {
-        throw new Error('Document upload failed or returned no ID');
-      }
-
-      const uploadedId = response[0];
-
-      // Update local form state
-      const updated = [...getValues('supersededDocuments')];
-      updated[index].newDocumentId = uploadedId;
-      updated[index].uploadedFileName = generatedName?.data?.documentName;
-      // updated[index].generatedName = generatedName; // Optional: store generated name if needed
-
-      reset((prev) => ({
-        ...prev,
-        supersededDocuments: updated,
-      }));
+      setValue(`supersededDocuments.${index}.newDocumentId`, uploadRes[0]);
+      setValue(`supersededDocuments.${index}.uploadedFileName`, finalFileName);
 
       toast.success('Document uploaded successfully');
     } catch (err) {
-      toast.error(
-        err?.response?.data?.message || err.message || 'Upload failed',
-      );
+      toast.error(err?.response?.data?.message || err.message);
     }
   };
 
+  /* ===================== SUBMIT ===================== */
   const onSubmit = async (data) => {
-    const valid = data.supersededDocuments.every(
-      (item) => item.oldDocumentId && item.newDocumentId,
-    );
+    const valid = data.supersededDocuments.every((d) => {
+      return (
+        d.uploadedFileName &&
+        d.newDocumentId &&
+        (d.isNewDocument || d.oldDocumentId)
+      );
+    });
+
     if (!valid) {
-      toast.warning('Please select documents and upload replacements.');
+      toast.warning(
+        'Please fill all required fields and upload all documents.',
+      );
       return;
     }
-    try {
-      const res = await ReOpenProcess({
-        processId,
-        issueNo: data?.issueNo,
-        supersededDocuments: data.supersededDocuments.map((d) => ({
-          oldDocumentId: parseInt(d.oldDocumentId, 10),
-          newDocumentId: d.newDocumentId,
-          reasonOfSupersed: d.reasonOfSupersed,
-          issueNo: d.issueNo,
-          partNumber: d.partNumber,
-          fileDescription: d.fileDescription,
-          tags: tags,
-        })),
-      });
 
-      toast.success(res?.data?.message || 'Process reopened');
-      navigate('/processes/completed');
-      close();
-    } catch (error) {
-      toast.error(error?.response?.data?.message || error.message);
-    }
+    await ReOpenProcess({
+      processId,
+      issueNo: data.issueNo,
+      supersededDocuments: data.supersededDocuments.map((d) => ({
+        isNewDocument: d.isNewDocument,
+        preApproved: d.preApproved, // ✅ include preApproved
+        oldDocumentId: d.isNewDocument ? null : Number(d.oldDocumentId),
+        newDocumentId: d.newDocumentId,
+        reasonOfSupersed: d.reasonOfSupersed,
+        issueNo: d.issueNo,
+        partNumber: d.partNumber,
+        fileDescription: d.fileDescription,
+        tags: d.tags,
+        uploadedFileName: d.uploadedFileName,
+      })),
+    });
+
+    toast.success('Process reopened');
+    navigate('/processes/completed');
+    close();
   };
 
+  /* ===================== UI ===================== */
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
-      <h2 className="text-lg font-semibold text-gray-800">Reopen Process</h2>
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <h2 className="text-lg font-semibold">Reopen Process</h2>
 
-      <div>
-        <label className="block text-sm font-medium mb-1">
-          Enter SOP Issue/Revision Number
-        </label>
-        <input
-          type="text"
-          {...register(`issueNo`)}
-          className="w-full border p-2 rounded text-sm"
-          placeholder="Enter"
-        />
-      </div>
+      <input
+        {...register('issueNo', {
+          required: 'SOP Issue/Revision No is required',
+        })}
+        placeholder="SOP Issue / Revision No"
+        className="w-full border p-2 rounded"
+      />
+
       {fields.map((field, index) => {
-        const uploadedFileName = watch(
-          `supersededDocuments.${index}.uploadedFileName`,
-        );
-        const selectedId = watch(`supersededDocuments.${index}.oldDocumentId`);
+        const isNew = watch(`supersededDocuments.${index}.isNewDocument`);
+        const preApproved = watch(`supersededDocuments.${index}.preApproved`);
+        const uploaded = watch(`supersededDocuments.${index}.uploadedFileName`);
+        const tags = watch(`supersededDocuments.${index}.tags`) || [];
 
         return (
-          <div
-            key={field.id}
-            className="p-4 border bg-gray-50 rounded-md shadow-sm space-y-3 relative"
-          >
-            {index !== 0 ? (
+          <div key={field.id} className="border p-4 rounded relative space-y-3">
+            {index > 0 && (
               <button
                 type="button"
                 onClick={() => remove(index)}
-                className="absolute top-1 right-1 text-red-500"
-                title="Remove"
+                className="absolute top-2 right-2 text-red-500"
               >
-                <IconSquareX size={20} />
+                <IconSquareX />
               </button>
-            ) : null}
+            )}
 
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Select Document to Replace
-              </label>
-              <select
-                {...register(`supersededDocuments.${index}.oldDocumentId`)}
-                required
-                className="w-full border p-2 rounded text-sm"
+            {/* NEW DOCUMENT */}
+            <label className="flex gap-2 items-center">
+              <input
+                type="checkbox"
+                {...register(`supersededDocuments.${index}.isNewDocument`)}
                 onChange={(e) => {
-                  const value = e.target.value;
-
-                  // RHF update
-                  register(
-                    `supersededDocuments.${index}.oldDocumentId`,
-                  ).onChange(e);
-                  setValue(`supersededDocuments.${index}.oldDocumentId`, value);
-
-                  // find selected document
-                  const selectedDoc = documents.find(
-                    (doc) => String(doc.id) === value,
+                  setValue(
+                    `supersededDocuments.${index}.isNewDocument`,
+                    e.target.checked,
                   );
-
-                  // 🔥 update tags (ONLY this is added)
-                  if (selectedDoc?.tags) {
-                    setTags(selectedDoc.tags);
+                  if (e.target.checked) {
+                    setValue(`supersededDocuments.${index}.oldDocumentId`, '');
                   }
                 }}
-              >
-                <option value="">-- Select Document --</option>
-                {documents
-                  .filter(
-                    (doc) =>
-                      !getValues('supersededDocuments')
-                        ?.map((item, i) =>
-                          i !== index ? item.oldDocumentId : null,
-                        )
-                        .includes(String(doc.id)),
-                  )
-                  .map((doc) => (
+              />
+              New document (not replacement)
+            </label>
+
+            {/* PRE-APPROVED */}
+            <label className="flex gap-2 items-center">
+              <input
+                type="checkbox"
+                {...register(`supersededDocuments.${index}.preApproved`)}
+              />
+              Pre-approved document
+            </label>
+
+            {/* OLD DOCUMENT SELECT */}
+            {!isNew && (
+              <div>
+                <label className="text-sm font-medium mb-1 block">
+                  Select Document to Replace
+                </label>
+                <select
+                  {...register(`supersededDocuments.${index}.oldDocumentId`, {
+                    required: !isNew && 'Select document to replace',
+                  })}
+                  className="w-full border p-2 rounded"
+                >
+                  <option value="">Select document</option>
+                  {documents.map((doc) => (
                     <option key={doc.id} value={doc.id}>
                       {doc.name}
                     </option>
                   ))}
-              </select>
-            </div>
+                </select>
+              </div>
+            )}
 
+            {/* FILE NAME FOR PRE-APPROVED */}
+            {preApproved && (
+              <div>
+                <label className="text-sm font-medium mb-1 block">
+                  Enter File Name (without extension)
+                </label>
+                <input
+                  {...register(
+                    `supersededDocuments.${index}.uploadedFileName`,
+                    {
+                      required:
+                        preApproved &&
+                        'Filename is required for pre-approved document',
+                    },
+                  )}
+                  className="w-full border p-2 rounded"
+                  placeholder="Enter file name"
+                />
+              </div>
+            )}
+
+            {/* FILE UPLOAD */}
             <div>
-              <label className="block text-sm font-medium mb-1">
-                Upload Replacement Document
+              <label className="text-sm font-medium mb-1 block">
+                Upload Document
               </label>
               <input
                 type="file"
-                className="w-full border p-2 rounded text-sm"
-                onChange={(e) =>
-                  handleUpload(e.target.files[0], index, selectedId)
-                }
+                onChange={(e) => handleUpload(e.target.files[0], index)}
               />
-              {uploadedFileName && (
-                <p className="text-sm text-green-600 mt-1">
-                  Uploaded: {uploadedFileName}
+              {uploaded && (
+                <p className="text-green-600 text-sm mt-1">
+                  Uploaded: {uploaded}
                 </p>
               )}
             </div>
 
+            {/* REASON */}
             <div>
-              <label className="block text-sm font-medium mb-1">
+              <label className="text-sm font-medium mb-1 block">
                 Reason for Superseding
               </label>
               <input
-                type="text"
-                {...register(`supersededDocuments.${index}.reasonOfSupersed`)}
-                className="w-full border p-2 rounded text-sm"
+                {...register(`supersededDocuments.${index}.reasonOfSupersed`, {
+                  required: 'Reason is required',
+                })}
+                className="w-full border p-2 rounded"
                 placeholder="Enter reason"
               />
             </div>
+
+            {/* DOCUMENT DESCRIPTION */}
             <div>
-              <label className="block text-sm font-medium mb-1">
+              <label className="text-sm font-medium mb-1 block">
                 Document Description
               </label>
               <input
-                type="text"
-                {...register(`supersededDocuments.${index}.partNumber`)}
-                className="w-full border p-2 rounded text-sm"
-                placeholder="Enter Description"
+                {...register(`supersededDocuments.${index}.partNumber`, {
+                  required: 'Description is required',
+                })}
+                className="w-full border p-2 rounded"
+                placeholder="Enter description"
               />
             </div>
+
+            {/* PART NUMBER */}
             <div>
-              <label className="block text-sm font-medium mb-1">
+              <label className="text-sm font-medium mb-1 block">
                 Part Number
               </label>
               <input
-                type="text"
-                {...register(`supersededDocuments.${index}.fileDescription`)}
-                className="w-full border p-2 rounded text-sm"
-                placeholder="Enter Part Number"
+                {...register(`supersededDocuments.${index}.fileDescription`, {
+                  required: 'Part Number is required',
+                })}
+                className="w-full border p-2 rounded"
+                placeholder="Enter part number"
               />
             </div>
-            {/* Tag Input */}
-            <div className="mt-4">
-              <label className="text-sm font-medium text-gray-700">Tags</label>
+
+            {/* DOCUMENT ISSUE / REVISION */}
+            <div>
+              <label className="text-sm font-medium mb-1 block">
+                Document Issue / Revision No
+              </label>
+              <input
+                {...register(`supersededDocuments.${index}.issueNo`, {
+                  required: 'Issue/Revision no is required',
+                })}
+                className="w-full border p-2 rounded"
+                placeholder="Enter issue / revision"
+              />
+            </div>
+
+            {/* TAGS */}
+            <div>
+              <label className="text-sm font-medium block">Tags</label>
               <div className="flex gap-2 mt-2">
                 <input
-                  type="text"
                   value={newTag}
-                  onChange={(e) => {
-                    const sanitizedValue = e.target.value.replace(
-                      /[^a-zA-Z0-9 ]/g,
-                      '',
-                    );
-                    setNewTag(sanitizedValue);
-                  }}
-                  className="border border-gray-300 p-2 rounded-md w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter tag..."
+                  onChange={(e) =>
+                    setNewTag(e.target.value.replace(/[^a-zA-Z0-9 ]/g, ''))
+                  }
+                  placeholder="Enter tag"
+                  className="border p-2 rounded w-full"
                 />
                 <button
                   type="button"
                   onClick={() => {
-                    if (newTag.trim()) {
-                      setTags((prev) => [...prev, newTag.trim()]);
+                    if (newTag) {
+                      setValue(`supersededDocuments.${index}.tags`, [
+                        ...tags,
+                        newTag,
+                      ]);
                       setNewTag('');
                     }
                   }}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition"
+                  className="px-4 py-2 bg-blue-600 text-white rounded"
                 >
                   Add
                 </button>
               </div>
               {tags.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {tags.map((tag, index) => (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {tags.map((t, i) => (
                     <span
-                      key={index}
-                      className="bg-purple-600 text-white px-3 py-1 text-sm rounded-full flex items-center gap-1 cursor-pointer hover:bg-purple-700 transition"
+                      key={i}
                       onClick={() =>
-                        setTags((prev) => prev.filter((_, i) => i !== index))
+                        setValue(
+                          `supersededDocuments.${index}.tags`,
+                          tags.filter((_, x) => x !== i),
+                        )
                       }
+                      className="bg-purple-600 text-white px-3 py-1 rounded cursor-pointer"
                     >
-                      {tag} <span className="text-lg">&times;</span>
+                      {t} ×
                     </span>
                   ))}
                 </div>
               )}
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Enter Document Issue No/Revision No
-              </label>
-              <input
-                type="text"
-                {...register(`supersededDocuments.${index}.issueNo`)}
-                className="w-full border p-2 rounded text-sm"
-                placeholder="Enter"
-              />
-            </div>
 
+            {/* HIDDEN FIELDS */}
             <input
               type="hidden"
               {...register(`supersededDocuments.${index}.newDocumentId`)}
-            />
-            <input
-              type="hidden"
-              {...register(`supersededDocuments.${index}.uploadedFileName`)}
             />
           </div>
         );
@@ -333,39 +378,30 @@ export default function ReOpenProcessModal({
 
       <CustomButton
         type="button"
-        variant="secondary"
         click={() =>
           append({
+            isNewDocument: false,
+            preApproved: false,
             oldDocumentId: '',
             newDocumentId: '',
             uploadedFileName: '',
             reasonOfSupersed: '',
+            issueNo: '',
             partNumber: '',
             fileDescription: '',
+            tags: [],
           })
         }
-        className={'mx-auto block'}
         text={
-          <div className="flex items-center gap-2">
-            <IconSquarePlus size={18} />
-            Add Document to Replace
+          <div className="flex gap-2 items-center">
+            <IconSquarePlus /> Add Document
           </div>
         }
       />
 
-      <div className="flex justify-end gap-2 pt-4">
-        <CustomButton
-          type="button"
-          variant="danger"
-          text="Cancel"
-          click={close}
-          disabled={isSubmitting}
-        />
-        <CustomButton
-          type="submit"
-          text="Reopen Process"
-          disabled={isSubmitting}
-        />
+      <div className="flex justify-end gap-2">
+        <CustomButton type="button" variant="danger" click={close} />
+        <CustomButton type="submit" disabled={isSubmitting} />
       </div>
     </form>
   );
