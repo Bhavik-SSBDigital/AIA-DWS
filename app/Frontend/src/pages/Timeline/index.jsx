@@ -846,78 +846,63 @@ const Timeline = ({
     const { documentVersioning } = processData;
 
     const allReopenCycles = new Set();
-    const documentLineage = new Map();
+    const lineageMap = new Map();
+    const newDocuments = [];
 
-    const originalOrder = [];
-    const originalDocumentsMap = new Map();
-
-    // Pre-process all document versions and find original order
-    documentVersioning.forEach((docGroup) => {
-      const versions = docGroup.versions.sort(
+    // Step 1: Normalize data
+    documentVersioning.forEach((group) => {
+      const versions = [...group.versions].sort(
         (a, b) => a.reopenCycle - b.reopenCycle,
       );
 
-      documentLineage.set(docGroup.latestDocumentId, versions);
+      versions.forEach((v) => allReopenCycles.add(v.reopenCycle));
 
-      const originalVersion = versions.find((v) => v.reopenCycle === 0);
-      if (originalVersion) {
-        originalOrder.push(originalVersion.id);
-        originalDocumentsMap.set(originalVersion.id, versions);
+      const hasOriginal = versions.some((v) => v.reopenCycle === 0);
+
+      if (hasOriginal) {
+        lineageMap.set(group.latestDocumentId, versions);
+      } else {
+        // ✅ NEW DOCUMENT (no reopenCycle 0)
+        newDocuments.push(versions[0]);
       }
-
-      versions.forEach((version) => {
-        allReopenCycles.add(version.reopenCycle);
-      });
     });
 
-    const reopenCycles = Array.from(allReopenCycles).sort((a, b) => a - b);
+    const reopenCycles = [...allReopenCycles].sort((a, b) => a - b);
 
-    const result = reopenCycles.map((currentCycle) => {
-      const cycleDocuments = [];
+    // Step 2: Build cycles
+    return reopenCycles.map((cycle) => {
+      const documents = [];
 
-      originalOrder.forEach((originalDocId) => {
-        const versions = originalDocumentsMap.get(originalDocId);
-        if (versions) {
-          let appropriateVersion = null;
-
-          for (let i = versions.length - 1; i >= 0; i--) {
-            if (versions[i].reopenCycle <= currentCycle) {
-              appropriateVersion = versions[i];
-              break;
-            }
+      // Existing lineages (original + replacements)
+      lineageMap.forEach((versions) => {
+        let selected = null;
+        for (let i = versions.length - 1; i >= 0; i--) {
+          if (versions[i].reopenCycle <= cycle) {
+            selected = versions[i];
+            break;
           }
+        }
+        if (selected) documents.push(selected);
+      });
 
-          if (appropriateVersion) {
-            cycleDocuments.push(appropriateVersion);
-          }
+      // New documents appear only from their cycle onward
+      newDocuments.forEach((doc) => {
+        if (doc.reopenCycle <= cycle) {
+          documents.push(doc);
         }
       });
 
-      // ---------------------------
-      // NEW: SOPIssueNo = version matching the reopenCycle
-      // ---------------------------
-      let sopIssueNo = null;
-
-      for (const doc of cycleDocuments) {
-        if (doc.reopenCycle === currentCycle) {
-          sopIssueNo = doc.SOPIssueNo;
-          break;
-        }
-      }
-
-      // Fallback to first doc if no exact match
-      if (!sopIssueNo && cycleDocuments.length > 0) {
-        sopIssueNo = cycleDocuments[0].SOPIssueNo;
-      }
+      // SOP Issue No resolution
+      const sopMatch = documents.find(
+        (d) => d.reopenCycle === cycle && d.SOPIssueNo,
+      );
 
       return {
-        reopenCycle: currentCycle,
-        SOPIssueNo: sopIssueNo,
-        documents: cycleDocuments,
+        reopenCycle: cycle,
+        SOPIssueNo: sopMatch?.SOPIssueNo || documents[0]?.SOPIssueNo || '--',
+        documents,
       };
     });
-
-    return result;
   }
 
   const DocumentsCycle = (process) => {
@@ -962,7 +947,7 @@ const Timeline = ({
                     return (
                       <td key={idx} className="py-2 px-4 border">
                         {doc ? (
-                          <div className="flex items-center space-x-2">
+                          <div className="flex items-center space-x-2 mr-4">
                             {/* Document icon */}
                             <img
                               width={28}
