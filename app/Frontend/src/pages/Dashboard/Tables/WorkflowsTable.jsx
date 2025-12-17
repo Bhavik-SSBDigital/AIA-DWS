@@ -13,7 +13,11 @@ const WorkflowsTable = ({
   endDate,
 }) => {
   if (!data || data?.length === 0) {
-    return <p className="text-gray-500">No workflows available.</p>;
+    return (
+      <p className="text-gray-500">
+        No workflows available or you don't have access.
+      </p>
+    );
   }
 
   // states

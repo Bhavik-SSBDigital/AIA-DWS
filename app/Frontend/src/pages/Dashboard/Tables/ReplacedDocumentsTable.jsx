@@ -10,7 +10,7 @@ const ReplacedDocumentsTable = ({
   setActionsLoading,
 }) => {
   if (!data || data?.length === 0) {
-    return <p className="text-gray-500">No replaced documents available.</p>;
+    return <p className="text-gray-500">No replaced documents available or you don't have access.</p>;
   }
 
   // states

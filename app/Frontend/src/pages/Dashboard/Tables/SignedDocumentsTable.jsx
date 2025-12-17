@@ -6,7 +6,7 @@ import { toast } from 'react-toastify';
 
 const SignedDocumentsTable = ({ data, actionsLoading, setActionsLoading }) => {
   if (!data || data?.length === 0) {
-    return <p className="text-gray-500">No signed documents available.</p>;
+    return <p className="text-gray-500">No signed documents available or you don't have access.</p>;
   }
 
   // states

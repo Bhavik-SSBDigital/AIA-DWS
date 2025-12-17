@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 const ProcessesTable = ({ data }) => {
   if (!data || data.length === 0) {
-    return <p className="text-gray-500">No processes available.</p>;
+    return <p className="text-gray-500">No processes available or you don't have access.</p>;
   }
   // states
   const navigate = useNavigate();
