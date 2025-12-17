@@ -34,6 +34,214 @@ const getDocType = (path) => {
   return parts[parts.length - 1].toLowerCase();
 };
 
+// Helper function to check if user is admin (has at least one role with isAdmin AND isRootLevel true)
+const isUserAdmin = async (userId) => {
+  const userWithRoles = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      roles: {
+        include: {
+          role: true,
+        },
+      },
+    },
+  });
+
+  if (!userWithRoles) return false;
+
+  if (userWithRoles.isAdmin) {
+    return true;
+  }
+  // Check if user has at least one role with isAdmin AND isRootLevel true
+  return userWithRoles.roles.some(
+    (userRole) => userRole.role.isAdmin || userRole.role.isRootLevel
+  );
+};
+
+// Helper function to get allowed document IDs for a user
+const getAllowedDocumentIds = async (userId, userRoles) => {
+  // Get all document accesses for the user
+  const userDocumentAccesses = await prisma.documentAccess.findMany({
+    where: {
+      OR: [
+        { userId: userId },
+        { roleId: { in: userRoles.map((r) => r.roleId) } },
+      ],
+    },
+  });
+
+  const allowedDocumentIds = new Set();
+
+  // Helper function to get parent IDs
+  const getParents = async (documentId) => {
+    const parents = [];
+    let currentDoc = await prisma.document.findUnique({
+      where: { id: documentId },
+      select: { id: true, parentId: true },
+    });
+
+    while (currentDoc && currentDoc.parentId) {
+      parents.push(currentDoc.parentId);
+      currentDoc = await prisma.document.findUnique({
+        where: { id: currentDoc.parentId },
+        select: { id: true, parentId: true },
+      });
+    }
+    return parents;
+  };
+
+  // Process each access
+  for (const access of userDocumentAccesses) {
+    if (access.accessLevel === "FULL") {
+      // For FULL access, add the document and all its children
+      allowedDocumentIds.add(access.documentId);
+
+      // Get all children of this document
+      const getAllChildren = async (parentId) => {
+        const children = await prisma.document.findMany({
+          where: { parentId: parentId },
+          select: { id: true },
+        });
+
+        for (const child of children) {
+          allowedDocumentIds.add(child.id);
+          await getAllChildren(child.id);
+        }
+      };
+
+      await getAllChildren(access.documentId);
+    } else if (
+      access.accessType.includes("READ") ||
+      access.accessType.includes("DOWNLOAD") ||
+      access.accessType.includes("EDIT")
+    ) {
+      // For STANDARD access with READ/DOWNLOAD/EDIT permission
+      allowedDocumentIds.add(access.documentId);
+
+      // Check if any parent has FULL access that grants access to this document
+      const parents = await getParents(access.documentId);
+      const hasFullAccessParent = userDocumentAccesses.some(
+        (parentAccess) =>
+          parentAccess.accessLevel === "FULL" &&
+          parents.includes(parentAccess.documentId)
+      );
+
+      if (hasFullAccessParent) {
+        allowedDocumentIds.add(access.documentId);
+      }
+    }
+  }
+
+  // Also add documents created by the user
+  const userDocuments = await prisma.document.findMany({
+    where: { createdById: userId },
+    select: { id: true },
+  });
+
+  userDocuments.forEach((doc) => allowedDocumentIds.add(doc.id));
+
+  return Array.from(allowedDocumentIds);
+};
+
+// Helper function to get allowed workflow IDs for a user
+const getAllowedWorkflowIds = async (
+  userId,
+  userRoleIds,
+  userDepartmentIds
+) => {
+  // Get workflow assignments where user is directly assigned
+  const userAssignments = await prisma.workflowAssignment.findMany({
+    where: {
+      OR: [
+        { assigneeType: "USER", assigneeIds: { has: userId } },
+        { assigneeType: "ROLE", selectedRoles: { hasSome: userRoleIds } },
+        {
+          assigneeType: "DEPARTMENT",
+          selectedRoles: { hasSome: userRoleIds },
+        },
+      ],
+    },
+    select: {
+      step: {
+        select: {
+          workflowId: true,
+        },
+      },
+    },
+  });
+
+  // Get unique workflow IDs
+  const workflowIds = [
+    ...new Set(userAssignments.map((a) => a.step.workflowId)),
+  ];
+
+  return workflowIds;
+};
+
+// Helper function to get allowed process IDs for a user
+const getAllowedProcessIds = async (
+  userId,
+  userRoleIds,
+  userDepartmentIds,
+  allowedWorkflowIds
+) => {
+  // Get processes where user is initiator
+  const initiatedProcesses = await prisma.processInstance.findMany({
+    where: { initiatorId: userId },
+    select: { id: true },
+  });
+
+  // Get processes where user is assigned in any step
+  const assignedProcesses = await prisma.processStepInstance.findMany({
+    where: {
+      OR: [
+        { assignedTo: userId },
+        { roleId: { in: userRoleIds } },
+        { departmentId: { in: userDepartmentIds } },
+      ],
+    },
+    select: { processId: true },
+  });
+
+  // Get processes from allowed workflows
+  const workflowProcesses = await prisma.processInstance.findMany({
+    where: {
+      workflowId: { in: allowedWorkflowIds },
+    },
+    select: { id: true },
+  });
+
+  // Combine all process IDs
+  const processIds = new Set();
+
+  initiatedProcesses.forEach((p) => processIds.add(p.id));
+  assignedProcesses.forEach((p) => processIds.add(p.processId));
+  workflowProcesses.forEach((p) => processIds.add(p.id));
+
+  return Array.from(processIds);
+};
+
+// Helper function to get user roles and departments
+const getUserRolesAndDepartments = async (userId) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      roles: {
+        include: {
+          role: true,
+        },
+      },
+      branches: true,
+    },
+  });
+
+  const userRoles = user.roles;
+  const userRoleIds = userRoles.map((r) => r.roleId);
+  const userDepartmentIds = user.branches.map((b) => b.id);
+
+  return { userRoles, userRoleIds, userDepartmentIds };
+};
+
 // 1. /getNumbers Endpoint
 export const getNumbers = async (req, res) => {
   try {
@@ -186,6 +394,31 @@ export const getDetails = async (req, res) => {
     const { startDate, endDate } = req.query;
     const { start, end } = validateDateRange(startDate, endDate);
 
+    // First, check if user is admin
+    const isAdmin = await isUserAdmin(userData.id);
+
+    let allowedDocumentIds = null;
+    let allowedWorkflowIds = null;
+    let allowedProcessIds = null;
+
+    if (!isAdmin) {
+      // Only fetch access-controlled data if user is not admin
+      const { userRoles, userRoleIds, userDepartmentIds } =
+        await getUserRolesAndDepartments(userData.id);
+      allowedDocumentIds = await getAllowedDocumentIds(userData.id, userRoles);
+      allowedWorkflowIds = await getAllowedWorkflowIds(
+        userData.id,
+        userRoleIds,
+        userDepartmentIds
+      );
+      allowedProcessIds = await getAllowedProcessIds(
+        userData.id,
+        userRoleIds,
+        userDepartmentIds,
+        allowedWorkflowIds
+      );
+    }
+
     const [
       workflows,
       activeWorkflows,
@@ -196,10 +429,13 @@ export const getDetails = async (req, res) => {
       rejectedDocuments,
       replacedDocuments,
     ] = await Promise.all([
-      // Workflows
+      // Workflows (only accessible ones unless admin)
       prisma.workflow
         .findMany({
           where: {
+            ...(!isAdmin && allowedWorkflowIds
+              ? { id: { in: allowedWorkflowIds } }
+              : {}),
             createdAt: { gte: start, lte: end },
           },
           select: {
@@ -208,7 +444,6 @@ export const getDetails = async (req, res) => {
             version: true,
             description: true,
             createdAt: true,
-            // decisionAt: true,
           },
         })
         .then((workflows) =>
@@ -218,13 +453,15 @@ export const getDetails = async (req, res) => {
             version: w.version,
             description: w.description,
             createdAt: w.createdAt.toISOString(),
-            // decisionAt: w.decisionAt.toISOString(),
           }))
         ),
-      // Active workflows
+      // Active workflows (only accessible ones unless admin)
       prisma.workflow
         .findMany({
           where: {
+            ...(!isAdmin && allowedWorkflowIds
+              ? { id: { in: allowedWorkflowIds } }
+              : {}),
             createdAt: { gte: start, lte: end },
             processes: {
               some: { status: "IN_PROGRESS" },
@@ -236,7 +473,6 @@ export const getDetails = async (req, res) => {
             version: true,
             description: true,
             createdAt: true,
-            // decisionAt: true,
           },
         })
         .then((workflows) =>
@@ -246,13 +482,15 @@ export const getDetails = async (req, res) => {
             version: w.version,
             description: w.description,
             createdAt: w.createdAt.toISOString(),
-            // decisionAt: w.decisionAt.toISOString(),
           }))
         ),
-      // Completed processes
+      // Completed processes (only accessible ones unless admin)
       prisma.processInstance
         .findMany({
           where: {
+            ...(!isAdmin && allowedProcessIds
+              ? { id: { in: allowedProcessIds } }
+              : {}),
             status: "COMPLETED",
             createdAt: { gte: start, lte: end },
           },
@@ -271,10 +509,13 @@ export const getDetails = async (req, res) => {
             initiatorUsername: p.initiator.username,
           }))
         ),
-      // Pending processes
+      // Pending processes (only accessible ones unless admin)
       prisma.processInstance
         .findMany({
           where: {
+            ...(!isAdmin && allowedProcessIds
+              ? { id: { in: allowedProcessIds } }
+              : {}),
             status: "IN_PROGRESS",
             createdAt: { gte: start, lte: end },
           },
@@ -293,10 +534,13 @@ export const getDetails = async (req, res) => {
             initiatorUsername: p.initiator.username,
           }))
         ),
-      // Queries
+      // Queries (only from accessible processes unless admin)
       prisma.processQA
         .findMany({
           where: {
+            ...(!isAdmin && allowedProcessIds
+              ? { processId: { in: allowedProcessIds } }
+              : {}),
             createdAt: { gte: start, lte: end },
           },
           include: {
@@ -317,11 +561,23 @@ export const getDetails = async (req, res) => {
             status: q.answer ? "RESOLVED" : "OPEN",
           }))
         ),
-      // Signed documents
+      // Signed documents (only accessible ones unless admin)
       prisma.documentSignature
         .findMany({
           where: {
             signedAt: { gte: start, lte: end },
+            ...(!isAdmin && (allowedDocumentIds || allowedProcessIds)
+              ? {
+                  processDocument: {
+                    ...(allowedDocumentIds
+                      ? { document: { id: { in: allowedDocumentIds } } }
+                      : {}),
+                    ...(allowedProcessIds
+                      ? { process: { id: { in: allowedProcessIds } } }
+                      : {}),
+                  },
+                }
+              : {}),
           },
           include: {
             processDocument: {
@@ -338,7 +594,7 @@ export const getDetails = async (req, res) => {
 
           return signatures
             .map((s) => ({
-              signatureId: s.id, // Add signature ID for uniqueness
+              signatureId: s.id,
               documentId: s.processDocument.document.id,
               documentName: s.processDocument.document.name,
               documentPath: formatDocumentPath(s.processDocument.document.path),
@@ -348,7 +604,6 @@ export const getDetails = async (req, res) => {
               signedAt: s.signedAt.toISOString(),
             }))
             .filter((signature) => {
-              // Create a unique key combining documentId, processId, and signedAt
               const uniqueKey = `${signature.documentId}-${signature.processId}-${signature.signedAt}`;
               if (!seenSignatures.has(uniqueKey)) {
                 seenSignatures.add(uniqueKey);
@@ -357,11 +612,23 @@ export const getDetails = async (req, res) => {
               return false;
             });
         }),
-      // Rejected documents
+      // Rejected documents (only accessible ones unless admin)
       prisma.documentRejection
         .findMany({
           where: {
             rejectedAt: { gte: start, lte: end },
+            ...(!isAdmin && (allowedDocumentIds || allowedProcessIds)
+              ? {
+                  processDocument: {
+                    ...(allowedDocumentIds
+                      ? { document: { id: { in: allowedDocumentIds } } }
+                      : {}),
+                    ...(allowedProcessIds
+                      ? { process: { id: { in: allowedProcessIds } } }
+                      : {}),
+                  },
+                }
+              : {}),
           },
           include: {
             processDocument: {
@@ -377,7 +644,7 @@ export const getDetails = async (req, res) => {
 
           return rejections
             .map((r) => ({
-              rejectionId: r.id, // Add rejection ID for uniqueness
+              rejectionId: r.id,
               documentId: r.processDocument.document.id,
               documentName: r.processDocument.document.name,
               documentPath: formatDocumentPath(r.processDocument.document.path),
@@ -387,7 +654,6 @@ export const getDetails = async (req, res) => {
               rejectedAt: r.rejectedAt.toISOString(),
             }))
             .filter((rejection) => {
-              // Create a unique key combining documentId, processId, and rejectedAt
               const uniqueKey = `${rejection.documentId}-${rejection.processId}-${rejection.rejectedAt}`;
               if (!seenRejections.has(uniqueKey)) {
                 seenRejections.add(uniqueKey);
@@ -396,12 +662,15 @@ export const getDetails = async (req, res) => {
               return false;
             });
         }),
-      // Replaced documents
+      // Replaced documents (only accessible ones unless admin)
       prisma.documentHistory
         .findMany({
           where: {
             actionType: "REPLACED",
             createdAt: { gte: start, lte: end },
+            ...(!isAdmin && allowedDocumentIds
+              ? { document: { id: { in: allowedDocumentIds } } }
+              : {}),
           },
           include: {
             document: { select: { id: true, name: true, path: true } },
@@ -414,7 +683,7 @@ export const getDetails = async (req, res) => {
 
           return histories
             .map((h) => ({
-              historyId: h.id, // Add history ID for uniqueness
+              historyId: h.id,
               replacedDocumentId: h.document.id,
               replacedDocName: h.document.name,
               replacedDocumentPath: formatDocumentPath(h.document.path),
@@ -426,10 +695,9 @@ export const getDetails = async (req, res) => {
                 h.replacedDocument?.path || ""
               ),
               replacedBy: h.user.username,
-              replacedAt: h.createdAt.toISOString(), // Added for better uniqueness
+              replacedAt: h.createdAt.toISOString(),
             }))
             .filter((replacement) => {
-              // Create a unique key combining replacedDocumentId, replacesDocumentId, and replacedAt
               const uniqueKey = `${replacement.replacedDocumentId}-${replacement.replacesDocumentId}-${replacement.replacedAt}`;
               if (!seenReplacements.has(uniqueKey)) {
                 seenReplacements.add(uniqueKey);
@@ -471,346 +739,6 @@ export const getDetails = async (req, res) => {
 };
 
 // 3. /getWorkflowAnalysis/:workflowId Endpoint
-// export const getWorkflowAnalysis = async (req, res) => {
-//   try {
-//     const accessToken = req.headers["authorization"]?.substring(7);
-//     const userData = await verifyUser(accessToken);
-//     if (userData === "Unauthorized") {
-//       return res.status(401).json({ message: "Unauthorized request" });
-//     }
-
-//     const { workflowId } = req.params;
-//     const { startDate, endDate } = req.query;
-//     const { start, end } = validateDateRange(startDate, endDate);
-
-//     const workflow = await prisma.workflow.findUnique({
-//       where: { id: workflowId },
-//       select: {
-//         id: true,
-//         name: true,
-//         version: true,
-//         description: true,
-//         createdAt: true,
-//         updatedAt: true,
-//         steps: {
-//           select: {
-//             id: true,
-//             stepName: true,
-//             stepNumber: true,
-//             stepType: true,
-//           },
-//         },
-//       },
-//     });
-
-//     if (!workflow) {
-//       return res.status(404).json({
-//         success: false,
-//         error: {
-//           message: "Workflow not found",
-//           details: "No workflow found with the specified ID",
-//           code: "WORKFLOW_NOT_FOUND",
-//         },
-//       });
-//     }
-
-//     const [
-//       stepCompletionTimes,
-//       pendingProcessesByStep,
-//       assigneeCompletionTimes,
-//       pendingProcesses,
-//       queries,
-//       signedDocuments,
-//       rejectedDocuments,
-//       replacedDocuments,
-//     ] = await Promise.all([
-//       // Step completion times
-//       Promise.all(
-//         workflow.steps.map(async (step) => {
-//           const stepInstances = await prisma.processStepInstance.findMany({
-//             where: {
-//               stepId: step.id,
-//               status: "APPROVED",
-//               createdAt: { gte: start, lte: end },
-//               decisionAt: { not: null },
-//             },
-//             select: {
-//               createdAt: true,
-//               decisionAt: true,
-//             },
-//           });
-//           const avgTimeHours =
-//             stepInstances.length > 0
-//               ? stepInstances.reduce(
-//                   (sum, si) =>
-//                     sum + (si.decisionAt - si.createdAt) / (1000 * 60 * 60),
-//                   0
-//                 ) / stepInstances.length
-//               : 0;
-//           return {
-//             stepId: step.id,
-//             stepName: step.stepName,
-//             stepNumber: step.stepNumber,
-//             stepType: step.stepType,
-//             averageCompletionTimeHours: avgTimeHours.toFixed(2),
-//           };
-//         })
-//       ),
-//       // Pending processes by step
-//       Promise.all(
-//         workflow.steps.map(async (step) => {
-//           const processes = await prisma.processStepInstance.findMany({
-//             where: {
-//               stepId: step.id,
-//               status: "IN_PROGRESS",
-//               process: {
-//                 workflowId,
-//                 createdAt: { gte: start, lte: end },
-//               },
-//             },
-//             include: {
-//               process: {
-//                 select: {
-//                   id: true,
-//                   name: true,
-//                   createdAt: true,
-//                   initiator: { select: { username: true } },
-//                 },
-//               },
-//             },
-//           });
-//           return {
-//             stepId: step.id,
-//             stepName: step.stepName,
-//             stepNumber: step.stepNumber,
-//             pendingCount: processes.length,
-//             processes: processes.map((p) => ({
-//               processId: p.process.id,
-//               processName: p.process.name,
-//               createdAt: p.process.createdAt.toISOString(),
-//               createdBy: p.process.initiator.username,
-//             })),
-//           };
-//         })
-//       ),
-//       // Assignee completion times
-//       prisma.processStepInstance
-//         .groupBy({
-//           by: ["assignedTo"],
-//           where: {
-//             process: { workflowId, createdAt: { gte: start, lte: end } },
-//             status: "APPROVED",
-//             decisionAt: { not: null },
-//           },
-//           _avg: {
-//             decisionAt: true,
-//             createdAt: true,
-//           },
-//           _count: {
-//             id: true,
-//           },
-//         })
-//         .then(async (results) => {
-//           const assigneeDetails = await Promise.all(
-//             results.map(async (r) => {
-//               const user = await prisma.user.findUnique({
-//                 where: { id: r.assignedTo },
-//                 select: { username: true },
-//               });
-//               const avgTimeHours =
-//                 r._count.id > 0
-//                   ? (
-//                       (new Date(r._avg.decisionAt) -
-//                         new Date(r._avg.createdAt)) /
-//                       (1000 * 60 * 60)
-//                     ).toFixed(2)
-//                   : 0;
-//               return {
-//                 assigneeId: r.assignedTo,
-//                 assigneeUsername: user?.username || "Unknown User",
-//                 averageCompletionTimeHours: parseFloat(avgTimeHours),
-//                 totalTasks: r._count.id,
-//               };
-//             })
-//           );
-//           return assigneeDetails;
-//         }),
-//       // Pending processes
-//       prisma.processInstance
-//         .findMany({
-//           where: {
-//             workflowId: { id: workflowId },
-//             status: "IN_PROGRESS",
-//             createdAt: { gte: start, lte: end },
-//           },
-//           select: {
-//             id: true,
-//             name: true,
-//             createdAt: true,
-//             initiator: { select: { username: true } },
-//           },
-//         })
-//         .then((processes) =>
-//           processes.map((p) => ({
-//             processId: p.id,
-//             processName: p.name,
-//             createdAt: p.createdAt.toISOString(),
-//             initiatorUsername: p.initiator.username,
-//           }))
-//         ),
-//       // Queries
-//       prisma.processQA
-//         .findMany({
-//           where: {
-//             process: { workflowId: { id: workflowId } },
-//             createdAt: { gte: start, lte: end },
-//           },
-//           include: {
-//             initiator: { select: { username: true } },
-//             process: { select: { id: true, name: true } },
-//           },
-//         })
-//         .then((queries) => {
-//           const formatted = queries.map((q) => ({
-//             id: q.id,
-//             stepInstanceId: q.stepInstanceId,
-//             queryText: q.question,
-//             answerText: q.answer || null,
-//             initiatorName: q.initiator.username,
-//             createdAt: q.createdAt.toISOString(),
-//             answeredAt: q.answeredAt?.toISOString() || null,
-//             processId: q.process.id,
-//             processName: q.process.name,
-//             status: q.answer ? "RESOLVED" : "OPEN",
-//           }));
-//           return {
-//             total: queries.length,
-//             solved: queries.filter((q) => q.answer).length,
-//             details: formatted,
-//           };
-//         }),
-//       // Signed documents
-//       prisma.documentSignature
-//         .findMany({
-//           where: {
-//             processDocument: {
-//               process: { workflowId: { id: workflowId } },
-//               createdAt: { gte: start, lte: end },
-//             },
-//           },
-//           include: {
-//             processDocument: {
-//               include: {
-//                 document: { select: { id: true, name: true, path: true } },
-//                 process: { select: { id: true, name: true } },
-//               },
-//             },
-//           },
-//         })
-//         .then((signatures) =>
-//           signatures.map((s) => ({
-//             documentId: s.processDocument.document.id,
-//             documentName: s.processDocument.document.name,
-//             documentPath: formatDocumentPath(s.processDocument.document.path),
-//             processId: s.processDocument.process.id,
-//             processName: s.processDocument.process.name,
-//             signedAt: s.createdAt.toISOString(),
-//           }))
-//         ),
-//       // Rejected documents
-//       prisma.documentRejection
-//         .findMany({
-//           where: {
-//             processDocument: {
-//               process: { workflowId: { id: workflowId } },
-//               createdAt: { gte: start, lte: end },
-//             },
-//           },
-//           include: {
-//             processDocument: {
-//               include: {
-//                 document: { id: true, name: true, path: true },
-//                 process: { id: true, name: true },
-//               },
-//             },
-//           },
-//         })
-//         .then((rejections) =>
-//           rejections.map((r) => ({
-//             documentId: r.processDocument.document.id,
-//             documentName: r.processDocument.document.name,
-//             documentPath: formatDocumentPath(r.processDocument.document.path),
-//             processId: r.processDocument.process.id,
-//             processName: r.processDocument.process.name,
-//             rejectedAt: r.createdAt.toISOString(),
-//           }))
-//         ),
-//       // Replaced documents
-//       prisma.documentHistory
-//         .findMany({
-//           where: {
-//             processId: { workflowId: { id: workflowId } },
-//             actionType: "REPLACED",
-//             createdAt: { gte: start, lte: end },
-//           },
-//           include: {
-//             document: { select: { id: true, name: true, path: true } },
-//             replacedDocument: { select: { id: true, name: true, path: true } },
-//             user: { select: { username: true } },
-//           },
-//         })
-//         .then((histories) =>
-//           histories.map((h) => ({
-//             replacedDocumentId: h.document.id,
-//             replacedDocName: h.document.name,
-//             replacedDocumentPath: formatDocumentPath(h.document.path),
-//             replacesDocumentId: h.replacedDocument?.id || null,
-//             replacesDocumentName: h.replacedDocument?.name || null,
-//             replacesDocumentPath: formatDocumentPath(
-//               h.replacedDocument?.path || ""
-//             ),
-//             replacedBy: h.user.username,
-//           }))
-//         ),
-//     ]);
-
-//     return res.status(200).json({
-//       success: true,
-//       data: {
-//         workflow: {
-//           workflowId: workflow.id,
-//           name: workflow.name,
-//           version: workflow.version,
-//           description: workflow.description,
-//           createdAt: workflow.createdAt.toISOString(),
-//           updatedAt: workflow.updatedAt.toISOString(),
-//         },
-//         stepCompletionTimes,
-//         pendingProcessesByStep,
-//         assigneeCompletionTimes,
-//         pendingProcesses: {
-//           total: pendingProcesses.length,
-//           details: pendingProcesses,
-//         },
-//         queries,
-//         signedDocuments,
-//         rejectedDocuments,
-//         replacedDocuments,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Error in getWorkflowAnalysis:", error);
-//     return res.status(500).json({
-//       success: false,
-//       error: {
-//         message: "Failed to analyze workflow",
-//         details: error.message,
-//         code: "WORKFLOW_ANALYSIS_ERROR",
-//       },
-//     });
-//   }
-// };
-
 export const getWorkflowAnalysis = async (req, res) => {
   try {
     const accessToken = req.headers["authorization"]?.substring(7);
@@ -822,6 +750,44 @@ export const getWorkflowAnalysis = async (req, res) => {
     const { workflowId } = req.params;
     const { startDate, endDate } = req.query;
     const { start, end } = validateDateRange(startDate, endDate);
+
+    // First, check if user is admin
+    const isAdmin = await isUserAdmin(userData.id);
+
+    let allowedDocumentIds = null;
+    let allowedWorkflowIds = null;
+    let allowedProcessIds = null;
+
+    if (!isAdmin) {
+      // Only fetch access-controlled data if user is not admin
+      const { userRoles, userRoleIds, userDepartmentIds } =
+        await getUserRolesAndDepartments(userData.id);
+      allowedWorkflowIds = await getAllowedWorkflowIds(
+        userData.id,
+        userRoleIds,
+        userDepartmentIds
+      );
+
+      // Check if user has access to this workflow
+      if (!allowedWorkflowIds.includes(workflowId)) {
+        return res.status(403).json({
+          success: false,
+          error: {
+            message: "Access denied",
+            details: "You don't have access to this workflow",
+            code: "WORKFLOW_ACCESS_DENIED",
+          },
+        });
+      }
+
+      allowedDocumentIds = await getAllowedDocumentIds(userData.id, userRoles);
+      allowedProcessIds = await getAllowedProcessIds(
+        userData.id,
+        userRoleIds,
+        userDepartmentIds,
+        [workflowId]
+      );
+    }
 
     const workflow = await prisma.workflow.findUnique({
       where: { id: workflowId },
@@ -864,7 +830,7 @@ export const getWorkflowAnalysis = async (req, res) => {
       rejectedDocuments,
       replacedDocuments,
     ] = await Promise.all([
-      // Step completion times
+      // Step completion times (only from accessible processes unless admin)
       Promise.all(
         workflow.steps.map(async (step) => {
           const stepInstances = await prisma.processStepInstance.findMany({
@@ -873,6 +839,9 @@ export const getWorkflowAnalysis = async (req, res) => {
               status: "APPROVED",
               createdAt: { gte: start, lte: end },
               decisionAt: { not: null },
+              ...(!isAdmin && allowedProcessIds
+                ? { process: { id: { in: allowedProcessIds } } }
+                : {}),
             },
             select: {
               createdAt: true,
@@ -903,7 +872,7 @@ export const getWorkflowAnalysis = async (req, res) => {
           };
         })
       ),
-      // Pending processes by step
+      // Pending processes by step (only accessible ones unless admin)
       Promise.all(
         workflow.steps.map(async (step) => {
           const processes = await prisma.processStepInstance.findMany({
@@ -912,6 +881,9 @@ export const getWorkflowAnalysis = async (req, res) => {
               status: "IN_PROGRESS",
               process: {
                 workflowId: workflowId,
+                ...(!isAdmin && allowedProcessIds
+                  ? { id: { in: allowedProcessIds } }
+                  : {}),
                 createdAt: { gte: start, lte: end },
               },
             },
@@ -940,12 +912,15 @@ export const getWorkflowAnalysis = async (req, res) => {
           };
         })
       ),
-      // Assignee completion times
+      // Assignee completion times (only from accessible processes unless admin)
       prisma.processStepInstance
         .findMany({
           where: {
             process: {
               workflowId: workflowId,
+              ...(!isAdmin && allowedProcessIds
+                ? { id: { in: allowedProcessIds } }
+                : {}),
               createdAt: { gte: start, lte: end },
             },
             status: "APPROVED",
@@ -1002,11 +977,14 @@ export const getWorkflowAnalysis = async (req, res) => {
             }
           );
         }),
-      // Pending processes
+      // Pending processes (only accessible ones unless admin)
       prisma.processInstance
         .findMany({
           where: {
             workflowId: workflowId,
+            ...(!isAdmin && allowedProcessIds
+              ? { id: { in: allowedProcessIds } }
+              : {}),
             status: "IN_PROGRESS",
             createdAt: { gte: start, lte: end },
           },
@@ -1025,11 +1003,16 @@ export const getWorkflowAnalysis = async (req, res) => {
             initiatorUsername: p.initiator.username,
           }))
         ),
-      // Queries
+      // Queries (only from accessible processes unless admin)
       prisma.processQA
         .findMany({
           where: {
-            process: { workflowId: workflowId },
+            process: {
+              workflowId: workflowId,
+              ...(!isAdmin && allowedProcessIds
+                ? { id: { in: allowedProcessIds } }
+                : {}),
+            },
             createdAt: { gte: start, lte: end },
           },
           include: {
@@ -1056,12 +1039,20 @@ export const getWorkflowAnalysis = async (req, res) => {
             details: formatted,
           };
         }),
-      // Signed documents
+      // Signed documents (only accessible ones unless admin)
       prisma.documentSignature
         .findMany({
           where: {
             processDocument: {
-              process: { workflowId: workflowId },
+              process: {
+                workflowId: workflowId,
+                ...(!isAdmin && allowedProcessIds
+                  ? { id: { in: allowedProcessIds } }
+                  : {}),
+              },
+              ...(!isAdmin && allowedDocumentIds
+                ? { document: { id: { in: allowedDocumentIds } } }
+                : {}),
             },
             signedAt: { gte: start, lte: end },
           },
@@ -1085,12 +1076,20 @@ export const getWorkflowAnalysis = async (req, res) => {
             signedAt: s.signedAt.toISOString(),
           }))
         ),
-      // Rejected documents
+      // Rejected documents (only accessible ones unless admin)
       prisma.documentRejection
         .findMany({
           where: {
             processDocument: {
-              process: { workflowId: workflowId },
+              process: {
+                workflowId: workflowId,
+                ...(!isAdmin && allowedProcessIds
+                  ? { id: { in: allowedProcessIds } }
+                  : {}),
+              },
+              ...(!isAdmin && allowedDocumentIds
+                ? { document: { id: { in: allowedDocumentIds } } }
+                : {}),
             },
             rejectedAt: { gte: start, lte: end },
           },
@@ -1114,13 +1113,21 @@ export const getWorkflowAnalysis = async (req, res) => {
             rejectedAt: r.rejectedAt.toISOString(),
           }))
         ),
-      // Replaced documents
+      // Replaced documents (only accessible ones unless admin)
       prisma.documentHistory
         .findMany({
           where: {
-            process: { workflowId: workflowId },
+            process: {
+              workflowId: workflowId,
+              ...(!isAdmin && allowedProcessIds
+                ? { id: { in: allowedProcessIds } }
+                : {}),
+            },
             actionType: "REPLACED",
             createdAt: { gte: start, lte: end },
+            ...(!isAdmin && allowedDocumentIds
+              ? { document: { id: { in: allowedDocumentIds } } }
+              : {}),
           },
           include: {
             document: { select: { id: true, name: true, path: true } },
