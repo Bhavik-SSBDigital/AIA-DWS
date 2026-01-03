@@ -73,7 +73,7 @@ const ViewProcess = () => {
   const processDetails = [
     { label: 'Process ID', value: process?.processId },
     { label: 'Process Name', value: process?.processName || 'N/A' },
-    { label: 'Process SOP', value: process?.issueNo || 'N/A' },
+    { label: 'Process Version', value: process?.issueNo || 'N/A' },
     { label: 'Description', value: process?.description || 'N/A' },
     { label: 'Initiator Name', value: process?.initiatorName || 'Unknown' },
     {
@@ -92,10 +92,10 @@ const ViewProcess = () => {
       label: 'Created At',
       value: new Date(process?.createdAt).toLocaleString(),
     },
-    {
-      label: 'Arrived At',
-      value: new Date(process?.arrivedAt).toLocaleString(),
-    },
+    // {
+    //   label: 'Arrived At',
+    //   value: new Date(process?.arrivedAt).toLocaleString(),
+    // },
     {
       label: 'Updated At',
       value: process?.updatedAt
@@ -401,8 +401,8 @@ const ViewProcess = () => {
           <table className="min-w-full border border-gray-300">
             <thead className="bg-gray-100">
               <tr>
-                <th className="py-2 px-4 border">System SOP</th>
-                <th className="py-2 px-4 border">Manual SOP</th>
+                <th className="py-2 px-4 border">System Process Version</th>
+                <th className="py-2 px-4 border">Manual Process Version</th>
                 {Array.from({ length: maxDocs }).map((_, idx) => (
                   <th key={idx} className="py-2 px-4 border">
                     Document {idx + 1}

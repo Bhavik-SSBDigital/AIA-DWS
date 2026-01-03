@@ -215,10 +215,10 @@ export default function Query({
                   </td>
                 </tr>
               ))}
-            </tbody>
+            </tbody>\
           </table>
         </div>
-        <div>
+        {/* <div>
           <h3 className="text-lg font-semibold mb-2">Document Changes</h3>
           {changeFields.map((field, index) => {
             const isReplacement = watch(
@@ -310,7 +310,7 @@ export default function Query({
             }
             text={'Add Change'}
           />
-        </div>
+        </div> */}
         <div className="flex gap-1">
           <CustomButton
             className={'w-full'}

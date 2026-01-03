@@ -277,9 +277,7 @@ export default function ReOpenProcessModal({
                 Reason for Superseding
               </label>
               <input
-                {...register(`supersededDocuments.${index}.reasonOfSupersed`, {
-                  required: 'Reason is required',
-                })}
+                {...register(`supersededDocuments.${index}.reasonOfSupersed`)}
                 className="w-full border p-2 rounded"
                 placeholder="Enter reason"
               />
@@ -305,9 +303,7 @@ export default function ReOpenProcessModal({
                 Part Number
               </label>
               <input
-                {...register(`supersededDocuments.${index}.fileDescription`, {
-                  required: 'Part Number is required',
-                })}
+                {...register(`supersededDocuments.${index}.fileDescription`)}
                 className="w-full border p-2 rounded"
                 placeholder="Enter part number"
               />
@@ -319,9 +315,7 @@ export default function ReOpenProcessModal({
                 Document Issue / Revision No
               </label>
               <input
-                {...register(`supersededDocuments.${index}.issueNo`, {
-                  required: 'Issue/Revision no is required',
-                })}
+                {...register(`supersededDocuments.${index}.issueNo`)}
                 className="w-full border p-2 rounded"
                 placeholder="Enter issue / revision"
               />
