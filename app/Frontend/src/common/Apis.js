@@ -223,6 +223,14 @@ export const SignDocument = async (
     remarks,
   });
 };
+export const SignDocumentAll = async (processId,
+  processStepInstanceId, documents) => {
+  return apiClient.post('/signDocuments', {
+    processId,
+    processStepInstanceId,
+    documents
+  });
+};
 export const SignRevoke = async (processId, documentId) => {
   return apiClient.post('/revokeSign', {
     processId,

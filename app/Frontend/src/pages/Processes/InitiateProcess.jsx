@@ -22,7 +22,7 @@ import CustomCard from '../../CustomComponents/CustomCard';
 import Title from '../../CustomComponents/Title';
 
 export default function InitiateProcess() {
-  console.log("called")
+  console.log('called');
   const navigate = useNavigate();
   const [workflowData, setWorkflowData] = useState([]);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
@@ -84,7 +84,7 @@ export default function InitiateProcess() {
   };
 
   useEffect(() => {
-    console.log("called")
+    console.log('called');
     const getWorkflowsData = async () => {
       try {
         const response = await GetWorkflows();
@@ -266,7 +266,7 @@ export default function InitiateProcess() {
                 )}
               </div>
 
-              <div>
+              {/* <div>
                 <label className="block text-sm font-medium text-gray-700">
                   Enter SOP Issue / Revision Number
                 </label>
@@ -280,7 +280,7 @@ export default function InitiateProcess() {
                     {errors.issueNo.message}
                   </p>
                 )}
-              </div>
+              </div> */}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">
@@ -477,7 +477,7 @@ export default function InitiateProcess() {
 
             {/* Part Number & Description */}
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
+              {/* <div>
                 <label className="text-sm font-medium text-gray-700">
                   Document Number
                 </label>
@@ -492,7 +492,7 @@ export default function InitiateProcess() {
                   className="border border-gray-300 p-2 rounded-md w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter part number"
                 />
-              </div>
+              </div> */}
 
               <div>
                 <label className="text-sm font-medium text-gray-700">
@@ -513,7 +513,7 @@ export default function InitiateProcess() {
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-700">
-                  Issue Number / Revision Number
+                  Version Number(optional)
                 </label>
                 <input
                   type="text"
@@ -525,7 +525,7 @@ export default function InitiateProcess() {
                     }))
                   }
                   className="border border-gray-300 p-2 rounded-md w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter Issue Number / Revision Number"
+                  placeholder="Enter Version Number"
                 />
               </div>
               {fileDetails.preApproved ? (

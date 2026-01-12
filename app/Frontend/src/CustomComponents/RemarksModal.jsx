@@ -9,6 +9,7 @@ const RemarksModal = ({
   onClose,
   loading,
   showPassField,
+  remarksOptional = false,
 }) => {
   const [remark, setRemark] = useState('');
   const [dscPass, setDscPass] = useState('');
@@ -22,6 +23,10 @@ const RemarksModal = ({
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (remarksOptional) {
+      onSubmit(remark.trim());
+      return;
+    }
 
     if (!remark.trim()) return;
     if (showPassField && !dscPass.trim()) return;

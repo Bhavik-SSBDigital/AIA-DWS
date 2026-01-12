@@ -10,6 +10,7 @@ import {
   RejectDocument,
   RevokeRejection,
   SignDocument,
+  SignDocumentAll,
   SignRevoke,
   ViewDocument,
 } from '../../common/Apis';
@@ -197,6 +198,59 @@ const ViewProcess = () => {
     setActionsLoading(false);
   };
 
+  const [signAllModalOpen, setSignAllModalOpen] = useState({
+    open: false,
+    withRemarks: false,
+    listOfDocuments: [],
+  });
+
+  const openModelSignAllDoec = async () => {
+    setSignAllModalOpen({
+      open: true,
+      withRemarks: false,
+      processStepInstanceId: process?.processStepInstanceId,
+      processId: process?.processId,
+      // filter only  active and pdf map details processStepInstanceId,documentId,processId,name, remarks
+      listOfDocuments: process.documents
+        .filter((doc) => !doc.rejectionDetails && doc.type === 'pdf')
+        .map((doc) => ({
+          documentId: doc.id,
+
+          name: doc.name,
+          remarks: '',
+        })),
+    });
+  };
+  const handleSignAllDocuments = async () => {
+    setActionsLoading(true);
+    try {
+      const res = await SignDocumentAll(
+        process?.processId,
+        process?.processStepInstanceId,
+        signAllModalOpen.listOfDocuments.map((doc) => {
+          const { remarks, name, ...rest } = doc;
+          return signAllModalOpen.withRemarks ? { ...rest, remarks } : rest;
+        }),
+      );
+      toast.success(res?.data?.message);
+      setRemarksModalOpen({ id: null, open: false });
+      setProcess((prev) => ({
+        ...prev,
+        documents: prev.documents.map((doc) =>
+          doc.id === remarksModalOpen.id
+            ? {
+                ...doc,
+                signedBy: [...doc?.signedBy, { signedBy: username, remarks }],
+              }
+            : doc,
+        ),
+      }));
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error?.message);
+    } finally {
+      setActionsLoading(false);
+    }
+  };
   const handleViewAllSelectedFiles = async () => {
     setActionsLoading(true);
     try {
@@ -223,7 +277,7 @@ const ViewProcess = () => {
     }
   };
 
-  const handleSignDocument = async (remarks) => {
+  const handleSignDocument = async (remarks = '') => {
     setActionsLoading(true);
     try {
       const res = await SignDocument(
@@ -402,7 +456,7 @@ const ViewProcess = () => {
             <thead className="bg-gray-100">
               <tr>
                 <th className="py-2 px-4 border">System Process Version</th>
-                <th className="py-2 px-4 border">Manual Process Version</th>
+                {/* <th className="py-2 px-4 border">Manual Process Version</th> */}
                 {Array.from({ length: maxDocs }).map((_, idx) => (
                   <th key={idx} className="py-2 px-4 border">
                     Document {idx + 1}
@@ -423,9 +477,9 @@ const ViewProcess = () => {
                       {cycle.reopenCycle}
                     </td>
 
-                    <td className="py-2 px-4 border font-medium">
+                    {/* <td className="py-2 px-4 border font-medium">
                       {cycle.SOPIssueNo || '--'}
-                    </td>
+                    </td> */}
 
                     {Array.from({ length: maxDocs }).map((_, idx) => {
                       const doc = cycle.documents[idx];
@@ -455,7 +509,7 @@ const ViewProcess = () => {
                                 </span>
 
                                 <span className="text-sm text-blue-600 font-medium">
-                                  Issue No: {doc?.issueNo || '--'}
+                                  Version No: {doc?.issueNo || '--'}
                                 </span>
                               </div>
 
@@ -664,6 +718,12 @@ const ViewProcess = () => {
             </span>
             <div className="flex-grow border-t border-green-600"></div>
           </div>
+          <CustomButton
+            // disabled={selectedDocs.length === 0}
+            className="ml-auto mb-4 block"
+            text={`Sign All Documents`}
+            click={openModelSignAllDoec}
+          />
 
           {/* View All Selected Button */}
           <CustomButton
@@ -1549,13 +1609,112 @@ const ViewProcess = () => {
           documents={process.documents}
         />
       </CustomModal>
+      <CustomModal
+        isOpen={signAllModalOpen.open}
+        onClose={() => {
+          setSignAllModalOpen({
+            open: false,
+            withRemarks: false,
+            listOfDocuments: [],
+          });
+        }}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+      >
+        <div>
+          <h2 className="text-lg font-semibold mb-4">Sign All Documents</h2>
+          <p className="mb-4">Are you sure you want to sign all documents?</p>
+          {/* radiobuton for with remarks or without remarks */}
+          <div className="mb-4">
+            <label className="inline-flex items-center">
+              <input
+                type="checkbox"
+                name="signWithRemarks"
+                checked={signAllModalOpen.withRemarks}
+                onChange={() => {
+                  setSignAllModalOpen({
+                    ...signAllModalOpen,
+                    withRemarks: !signAllModalOpen.withRemarks,
+                  });
+                }}
+              />
+              <span className="ml-2">With Remarks</span>
+            </label>
+          </div>
+
+          {signAllModalOpen.withRemarks && (
+            <div className="mb-4">
+              <table className="w-full border">
+                <thead>
+                  <tr className="bg-gray-100">
+                    <th className="border px-3 py-2 text-left">
+                      Document Name
+                    </th>
+                    <th className="border px-3 py-2 text-left">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {signAllModalOpen.listOfDocuments.map((doc, index) => (
+                    <tr key={index}>
+                      <td className="border px-3 py-2">{doc.name}</td>
+                      <td className="border px-3 py-2">
+                        <input
+                          type="text"
+                          value={doc.remarks || ''}
+                          onChange={(e) => {
+                            const updatedDocuments = [
+                              ...signAllModalOpen.listOfDocuments,
+                            ];
+                            updatedDocuments[index].remarks = e.target.value;
+                            setSignAllModalOpen({
+                              ...signAllModalOpen,
+                              listOfDocuments: updatedDocuments,
+                            });
+                          }}
+                          className="w-full p-1 border rounded"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="flex justify-end space-x-2">
+            <CustomButton
+              variant="secondary"
+              text={'Cancel'}
+              click={() => {
+                setSignAllModalOpen({
+                  open: false,
+                  withRemarks: false,
+                  listOfDocuments: [],
+                });
+              }}
+            />
+            <CustomButton
+              variant="primary"
+              text={'Confirm'}
+              click={() => {
+                handleSignAllDocuments();
+                setSignAllModalOpen({
+                  open: false,
+                  withRemarks: false,
+                  listOfDocuments: [],
+                });
+              }}
+            />
+          </div>
+        </div>
+      </CustomModal>
       <RemarksModal
         open={remarksModalOpen.open === 'sign'}
-        title="Sign Remarks"
+        title="Sign Remarks (optional)"
         onClose={() => setRemarksModalOpen({ id: null, open: false })}
         loading={actionsLoading}
         onSubmit={(remarks) => handleSignDocument(remarks)}
         showPassField={false}
+        remarksOptional={true}
       />
       <RemarksModal
         open={remarksModalOpen.open === 'reject'}
@@ -1563,6 +1722,7 @@ const ViewProcess = () => {
         onClose={() => setRemarksModalOpen({ id: null, open: false })}
         loading={actionsLoading}
         onSubmit={(remarks) => handleRejectDocument(remarks)}
+        // remarksOptional={true}
       />
 
       {/* Delete Confirmation Modal */}
