@@ -130,6 +130,9 @@ export const deleteRole = async (id) => {
 export const CreateWorkflow = async (data) => {
   return apiClient.post('/workflows/addWorkflow', data);
 };
+export const checkDuplicateWorkflow = async (data) => {
+  return apiClient.post('/workflows/checkIfDuplicateWorkflow', data);
+};
 export const EditWorkflow = async (id, data) => {
   return apiClient.put(`/workflows/editWorkflow/${id}`, data);
 };
