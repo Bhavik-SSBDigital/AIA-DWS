@@ -9,6 +9,7 @@ import RolesList from './pages/Roles/List';
 import WorkList from './pages/Processes/List';
 import DepartmentList from './pages/Department/List';
 import NewBranch from './pages/Branches/NewBranch';
+import TagsMasterPage from './master/tags';
 import NewUser from './pages/Users/NewUser';
 import NewRole from './pages/Roles/NewRole';
 import NewDepartment from './pages/Department/NewDepartment';
@@ -202,6 +203,15 @@ function App() {
             <DefaultLayout>
               <PageTitle title="Create Branch" />
               <NewBranch />
+            </DefaultLayout>
+          }
+        />
+        <Route
+          path="/master/tags"
+          element={
+            <DefaultLayout>
+              <PageTitle title="Tags" />
+              <TagsMasterPage />
             </DefaultLayout>
           }
         />

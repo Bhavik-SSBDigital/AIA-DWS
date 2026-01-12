@@ -13,7 +13,7 @@ import {
 import { upload } from '../../components/drop-file-input/FileUploadDownload';
 import Show from '../workflows/Show';
 import { toast } from 'react-toastify';
-import { IconInfoCircle } from '@tabler/icons-react';
+import { IconInfoCircle, IconX } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import CustomButton from '../../CustomComponents/CustomButton';
 import TopLoader from '../../common/Loader/TopLoader';
@@ -96,6 +96,45 @@ export default function InitiateProcess() {
 
     getWorkflowsData();
   }, []);
+
+  const [allTags, setAllTags] = useState([]);
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const fetchTags = async () => {
+      try {
+        const { data } = await apiClient.get('/tags');
+        setAllTags(data.map((t) => t.name.toLowerCase()));
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchTags();
+  }, []);
+
+  const addTag = (tag) => {
+    if (fileDetails.tags.includes(tag)) return;
+    setFileDetails((prev) => ({
+      ...prev,
+      tags: [...prev.tags, tag],
+    }));
+
+    setSearch('');
+    setOpen(false);
+  };
+
+  const removeTag = (tag) => {
+    setFileDetails((prev) => ({
+      ...prev,
+      tags: prev.tags.filter((t) => t !== tag),
+    }));
+  };
+
+  const filteredTags = allTags.filter(
+    (tag) =>
+      tag.includes(search.toLowerCase()) && !fileDetails.tags.includes(tag),
+  );
 
   const handleFileChange = (event) => {
     setSelectedFile(event.target.files[0]);
@@ -425,7 +464,51 @@ export default function InitiateProcess() {
             {/* Tag Input */}
             <div className="mt-4">
               <label className="text-sm font-medium text-gray-700">Tags</label>
-              <div className="flex gap-2 mt-2">
+              <div className="relative">
+                {/* Selected tags */}
+                <div
+                  className="flex flex-wrap gap-2 border rounded-lg p-2 cursor-text"
+                  onClick={() => setOpen(true)}
+                >
+                  {fileDetails.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="flex items-center gap-1 bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-sm"
+                    >
+                      {tag}
+                      <button onClick={() => removeTag(tag)}>
+                        <IconX size={14} />
+                      </button>
+                    </span>
+                  ))}
+
+                  <input
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setOpen(true);
+                    }}
+                    placeholder="Select tags..."
+                    className="flex-1 min-w-[140px] outline-none text-sm"
+                  />
+                </div>
+
+                {/* Dropdown */}
+                {open && filteredTags.length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow max-h-48 overflow-auto">
+                    {filteredTags.map((tag) => (
+                      <div
+                        key={tag}
+                        onClick={() => addTag(tag)}
+                        className="px-4 py-2 cursor-pointer hover:bg-indigo-50 text-sm"
+                      >
+                        {tag}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* <div className="flex gap-2 mt-2">
                 <input
                   type="text"
                   value={newTag}
@@ -454,8 +537,8 @@ export default function InitiateProcess() {
                 >
                   Add
                 </button>
-              </div>
-              {fileDetails.tags.length > 0 && (
+              </div> */}
+              {/* {fileDetails.tags.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-3">
                   {fileDetails.tags.map((tag, index) => (
                     <span
@@ -472,7 +555,7 @@ export default function InitiateProcess() {
                     </span>
                   ))}
                 </div>
-              )}
+              )} */}
             </div>
 
             {/* Part Number & Description */}

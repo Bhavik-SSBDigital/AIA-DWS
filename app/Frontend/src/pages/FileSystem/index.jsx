@@ -52,10 +52,13 @@ import { upload } from '../../components/drop-file-input/FileUploadDownload';
 import { Tooltip } from '@mui/material';
 import ModalWithField from '../../components/ModalWithField';
 import CustomTextField from '../../CustomComponents/CustomTextField';
+import MergePdf from './merge-pdf';
+import MergePdfComponent from './merge-pdf';
 
 export default function FileSysten() {
   // States
   const dispatch = useDispatch();
+  const [isOpenMergePdf, setIsOpenMergePdf] = useState(false);
   const [departments, setDepartments] = useState([]);
   const username = sessionStorage.getItem('username');
   const [fileType, setFileType] = useState('all');
@@ -553,6 +556,15 @@ export default function FileSysten() {
         state={'path'}
         reset={resetFilters}
       />
+      <CustomModal
+        isOpen={isOpenMergePdf}
+        onClose={() => {
+          setIsOpenMergePdf(false);
+        }}
+        className={'max-h-[95vh] fixed overflow-auto max-w-lg w-full'}
+      >
+        <MergePdfComponent />
+      </CustomModal>
       {/* Sidebar and Filter Button */}
       <div className="relative flex flex-col md:flex-row h-[calc(100vh-160px)] gap-1 mt-1">
         {/* Mobile Filter Button - Floating */}
@@ -690,6 +702,12 @@ export default function FileSysten() {
               text="Upload File"
               click={() => setUploadFileModal(true)}
               variant={'success'}
+            />
+            <CustomButton
+              text={`Merge PDF`}
+              click={() => {
+                setIsOpenMergePdf(true);
+              }}
             />
             <CustomButton
               text={'Reset Filters'}

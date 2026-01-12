@@ -522,3 +522,6 @@ export const updatePhysicalRequest = async (id, data) => {
 export const getPhysicalRequestMessages = async (id) => {
   return apiClient.get(`/getPhysicalRequestMessages/${id}`);
 };
+
+
+export default apiClient;
