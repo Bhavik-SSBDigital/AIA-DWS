@@ -531,6 +531,13 @@ model Recommendation {
   recommender      User      @relation("RecommendationRecommender", fields: [recommenderId], references: [id], onDelete: Cascade)
 }
 
+model Tag {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+
+
 model DocumentRejection {
   id                        String    @id @default(uuid())
   processDocumentId         String

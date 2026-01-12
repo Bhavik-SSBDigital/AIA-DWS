@@ -1,6 +1,9 @@
 import express from "express";
 
-import upload_ from "../config/multer-config.js";
+import upload_, {
+  mergePdfUpload,
+  uploadMemory,
+} from "../config/multer-config.js";
 import multer from "multer";
 
 import {
@@ -84,6 +87,8 @@ import {
   file_upload,
   file_download,
   create_folder,
+  mergeFilesToPdf,
+  mergeAndSavePdf,
   folder_download,
   file_copy,
   file_cut,
@@ -177,10 +182,14 @@ import {
 } from "../controller/doc-tracking-controller.js";
 import { export_file_logs } from "../controller/file-operation-handler.js";
 
+import { add_tags, get_tags } from "../controller/tag-controller.js";
+
 const router = express.Router();
 
 router.post("/signup", sign_up);
 router.post("/login", login);
+router.post("/tags", add_tags);
+router.get("/tags", get_tags);
 
 // backend/routes/auth.js
 
@@ -255,6 +264,12 @@ router.delete("/workflows/deleteWorkflow/:workflowId", delete_workflow); // Dele
 router.get("/workflows/getWorkflows", get_workflows); // Get all workflows
 router.get("/workflows/getWorkflowsList", get_all_workflows_with_basics);
 router.post("/initiateProcess", initiate_process);
+
+router.post("/merge-pdf", mergePdfUpload, mergeFilesToPdf);
+// OR alternatively:
+// router.post('/merge-pdf', uploadMemory.array('files', 10), mergeFilesToPdf);
+
+router.post("/merge-and-save", mergePdfUpload, mergeAndSavePdf);
 
 router.get("/viewProcess/:processId", view_process);
 

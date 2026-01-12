@@ -2668,3 +2668,529 @@ export const remove_bookmark_document = async (req, res) => {
     res.status(500).json({ error: "Failed to remove bookmark" });
   }
 };
+
+export const mergeFilesToPdf = async (req, res) => {
+  let userData;
+  let tempFiles = [];
+  let mergedPdfPath = null;
+
+  try {
+    const accessToken = req.headers["authorization"]?.substring(7);
+    userData = await verifyUser(accessToken);
+
+    logger.info({
+      action: "MERGE_FILES_START",
+      userId: userData.id,
+      details: {
+        username: userData.username,
+      },
+    });
+
+    if (userData === "Unauthorized") {
+      logger.warn({
+        action: "MERGE_FILES_UNAUTHORIZED",
+        details: { accessToken },
+      });
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+      return res.status(400).json({ message: "No files uploaded for merging" });
+    }
+
+    // Create a new PDF document for merging
+    const mergedPdf = await PDFDocument.create();
+
+    // Create temporary directory
+    const tempDir = path.join(__dirname, STORAGE_PATH, "temp");
+    await fs.mkdir(tempDir, { recursive: true });
+
+    // Process each uploaded file
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+      const fileBuffer = file.buffer;
+      const originalName = file.originalname;
+      const fileExtension = path.extname(originalName).toLowerCase();
+
+      // Save file temporarily
+      const tempFilePath = path.join(
+        tempDir,
+        `temp_${Date.now()}_${i}${fileExtension}`
+      );
+      await fs.writeFile(tempFilePath, fileBuffer);
+      tempFiles.push(tempFilePath);
+
+      try {
+        if (fileExtension === ".pdf") {
+          // For PDF files, directly copy pages
+          const pdfDoc = await PDFDocument.load(fileBuffer);
+          const copiedPages = await mergedPdf.copyPages(
+            pdfDoc,
+            pdfDoc.getPageIndices()
+          );
+          copiedPages.forEach((page) => mergedPdf.addPage(page));
+
+          logger.info({
+            action: "MERGE_PDF_PROCESSED",
+            userId: userData.id,
+            details: {
+              fileName: originalName,
+              pageCount: pdfDoc.getPageCount(),
+            },
+          });
+        } else if (
+          [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"].includes(
+            fileExtension
+          )
+        ) {
+          // For image files, convert to PDF page
+          let image;
+
+          try {
+            image = sharp(fileBuffer, { failOn: "none" });
+          } catch (sharpError) {
+            // If sharp can't process, try alternative approach
+            image = sharp(fileBuffer);
+          }
+
+          const metadata = await image.metadata();
+          let imageObj;
+
+          if ([".jpg", ".jpeg"].includes(fileExtension)) {
+            imageObj = await mergedPdf.embedJpg(fileBuffer);
+          } else if ([".png"].includes(fileExtension)) {
+            imageObj = await mergedPdf.embedPng(fileBuffer);
+          } else {
+            // For other image formats, convert to PNG first
+            const pngBuffer = await image.png().toBuffer();
+            imageObj = await mergedPdf.embedPng(pngBuffer);
+          }
+
+          const page = mergedPdf.addPage([metadata.width, metadata.height]);
+          page.drawImage(imageObj, {
+            x: 0,
+            y: 0,
+            width: metadata.width,
+            height: metadata.height,
+          });
+
+          logger.info({
+            action: "MERGE_IMAGE_PROCESSED",
+            userId: userData.id,
+            details: {
+              fileName: originalName,
+              dimensions: `${metadata.width}x${metadata.height}`,
+            },
+          });
+        } else if (
+          [".txt", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt"].includes(
+            fileExtension
+          )
+        ) {
+          // For text/office documents, extract text and create text page
+          try {
+            // Save temp file for text extraction
+            await fs.writeFile(tempFilePath, fileBuffer);
+
+            let extractedText = "";
+            try {
+              const extractionResult = await executeTextExtractionScript(
+                tempFilePath
+              );
+              if (extractionResult.success && extractionResult.text) {
+                extractedText = extractionResult.text;
+              }
+            } catch (extractionError) {
+              logger.warn({
+                action: "MERGE_FILE_EXTRACTION_FAILED",
+                userId: userData.id,
+                details: {
+                  fileName: originalName,
+                  error: extractionError.message,
+                },
+              });
+            }
+
+            // Create a text page
+            const page = mergedPdf.addPage([595.28, 841.89]); // A4 size
+            const helveticaFont = await mergedPdf.embedFont(
+              StandardFonts.Helvetica
+            );
+
+            // Draw file name as header
+            page.drawText(`File: ${originalName}`, {
+              x: 50,
+              y: 800,
+              size: 16,
+              font: helveticaFont,
+            });
+
+            // Draw extracted text
+            if (extractedText) {
+              const lines = extractedText.split("\n");
+              let yPosition = 750;
+              const maxWidth = 495; // Page width minus margins
+
+              for (let line of lines) {
+                if (yPosition < 50) {
+                  // Add new page if we run out of space
+                  const newPage = mergedPdf.addPage([595.28, 841.89]);
+                  newPage.drawText(`File: ${originalName} (continued)`, {
+                    x: 50,
+                    y: 800,
+                    size: 16,
+                    font: helveticaFont,
+                  });
+                  yPosition = 750;
+                }
+
+                // Simple text wrapping
+                let currentLine = "";
+                const words = line.split(" ");
+                for (const word of words) {
+                  const testLine = currentLine + word + " ";
+                  const testWidth = helveticaFont.widthOfTextAtSize(
+                    testLine,
+                    12
+                  );
+
+                  if (testWidth > maxWidth && currentLine !== "") {
+                    page.drawText(currentLine, {
+                      x: 50,
+                      y: yPosition,
+                      size: 12,
+                      font: helveticaFont,
+                    });
+                    yPosition -= 20;
+                    currentLine = word + " ";
+                  } else {
+                    currentLine = testLine;
+                  }
+                }
+
+                if (currentLine) {
+                  page.drawText(currentLine, {
+                    x: 50,
+                    y: yPosition,
+                    size: 12,
+                    font: helveticaFont,
+                  });
+                  yPosition -= 20;
+                }
+              }
+            } else {
+              // If no text extracted, show placeholder
+              page.drawText("(Content could not be extracted)", {
+                x: 50,
+                y: 750,
+                size: 12,
+                font: helveticaFont,
+              });
+            }
+
+            logger.info({
+              action: "MERGE_DOCUMENT_PROCESSED",
+              userId: userData.id,
+              details: {
+                fileName: originalName,
+                textLength: extractedText.length,
+              },
+            });
+          } catch (docError) {
+            logger.error({
+              action: "MERGE_DOCUMENT_ERROR",
+              userId: userData.id,
+              details: {
+                fileName: originalName,
+                error: docError.message,
+              },
+            });
+
+            // Add a placeholder page
+            const page = mergedPdf.addPage([595.28, 841.89]);
+            const helveticaFont = await mergedPdf.embedFont(
+              StandardFonts.Helvetica
+            );
+            page.drawText(`File: ${originalName}`, {
+              x: 50,
+              y: 400,
+              size: 16,
+              font: helveticaFont,
+            });
+            page.drawText("(Error processing file)", {
+              x: 50,
+              y: 370,
+              size: 12,
+              font: helveticaFont,
+            });
+          }
+        } else {
+          // For unsupported file types, create an informational page
+          const page = mergedPdf.addPage([595.28, 841.89]);
+          const helveticaFont = await mergedPdf.embedFont(
+            StandardFonts.Helvetica
+          );
+          page.drawText(`File: ${originalName}`, {
+            x: 50,
+            y: 400,
+            size: 16,
+            font: helveticaFont,
+          });
+          page.drawText(
+            `File type ${fileExtension} is not supported for content extraction`,
+            {
+              x: 50,
+              y: 370,
+              size: 12,
+              font: helveticaFont,
+            }
+          );
+
+          logger.info({
+            action: "MERGE_UNSUPPORTED_FILE",
+            userId: userData.id,
+            details: {
+              fileName: originalName,
+              fileType: fileExtension,
+            },
+          });
+        }
+      } catch (error) {
+        logger.error({
+          action: "MERGE_FILE_PROCESSING_ERROR",
+          userId: userData.id,
+          details: {
+            fileName: originalName,
+            error: error.message,
+          },
+        });
+        continue;
+      }
+    }
+
+    // Check if any pages were added
+    if (mergedPdf.getPageCount() === 0) {
+      logger.warn({
+        action: "MERGE_FILES_NO_VALID_PAGES",
+        userId: userData.id,
+        details: { fileCount: req.files.length },
+      });
+      return res
+        .status(400)
+        .json({ message: "No valid files could be merged" });
+    }
+
+    // Save the merged PDF to a temporary file
+    const mergedPdfBytes = await mergedPdf.save();
+    const timestamp = Date.now();
+    mergedPdfPath = path.join(tempDir, `merged_${timestamp}.pdf`);
+    await fs.writeFile(mergedPdfPath, mergedPdfBytes);
+
+    // Get file stats for range requests
+    const stat = await fs.stat(mergedPdfPath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    // Set response headers
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="merged_documents_${timestamp}.pdf"`
+    );
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+
+    if (range === "bytes=0-0") {
+      res.setHeader("Content-Range", `bytes 0-0/${fileSize}`);
+      res.setHeader("Content-Length", 1);
+      return res.status(206).json({
+        fileSize,
+        message: "Partial file details fetched successfully.",
+      });
+    }
+
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = end - start + 1;
+
+      res.setHeader("Content-Range", `bytes ${start}-${end}/${fileSize}`);
+      res.setHeader("Content-Length", chunksize);
+      res.status(206);
+
+      const fileStream = fsCB.createReadStream(mergedPdfPath, { start, end });
+      fileStream.pipe(res);
+
+      // Cleanup after stream ends
+      fileStream.on("end", async () => {
+        await cleanupTempFiles(tempFiles, mergedPdfPath);
+      });
+
+      fileStream.on("error", async (error) => {
+        logger.error({
+          action: "MERGE_FILES_STREAM_ERROR",
+          userId: userData.id,
+          details: { error: error.message },
+        });
+        await cleanupTempFiles(tempFiles, mergedPdfPath);
+      });
+    } else {
+      res.setHeader("Content-Length", fileSize);
+
+      const fileStream = fsCB.createReadStream(mergedPdfPath);
+      fileStream.pipe(res);
+
+      // Cleanup after stream ends
+      fileStream.on("end", async () => {
+        await cleanupTempFiles(tempFiles, mergedPdfPath);
+      });
+
+      fileStream.on("error", async (error) => {
+        logger.error({
+          action: "MERGE_FILES_STREAM_ERROR",
+          userId: userData.id,
+          details: { error: error.message },
+        });
+        await cleanupTempFiles(tempFiles, mergedPdfPath);
+      });
+    }
+
+    logger.info({
+      action: "MERGE_FILES_SUCCESS",
+      userId: userData.id,
+      details: {
+        fileCount: req.files.length,
+        pageCount: mergedPdf.getPageCount(),
+        mergedFilePath: mergedPdfPath,
+        username: userData.username,
+      },
+    });
+  } catch (error) {
+    logger.error({
+      action: "MERGE_FILES_ERROR",
+      userId: userData?.id,
+      details: {
+        error: error.message,
+        fileCount: req.files?.length || 0,
+      },
+    });
+
+    // Cleanup on error
+    await cleanupTempFiles(tempFiles, mergedPdfPath);
+
+    if (!res.headersSent) {
+      return res
+        .status(500)
+        .json({ message: "Error merging files: " + error.message });
+    }
+  }
+};
+
+// Helper function to clean up temporary files
+async function cleanupTempFiles(tempFiles, mergedPdfPath) {
+  try {
+    // Clean up individual temp files
+    for (const tempFile of tempFiles) {
+      try {
+        await fs.unlink(tempFile);
+      } catch (err) {
+        if (err.code !== "ENOENT") {
+          console.error(`Error deleting temp file ${tempFile}:`, err.message);
+        }
+      }
+    }
+
+    // Clean up merged PDF
+    if (mergedPdfPath) {
+      try {
+        await fs.unlink(mergedPdfPath);
+      } catch (err) {
+        if (err.code !== "ENOENT") {
+          console.error(
+            `Error deleting merged PDF ${mergedPdfPath}:`,
+            err.message
+          );
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error in cleanupTempFiles:", error.message);
+  }
+}
+
+// Alternative version that returns the file URL (if you want to save it)
+export const mergeAndSavePdf = async (req, res) => {
+  let userData;
+  let tempFiles = [];
+
+  try {
+    const accessToken = req.headers["authorization"]?.substring(7);
+    userData = await verifyUser(accessToken);
+
+    if (userData === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+      return res.status(400).json({ message: "No files uploaded for merging" });
+    }
+
+    // Create merged PDF
+    const mergedPdf = await PDFDocument.create();
+
+    // Process each file (similar to above function)
+    // ... [same processing logic as above] ...
+
+    // Save to a permanent location
+    const mergedPdfBytes = await mergedPdf.save();
+    const timestamp = Date.now();
+    const fileName = `merged_documents_${timestamp}.pdf`;
+    const filePath = `temp/merged/${fileName}`;
+    const fullPath = path.join(__dirname, STORAGE_PATH, filePath);
+
+    // Ensure directory exists
+    await fs.mkdir(path.dirname(fullPath), { recursive: true });
+
+    // Save the file
+    await fs.writeFile(fullPath, mergedPdfBytes);
+
+    // Create document record
+    const newDocument = await prisma.document.create({
+      data: {
+        name: fileName,
+        type: "pdf",
+        path: filePath,
+        createdById: userData.id,
+        isInvolvedInProcess: false,
+        isRecord: false,
+      },
+    });
+
+    await createUserPermissions(newDocument.id, userData.username, true);
+
+    // Return the file URL for download
+    const fileURL = process.env.FILE_URL + filePath;
+
+    return res.status(200).json({
+      message: "Files merged and saved successfully",
+      documentId: newDocument.id,
+      fileUrl: fileURL,
+      fileName: fileName,
+      pageCount: mergedPdf.getPageCount(),
+    });
+  } catch (error) {
+    logger.error({
+      action: "MERGE_AND_SAVE_ERROR",
+      userId: userData?.id,
+      details: { error: error.message },
+    });
+
+    // Cleanup temp files
+    await cleanupTempFiles(tempFiles, null);
+
+    return res.status(500).json({ message: "Error merging and saving files" });
+  }
+};

@@ -17,9 +17,9 @@ const prisma = new PrismaClient();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Configure Multer storage
+// Configure Multer storage for existing functionality
 // Modify your storage configuration to not rely on req.body directly
-const storage = multer.diskStorage({
+const diskStorage = multer.diskStorage({
   destination: async function (req, file, cb) {
     // Get purpose from file.fieldname (since we're using fields)
 
@@ -117,9 +117,9 @@ const storage = multer.diskStorage({
   },
 });
 
-// Initialize Multer with field parsing
+// Initialize Multer with field parsing for existing functionality
 const upload = multer({
-  storage,
+  storage: diskStorage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const supportedExtensions = [
@@ -147,6 +147,69 @@ const upload = multer({
   },
 });
 
-// Middleware to parse form fields before file upload
+// ================== NEW CONFIGURATION FOR PDF MERGING ==================
 
-export default upload;
+// Configure multer for memory storage (no disk writes for uploaded files)
+const memoryStorage = multer.memoryStorage();
+
+// Separate upload configuration for PDF merging
+const uploadMemory = multer({
+  storage: memoryStorage,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit per file
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept common file types that can be converted to PDF
+    const supportedExtensions = [
+      // PDF files
+      ".pdf",
+      // Image files
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".gif",
+      ".bmp",
+      ".tiff",
+      ".tif",
+      ".webp",
+      // Office documents
+      ".doc",
+      ".docx",
+      ".docm",
+      ".dot",
+      ".dotx",
+      ".xls",
+      ".xlsx",
+      ".xlsm",
+      ".xlt",
+      ".xltx",
+      ".ppt",
+      ".pptx",
+      ".pptm",
+      ".pot",
+      ".potx",
+      // Text files
+      ".txt",
+      ".rtf",
+      ".md",
+      // Others
+      ".html",
+      ".htm",
+    ];
+
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (supportedExtensions.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Unsupported file type for merging: ${ext}`), false);
+    }
+  },
+});
+
+// ================== EXPORT BOTH CONFIGURATIONS ==================
+
+export default upload; // Existing upload for disk storage
+export { uploadMemory }; // New upload for memory storage
+
+// You can also export a pre-configured middleware for merge-pdf if needed
+export const mergePdfUpload = uploadMemory.array("files", 10); // max 10 files
