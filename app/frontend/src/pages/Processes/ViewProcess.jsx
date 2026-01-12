@@ -233,11 +233,11 @@ const ViewProcess = () => {
         }),
       );
       toast.success(res?.data?.message);
-      setRemarksModalOpen({ id: null, open: false });
+
       setProcess((prev) => ({
         ...prev,
         documents: prev.documents.map((doc) =>
-          doc.id === remarksModalOpen.id
+          signAllModalOpen.listOfDocuments.some((y) => y.documentId === doc.id)
             ? {
                 ...doc,
                 signedBy: [...doc?.signedBy, { signedBy: username, remarks }],
@@ -245,6 +245,11 @@ const ViewProcess = () => {
             : doc,
         ),
       }));
+      setSignAllModalOpen({
+        open: false,
+        withRemarks: false,
+        listOfDocuments: [],
+      });
     } catch (error) {
       toast.error(error?.response?.data?.message || error?.message);
     } finally {
@@ -444,7 +449,7 @@ const ViewProcess = () => {
 
     // Maximum number of documents in any cycle
     const maxDocs = Math.max(...cycles?.map((cycle) => cycle.documents.length));
-
+    if (cycles?.length === 0) return null;
     return (
       <CustomCard className={'mt-2'}>
         <h2 className="text-xl font-semibold mb-4">
@@ -663,7 +668,7 @@ const ViewProcess = () => {
           />
           <CustomButton
             variant={'secondary'}
-            text={'Query'}
+            text={'Reject'}
             className={'min-w-[150px]'}
             click={() => setOpenModal('query')}
             disabled={actionsLoading || isCompleted || disableActions}
@@ -880,7 +885,12 @@ const ViewProcess = () => {
                         })
                       }
                       disabled={
-                        actionsLoading || !isCompleted || disableActions
+                        actionsLoading ||
+                        doc?.signedBy?.length < 1 ||
+                        // doc?.type?.toUpperCase() !== 'PDF' ||
+                        doc?.rejectionDetails ||
+                        !isCompleted ||
+                        disableActions
                       }
                       title="Delete"
                       text={<IconTrash size={18} className="text-white" />}
@@ -1695,8 +1705,8 @@ const ViewProcess = () => {
             <CustomButton
               variant="primary"
               text={'Confirm'}
-              click={() => {
-                handleSignAllDocuments();
+              click={async () => {
+                await handleSignAllDocuments();
                 setSignAllModalOpen({
                   open: false,
                   withRemarks: false,
