@@ -307,6 +307,265 @@ export const sign_document = async (req, res, next) => {
   }
 };
 
+export const sign_documents = async (req, res, next) => {
+  try {
+    const accessToken = req.headers["authorization"].substring(7);
+    const userData = await verifyUser(accessToken);
+    if (userData === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    // Get user's signature image
+    const signaturePic = await prisma.user.findUnique({
+      where: { id: userData.id },
+      select: { signaturePicFileName: true },
+    });
+    const eSignFileName = signaturePic?.signaturePicFileName;
+
+    if (!eSignFileName) {
+      return res
+        .status(400)
+        .json({ message: "Please upload pic of your signature first" });
+    }
+
+    const imagePath = path.join(
+      __dirname,
+      envVariables.SIGNATURE_FOLDER_PATH,
+      eSignFileName
+    );
+    try {
+      await fs.access(imagePath);
+    } catch (error) {
+      return res
+        .status(400)
+        .json({ message: "Couldn't find your signature image" });
+    }
+
+    // Convert signature image to JPEG if needed
+    const convertToJpeg = async (inputPath) => {
+      const metadata = await sharp(inputPath).metadata();
+      if (metadata.format === "jpeg") return inputPath;
+      const outputFilePath = path.join(
+        __dirname,
+        envVariables.SIGNATURE_FOLDER_PATH,
+        `${userData.username.toLowerCase()}.jpeg`
+      );
+      await sharp(inputPath).jpeg().toFile(outputFilePath);
+      return outputFilePath;
+    };
+
+    const jpegImagePath = await convertToJpeg(imagePath);
+
+    // Get user's DSC file if exists
+    const user = await prisma.user.findUnique({
+      where: { username: userData.username },
+      select: { dscFileName: true },
+    });
+
+    const dscPath = user.dscFileName
+      ? path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName)
+      : undefined;
+
+    // Extract array of documents from request body
+    const { documents, processId, passphrase, p12password } = req.body;
+
+    if (!Array.isArray(documents) || documents.length === 0) {
+      return res.status(400).json({ message: "No documents provided" });
+    }
+
+    const process = await prisma.processInstance.findUnique({
+      where: { id: processId },
+    });
+
+    if (!process) {
+      return res.status(404).json({ message: "Process not found" });
+    }
+
+    const currentStep = await prisma.workflowStep.findUnique({
+      where: { id: process.currentStepId },
+    });
+
+    // Prepare Python paths (used in default signing)
+    const pythonScriptPath = path.join(
+      __dirname,
+      "../../support/getFileSpace.py"
+    );
+    const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
+
+    const results = [];
+    const errors = [];
+
+    // Process each document
+    for (const doc of documents) {
+      try {
+        const { documentId, processStepInstanceId, remarks = "N/A" } = doc;
+
+        // Find the document
+        const document = await prisma.document.findUnique({
+          where: { id: documentId },
+        });
+
+        if (!document) {
+          errors.push({
+            documentId,
+            error: "Document not found",
+            success: false,
+          });
+          continue;
+        }
+
+        // Check if document is associated with the process
+        const processDocument = await prisma.processDocument.findFirst({
+          where: { processId, documentId },
+        });
+
+        if (!processDocument) {
+          errors.push({
+            documentId,
+            error: "Document not found in process",
+            success: false,
+          });
+          continue;
+        }
+
+        // Read the PDF document
+        const documentPath = document.path;
+        const existingPdfBytes = await fs.readFile(
+          path.join(__dirname, "../../../../", "storage", documentPath)
+        );
+        const pdfDoc = await PDFDocument.load(existingPdfBytes);
+        const pages = pdfDoc.getPages();
+        const lastPageIndex = pages.length - 1;
+        const lastPage = pages[lastPageIndex];
+        const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+        // Get coordinates for signing
+        const coordinates =
+          await get_sign_coordinates_for_specific_step_in_process(
+            documentId,
+            currentStep?.id
+          );
+
+        if (coordinates.length > 0) {
+          // Sign at predefined coordinates
+          await print_signature_at_coordinates(
+            pdfDoc,
+            coordinates,
+            jpegImagePath,
+            userData.username,
+            remarks,
+            formatDate(Date.now()),
+            helveticaFont,
+            path.join(__dirname, "../../../../", "storage", documentPath),
+            documentId,
+            userData,
+            dscPath,
+            p12password
+          );
+        } else {
+          // Sign at default position (end of document)
+          const signatureCoordinates =
+            await print_signature_after_content_on_the_last_page(
+              pdfDoc,
+              lastPage,
+              documentPath,
+              jpegImagePath,
+              userData.username,
+              formatDate(Date.now()),
+              remarks,
+              helveticaFont,
+              pythonEnvPath,
+              pythonScriptPath,
+              dscPath,
+              p12password
+            );
+
+          // Save the coordinates for future reference
+          await prisma.signCoordinate.create({
+            data: {
+              processDocumentId: processDocument.id,
+              page: signatureCoordinates.newlyAdded
+                ? lastPageIndex + 2
+                : lastPageIndex + 1,
+              x: signatureCoordinates.x,
+              y: signatureCoordinates.y,
+              width: signatureCoordinates.width,
+              height: signatureCoordinates.height,
+              stepId: currentStep?.id,
+              isSigned: true,
+              signedById: userData.id,
+            },
+          });
+        }
+
+        // Create signature record
+        const signDetails = await prisma.documentSignature.create({
+          data: {
+            processDocumentId: processDocument.id,
+            userId: userData.id,
+            processStepInstanceId: processStepInstanceId,
+            reason: remarks,
+          },
+        });
+
+        results.push({
+          documentId,
+          documentName: document.name,
+          signDetailsId: signDetails.id,
+          success: true,
+          message: "Document signed successfully",
+        });
+      } catch (error) {
+        console.error(`Error signing document ${doc.documentId}:`, error);
+        errors.push({
+          documentId: doc.documentId,
+          error: error.message,
+          success: false,
+        });
+      }
+    }
+
+    // Check if process is forwardable after signing all documents
+    const processResult = await is_process_forwardable(process, userData.id);
+
+    // Prepare response
+    const response = {
+      message: "Batch signing completed",
+      signedCount: results.length,
+      failedCount: errors.length,
+      results: results,
+      isForwardable: processResult.isForwardable,
+      isRevertable: processResult.isRevertable,
+    };
+
+    // Include errors if any
+    if (errors.length > 0) {
+      response.errors = errors;
+    }
+
+    // Return appropriate status code
+    if (results.length === 0 && errors.length > 0) {
+      return res.status(500).json({
+        ...response,
+        message: "Failed to sign any documents",
+      });
+    } else if (errors.length > 0) {
+      return res.status(207).json({
+        ...response,
+        message: "Some documents failed to sign",
+      });
+    }
+
+    return res.status(200).json(response);
+  } catch (error) {
+    console.error("Batch signing error:", error);
+    res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
 export const revoke_sign = async (req, res, next) => {
   try {
     const accessToken = req.headers["authorization"].substring(7);

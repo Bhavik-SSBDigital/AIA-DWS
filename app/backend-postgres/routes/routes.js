@@ -76,6 +76,7 @@ import {
   revoke_sign,
   reject_document,
   revoke_rejection,
+  sign_documents,
 } from "../controller/e-sign-controller.js";
 
 import {
@@ -263,6 +264,8 @@ router.get("/getUserProcesses", get_user_processes);
 router.post("/changePassword", change_password);
 
 router.post("/signDocument", sign_document);
+
+router.post("/signDocuments", sign_documents);
 
 router.post("/revokeSign", revoke_sign);
 router.post("/rejectDocument", reject_document);
