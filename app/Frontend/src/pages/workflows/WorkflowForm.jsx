@@ -4,6 +4,7 @@ import {
   IconEdit,
   IconEye,
   IconInfoCircle,
+  IconInfoCircleFilled,
   IconPlus,
   IconSquareLetterX,
   IconTrash,
@@ -12,6 +13,7 @@ import { useEffect, useState } from 'react';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { toast } from 'react-toastify';
 import {
+  checkDuplicateWorkflow,
   CopyWorkflow,
   CreateWorkflow,
   EditWorkflow,
@@ -63,24 +65,28 @@ export default function WorkflowForm({
     remove: removeStep,
     move: moveStep,
   } = useFieldArray({ control, name: 'steps' });
-  console.log(stepFields);
+
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
+  const [isDuplicate, setIsDuplicate] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(null);
   const [currentAssignmentIndex, setCurrentAssignmentIndex] = useState(null);
   const [editingAssignment, setEditingAssignment] = useState(null);
   const [workflowsList, setWorkflowsList] = useState([]);
 
   const handleAddAssignment = (stepIndex) => {
+    setIsDuplicate(false);
     setCurrentStepIndex(stepIndex);
     setShowAssignmentForm(true);
   };
   const handleMoveStepUp = (index) => {
+    setIsDuplicate(false);
     if (index > 0) {
       moveStep(index, index - 1); // Move step up
     }
   };
 
   const handleMoveStepDown = (index) => {
+    setIsDuplicate(false);
     if (index < stepFields.length - 1) {
       moveStep(index, index + 1); // Move step down
     }
@@ -89,7 +95,7 @@ export default function WorkflowForm({
   const handleAssignmentSubmit = (assignment, assignmentIndex = null) => {
     const updatedSteps = [...stepFields];
     const stepName = getValues(`steps.${currentStepIndex}.stepName`);
-
+    setIsDuplicate(false);
     if (assignmentIndex !== null) {
       // Update existing assignment
       updatedSteps[currentStepIndex].assignments[assignmentIndex] = {
@@ -112,6 +118,7 @@ export default function WorkflowForm({
     setCurrentAssignmentIndex(null); // Reset assignment index
   };
   const createWorkflow = async (data) => {
+    setIsDuplicate(false);
     if (!data?.steps || data.steps.length < 2) {
       toast.info('Please add at least two steps to proceed.');
       return;
@@ -121,7 +128,13 @@ export default function WorkflowForm({
       toast.info('Please add assignments');
       return;
     }
+
     try {
+      const resD = await checkDuplicateWorkflow(data);
+      if (resD?.data?.is_workflow_duplicate) {
+        setIsDuplicate(true);
+        return;
+      }
       const res = editData
         ? await EditWorkflow(editData?.id, data)
         : await CreateWorkflow(data);
@@ -135,6 +148,7 @@ export default function WorkflowForm({
     }
   };
   const handleEditAssignment = (stepIndex, assignmentIndex, selectedRoles) => {
+    setIsDuplicate(false);
     setCurrentStepIndex(stepIndex);
     setCurrentAssignmentIndex(assignmentIndex); // Store the index of the assignment being edited
     const assignment = stepFields[stepIndex].assignments[assignmentIndex];
@@ -144,7 +158,9 @@ export default function WorkflowForm({
   };
 
   const handleCopyWorkflow = async (id) => {
+    setIsDuplicate(false);
     setActionsLoading(true);
+    setIsDuplicate(false);
     try {
       const response = await CopyWorkflow(id);
       setValue('steps', response?.data);
@@ -160,6 +176,7 @@ export default function WorkflowForm({
     }
   };
   const getWorkflowsToCopy = async () => {
+    setIsDuplicate(false);
     try {
       const response = await GetWorkflowsList();
       setWorkflowsList(response.data);
@@ -396,7 +413,10 @@ export default function WorkflowForm({
           {/* Add Step Button */}
           <button
             type="button"
-            onClick={() => appendStep({ stepName: '', assignments: [] })}
+            onClick={() => {
+              setIsDuplicate(false);
+              appendStep({ stepName: '', assignments: [] });
+            }}
             disabled={actionsLoading}
             className="bg-button-secondary-default hover:bg-button-secondary-hover text-white px-4 py-2 rounded-md flex items-center justify-center w-full"
           >
@@ -406,6 +426,11 @@ export default function WorkflowForm({
 
         {/* Submit Buttons */}
         <hr className="mt-15 border-t-2 border-gray-300" />
+        {isDuplicate && (
+          <div className="mt-4 p-3 px-5 bg-red-300 text-red-800 flex gap-3 rounded-2xl font-semibold">
+            <IconInfoCircleFilled />A workflow already exists.
+          </div>
+        )}
 
         <div className="flex flex-col sm:flex-row justify-end space-y-2 sm:space-y-0 sm:space-x-2 mt-4">
           <CustomButton
