@@ -12,8 +12,9 @@ import {
 } from '../../common/Apis';
 import { upload } from '../../components/drop-file-input/FileUploadDownload';
 import Show from '../workflows/Show';
+import apiClient from '../../common/Apis';
 import { toast } from 'react-toastify';
-import { IconInfoCircle, IconX } from '@tabler/icons-react';
+import { IconInfoCircle, IconX, IconChevronDown, IconChevronUp } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import CustomButton from '../../CustomComponents/CustomButton';
 import TopLoader from '../../common/Loader/TopLoader';
@@ -66,6 +67,7 @@ export default function InitiateProcess() {
     append: addDocument,
     remove: removeDocument,
   } = useFieldArray({ control, name: 'documents' });
+  
   const handleDeleteDocument = async (index, id) => {
     setActionsLoading(true);
     try {
@@ -100,11 +102,13 @@ export default function InitiateProcess() {
   const [allTags, setAllTags] = useState([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const dropdownRef = useRef(null);
 
   useEffect(() => {
     const fetchTags = async () => {
       try {
         const { data } = await apiClient.get('/tags');
+        console.log("data", data)
         setAllTags(data.map((t) => t.name.toLowerCase()));
       } catch (e) {
         console.error(e);
@@ -113,13 +117,26 @@ export default function InitiateProcess() {
     fetchTags();
   }, []);
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   const addTag = (tag) => {
     if (fileDetails.tags.includes(tag)) return;
     setFileDetails((prev) => ({
       ...prev,
       tags: [...prev.tags, tag],
     }));
-
     setSearch('');
     setOpen(false);
   };
@@ -305,22 +322,6 @@ export default function InitiateProcess() {
                 )}
               </div>
 
-              {/* <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Enter SOP Issue / Revision Number
-                </label>
-                <input
-                  {...register('issueNo')}
-                  className="w-full border border-gray-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter"
-                />
-                {errors.issueNo && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.issueNo.message}
-                  </p>
-                )}
-              </div> */}
-
               <div>
                 <label className="block text-sm font-medium text-gray-700">
                   Select Workflow
@@ -464,119 +465,78 @@ export default function InitiateProcess() {
             {/* Tag Input */}
             <div className="mt-4">
               <label className="text-sm font-medium text-gray-700">Tags</label>
-              <div className="relative">
-                {/* Selected tags */}
-                <div
-                  className="flex flex-wrap gap-2 border rounded-lg p-2 cursor-text"
-                  onClick={() => setOpen(true)}
-                >
+              <div className="relative" ref={dropdownRef}>
+                {/* Selected tags and input */}
+                <div className="flex items-center flex-wrap gap-2 border rounded-lg p-2">
                   {fileDetails.tags.map((tag) => (
                     <span
                       key={tag}
                       className="flex items-center gap-1 bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-sm"
                     >
                       {tag}
-                      <button onClick={() => removeTag(tag)}>
+                      <button 
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeTag(tag);
+                        }}
+                        className="hover:bg-indigo-200 rounded-full p-0.5"
+                      >
                         <IconX size={14} />
                       </button>
                     </span>
                   ))}
 
-                  <input
-                    value={search}
-                    onChange={(e) => {
-                      setSearch(e.target.value);
-                      setOpen(true);
-                    }}
-                    placeholder="Select tags..."
-                    className="flex-1 min-w-[140px] outline-none text-sm"
-                  />
+                  <div className="flex-1 flex items-center">
+                    <input
+                      value={search}
+                      onChange={(e) => {
+                        setSearch(e.target.value);
+                        setOpen(true);
+                      }}
+                      onFocus={() => setOpen(true)}
+                      placeholder="Type to search tags..."
+                      className="flex-1 min-w-[120px] outline-none text-sm bg-transparent"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setOpen(!open)}
+                      className="ml-2 text-gray-500 hover:text-gray-700"
+                    >
+                      {open ? <IconChevronUp size={18} /> : <IconChevronDown size={18} />}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Dropdown */}
-                {open && filteredTags.length > 0 && (
-                  <div className="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow max-h-48 overflow-auto">
-                    {filteredTags.map((tag) => (
-                      <div
-                        key={tag}
-                        onClick={() => addTag(tag)}
-                        className="px-4 py-2 cursor-pointer hover:bg-indigo-50 text-sm"
-                      >
-                        {tag}
+                {open && (
+                  <div className="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-48 overflow-auto">
+                    {filteredTags.length > 0 ? (
+                      filteredTags.map((tag) => (
+                        <div
+                          key={tag}
+                          onClick={() => addTag(tag)}
+                          className="px-4 py-2 cursor-pointer hover:bg-indigo-50 text-sm border-b last:border-b-0"
+                        >
+                          {tag}
+                        </div>
+                      ))
+                    ) : search ? (
+                      <div className="px-4 py-3 text-sm text-gray-500 text-center">
+                        No tags found matching "{search}"
                       </div>
-                    ))}
+                    ) : (
+                      <div className="px-4 py-3 text-sm text-gray-500 text-center">
+                        Type to search tags
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-              {/* <div className="flex gap-2 mt-2">
-                <input
-                  type="text"
-                  value={newTag}
-                  onChange={(e) => {
-                    const sanitizedValue = e.target.value.replace(
-                      /[^a-zA-Z0-9 ]/g,
-                      '',
-                    );
-                    setNewTag(sanitizedValue);
-                  }}
-                  className="border border-gray-300 p-2 rounded-md w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter tag..."
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (newTag.trim()) {
-                      setFileDetails((prev) => ({
-                        ...prev,
-                        tags: [...prev.tags, newTag.trim()],
-                      }));
-                      setNewTag('');
-                    }
-                  }}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition"
-                >
-                  Add
-                </button>
-              </div> */}
-              {/* {fileDetails.tags.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {fileDetails.tags.map((tag, index) => (
-                    <span
-                      key={index}
-                      className="bg-purple-600 text-white px-3 py-1 text-sm rounded-full flex items-center gap-1 cursor-pointer hover:bg-purple-700 transition"
-                      onClick={() =>
-                        setFileDetails((prev) => ({
-                          ...prev,
-                          tags: prev.tags.filter((_, i) => i !== index),
-                        }))
-                      }
-                    >
-                      {tag} <span className="text-lg">&times;</span>
-                    </span>
-                  ))}
-                </div>
-              )} */}
             </div>
 
             {/* Part Number & Description */}
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Document Number
-                </label>
-                <input
-                  value={fileDetails.partNumber}
-                  onChange={(e) =>
-                    setFileDetails((prev) => ({
-                      ...prev,
-                      partNumber: e.target.value,
-                    }))
-                  }
-                  className="border border-gray-300 p-2 rounded-md w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter part number"
-                />
-              </div> */}
-
               <div>
                 <label className="text-sm font-medium text-gray-700">
                   Document Description
@@ -596,7 +556,7 @@ export default function InitiateProcess() {
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-700">
-                  Version Number(optional)
+                  Version Number (optional)
                 </label>
                 <input
                   type="text"

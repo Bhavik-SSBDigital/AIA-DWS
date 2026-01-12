@@ -23,7 +23,7 @@ export default function NewUser() {
   } = useForm({
     defaultValues: {
       username: '',
-      // email: '',
+      email: '',
       status: '',
       roles: [],
       password: '',
@@ -86,10 +86,12 @@ export default function NewUser() {
               <Controller
                 name="username"
                 control={control}
+                rules={{
+                  required: 'Username is required',
+                }}
                 render={({ field }) => (
                   <input
                     {...field}
-                    required
                     className="w-full p-2 border rounded"
                   />
                 )}
@@ -100,7 +102,9 @@ export default function NewUser() {
                 </p>
               )}
             </div>
-            {/* <div>
+            
+            {/* Email Field */}
+            <div>
               <label className="block text-sm font-medium text-gray-700">
                 Email
               </label>
@@ -108,23 +112,26 @@ export default function NewUser() {
                 name="email"
                 control={control}
                 rules={{
+                  required: 'Email is required',
                   pattern: {
                     value: /^[^@\s]+@[^@\s]+\.[^@\s]+$/,
-                    message: 'Invalid email',
+                    message: 'Invalid email address',
                   },
                 }}
                 render={({ field }) => (
                   <input
                     {...field}
-                    required
+                    type="email"
                     className="w-full p-2 border rounded"
+                    placeholder="Enter email address"
                   />
                 )}
               />
               {errors.email && (
                 <p className="text-red-500 text-sm">{errors.email.message}</p>
               )}
-            </div> */}
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700">
                 Password
@@ -193,10 +200,10 @@ export default function NewUser() {
               <Controller
                 name="status"
                 control={control}
+                rules={{ required: 'Status is required' }}
                 render={({ field }) => (
                   <select
                     {...field}
-                    required
                     className="w-full p-2 border rounded"
                   >
                     <option value="">Select Status</option>
@@ -209,6 +216,7 @@ export default function NewUser() {
                 <p className="text-red-500 text-sm">{errors.status.message}</p>
               )}
             </div>
+            
             <div>
               <label className="block text-sm font-medium text-gray-700">
                 Roles
@@ -216,11 +224,10 @@ export default function NewUser() {
               <Controller
                 name="roles"
                 control={control}
-                rules={{ required: 'Status is required' }}
+                rules={{ required: 'At least one role is required' }}
                 render={({ field }) => {
-                  const allSelected = field.value?.length === roles?.length; // Check if all are selected
+                  const allSelected = field.value?.length === roles?.length;
 
-                  // Add "Select All" option at the top
                   const enhancedOptions = [
                     {
                       id: 'all',
@@ -250,14 +257,15 @@ export default function NewUser() {
                         if (value.some((v) => v.id === 'all')) {
                           field.onChange(
                             allSelected ? [] : roles?.map((r) => r.id),
-                          ); // Select/Deselect all
+                          );
                         } else {
-                          field.onChange(value.map((v) => v.id)); // Normal selection
+                          field.onChange(value.map((v) => v.id));
                         }
                       }}
                       renderInput={(params) => (
                         <MuiTextField
-                          error={errors?.roles}
+                          error={!!errors?.roles}
+                          helperText={errors?.roles?.message}
                           {...params}
                           variant="outlined"
                         />
@@ -267,6 +275,7 @@ export default function NewUser() {
                 }}
               />
             </div>
+            
             <div className="grid grid-cols-2 gap-4">
               <CustomButton
                 type="submit"

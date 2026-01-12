@@ -477,6 +477,8 @@ export const sendProcessNotification = async (eventType, data) => {
     // Get all recipients
     const recipients = await getRecipientsForEvent(eventType, data);
 
+    console.log("recipients", recipients);
+
     // Send emails to all recipients
     const emailPromises = recipients.map(async (recipient) => {
       if (recipient.email) {
@@ -498,6 +500,8 @@ export const sendProcessNotification = async (eventType, data) => {
 
 // Get recipients based on event type
 const getRecipientsForEvent = async (eventType, data) => {
+  console.log("event type", eventType);
+  console.log("data", data);
   const recipients = new Set();
 
   switch (eventType) {

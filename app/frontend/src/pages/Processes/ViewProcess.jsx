@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+
 import {
   ClaimProcess,
   CompleteProcess,
@@ -14,6 +16,7 @@ import {
   SignRevoke,
   ViewDocument,
 } from '../../common/Apis';
+
 import {
   IconEye,
   IconCheck,
@@ -28,6 +31,7 @@ import {
   IconPencil,
   IconTrash,
 } from '@tabler/icons-react';
+
 import CustomCard from '../../CustomComponents/CustomCard';
 import ComponentLoader from '../../common/Loader/ComponentLoader';
 import CustomButton from '../../CustomComponents/CustomButton';
@@ -49,6 +53,10 @@ import DeleteConfirmationModal from '../../CustomComponents/DeleteConfirmation';
 const ViewProcess = () => {
   const [selectedDocs, setSelectedDocs] = useState([]);
   const [searchParams] = useSearchParams();
+  const [remarksModalOpen, setRemarksModalOpen] = useState({
+  id: null,
+  open: false,
+});
   const isCompleted = searchParams.get('completed') === 'true';
   const username = sessionStorage.getItem('username');
   const [showActions, setShowActions] = useState(false);
@@ -65,10 +73,13 @@ const ViewProcess = () => {
   const [openModal, setOpenModal] = useState('');
   const [recommendations, setRecommendations] = useState([]);
   const [canEdit, setCanEdit] = useState({});
-  const [remarksModalOpen, setRemarksModalOpen] = useState({
-    id: null,
+
+  const [customSignModal, setCustomSignModal] = useState({
     open: false,
+    id: null,
+    remarks: '',
   });
+
   const disableActions = process?.currentStepType != 'APPROVAL';
 
   const processDetails = [
@@ -115,7 +126,6 @@ const ViewProcess = () => {
     try {
       const response = await GetProcessData(id);
       setProcess(response?.data?.process);
-
       // Check edit permissions for each document
       const editChecks = {};
       await Promise.all(
@@ -215,12 +225,12 @@ const ViewProcess = () => {
         .filter((doc) => !doc.rejectionDetails && doc.type === 'pdf')
         .map((doc) => ({
           documentId: doc.id,
-
           name: doc.name,
           remarks: '',
         })),
     });
   };
+
   const handleSignAllDocuments = async () => {
     setActionsLoading(true);
     try {
@@ -233,14 +243,13 @@ const ViewProcess = () => {
         }),
       );
       toast.success(res?.data?.message);
-
       setProcess((prev) => ({
         ...prev,
         documents: prev.documents.map((doc) =>
           signAllModalOpen.listOfDocuments.some((y) => y.documentId === doc.id)
             ? {
                 ...doc,
-                signedBy: [...doc?.signedBy, { signedBy: username, remarks }],
+                signedBy: [...doc?.signedBy, { signedBy: username, remarks: '' }],
               }
             : doc,
         ),
@@ -256,6 +265,7 @@ const ViewProcess = () => {
       setActionsLoading(false);
     }
   };
+
   const handleViewAllSelectedFiles = async () => {
     setActionsLoading(true);
     try {
@@ -282,21 +292,21 @@ const ViewProcess = () => {
     }
   };
 
-  const handleSignDocument = async (remarks = '') => {
+  const handleSignDocument = async (documentId, remarks = '') => {
     setActionsLoading(true);
     try {
       const res = await SignDocument(
         process?.processId,
         process?.processStepInstanceId,
-        remarksModalOpen.id,
+        documentId,
         remarks,
       );
       toast.success(res?.data?.message);
-      setRemarksModalOpen({ id: null, open: false });
+      setCustomSignModal({ open: false, id: null, remarks: '' });
       setProcess((prev) => ({
         ...prev,
         documents: prev.documents.map((doc) =>
-          doc.id === remarksModalOpen.id
+          doc.id === documentId
             ? {
                 ...doc,
                 signedBy: [...doc?.signedBy, { signedBy: username, remarks }],
@@ -337,7 +347,6 @@ const ViewProcess = () => {
             : doc,
         ),
       }));
-
       setRemarksModalOpen({ id: null, open: false });
       toast.success(response?.data?.message);
     } catch (error) {
@@ -381,7 +390,6 @@ const ViewProcess = () => {
 
   function extractDocumentsByReopenCycle(processData) {
     const { documentVersioning } = processData;
-
     const allReopenCycles = new Set();
     const lineageMap = new Map();
     const newDocuments = [];
@@ -391,11 +399,8 @@ const ViewProcess = () => {
       const versions = [...group.versions].sort(
         (a, b) => a.reopenCycle - b.reopenCycle,
       );
-
       versions.forEach((v) => allReopenCycles.add(v.reopenCycle));
-
       const hasOriginal = versions.some((v) => v.reopenCycle === 0);
-
       if (hasOriginal) {
         lineageMap.set(group.latestDocumentId, versions);
       } else {
@@ -409,7 +414,6 @@ const ViewProcess = () => {
     // Step 2: Build cycles
     return reopenCycles.map((cycle) => {
       const documents = [];
-
       // Existing lineages (original + replacements)
       lineageMap.forEach((versions) => {
         let selected = null;
@@ -433,7 +437,6 @@ const ViewProcess = () => {
       const sopMatch = documents.find(
         (d) => d.reopenCycle === cycle && d.SOPIssueNo,
       );
-
       return {
         reopenCycle: cycle,
         SOPIssueNo: sopMatch?.SOPIssueNo || documents[0]?.SOPIssueNo || '--',
@@ -449,13 +452,14 @@ const ViewProcess = () => {
 
     // Maximum number of documents in any cycle
     const maxDocs = Math.max(...cycles?.map((cycle) => cycle.documents.length));
+
     if (cycles?.length === 0) return null;
+
     return (
       <CustomCard className={'mt-2'}>
         <h2 className="text-xl font-semibold mb-4">
           Documents by Reopen Cycle
         </h2>
-
         <div className="overflow-auto">
           <table className="min-w-full border border-gray-300">
             <thead className="bg-gray-100">
@@ -472,7 +476,6 @@ const ViewProcess = () => {
             <tbody>
               {cycles.map((cycle, index) => {
                 const isLastRow = index === cycles.length - 1;
-
                 return (
                   <tr
                     key={cycle.reopenCycle}
@@ -481,14 +484,11 @@ const ViewProcess = () => {
                     <td className="py-2 px-4 border font-medium">
                       {cycle.reopenCycle}
                     </td>
-
                     {/* <td className="py-2 px-4 border font-medium">
                       {cycle.SOPIssueNo || '--'}
                     </td> */}
-
                     {Array.from({ length: maxDocs }).map((_, idx) => {
                       const doc = cycle.documents[idx];
-
                       return (
                         <td key={idx} className="py-2 px-4 border text-wrap">
                           {doc ? (
@@ -512,12 +512,10 @@ const ViewProcess = () => {
                                 >
                                   {doc.name}
                                 </span>
-
                                 <span className="text-sm text-blue-600 font-medium">
                                   Version No: {doc?.issueNo || '--'}
                                 </span>
                               </div>
-
                               <CustomButton
                                 className="px-2"
                                 click={() =>
@@ -585,6 +583,7 @@ const ViewProcess = () => {
       console.error(error?.response?.data?.message || error?.message);
     }
   };
+
   const DeleteDocument = async (data) => {
     setActionsLoading(true);
     try {
@@ -637,7 +636,6 @@ const ViewProcess = () => {
   return (
     <div className="mx-auto">
       {actionsLoading && <TopLoader />}
-
       <CustomCard>
         <div className="flex justify-end flex-row gap-2 flex-wrap">
           <CustomButton
@@ -723,6 +721,7 @@ const ViewProcess = () => {
             </span>
             <div className="flex-grow border-t border-green-600"></div>
           </div>
+
           <CustomButton
             // disabled={selectedDocs.length === 0}
             className="ml-auto mb-4 block"
@@ -749,9 +748,7 @@ const ViewProcess = () => {
                     : [...prev, doc.id],
                 );
               };
-
               const extension = doc.name?.split('.').pop()?.toLowerCase();
-
               return (
                 <CustomCard
                   key={doc.id}
@@ -780,7 +777,6 @@ const ViewProcess = () => {
                         checked={isSelected}
                         onChange={toggleSelect}
                       />
-
                       {/* File Icon */}
                       <div className="w-10 h-10 shrink-0 rounded-full bg-gray-100 border flex items-center justify-center">
                         <img
@@ -789,7 +785,6 @@ const ViewProcess = () => {
                           alt="icon"
                         />
                       </div>
-
                       {/* File Info */}
                       <div className="flex flex-col min-w-0 mr-9">
                         <p className="font-semibold text-gray-900 break-words">
@@ -830,7 +825,11 @@ const ViewProcess = () => {
                       variant="success"
                       className="px-2"
                       click={() =>
-                        setRemarksModalOpen({ id: doc.id, open: 'sign' })
+                        setCustomSignModal({
+                          open: true,
+                          id: doc.id,
+                          remarks: '',
+                        })
                       }
                       disabled={
                         actionsLoading ||
@@ -920,7 +919,6 @@ const ViewProcess = () => {
             text={'Version Wise'}
             click={() => setOpenModal('version-wise')}
           />
-
           <div className="space-y-6">
             {process.documentVersioning.map((docGroup, index) => {
               const activeDoc = docGroup.versions.find(
@@ -929,7 +927,6 @@ const ViewProcess = () => {
               const olderVersions = docGroup.versions.filter(
                 (v) => v.id !== docGroup.latestDocumentId,
               );
-
               return (
                 <CustomCard
                   key={index}
@@ -961,7 +958,6 @@ const ViewProcess = () => {
                       </div>
                     </div>
                   </div>
-
                   {olderVersions.length > 0 && (
                     <div className="mt-4 pl-5 border-l-2 border-dashed border-green-300">
                       <p className="text-sm font-medium text-gray-600 mb-2">
@@ -994,7 +990,6 @@ const ViewProcess = () => {
                                 </p>
                               </div>
                             </div>
-
                             <div className="flex gap-2 justify-end mt-auto">
                               <CustomButton
                                 className="px-2"
@@ -1058,7 +1053,6 @@ const ViewProcess = () => {
                 ?.split('.')
                 .pop()
                 ?.toLowerCase();
-
               return (
                 <CustomCard
                   key={index}
@@ -1090,7 +1084,6 @@ const ViewProcess = () => {
                         </p>
                       </div>
                     </div>
-
                     <div className="flex gap-2">
                       <CustomButton
                         className="px-2"
@@ -1172,7 +1165,6 @@ const ViewProcess = () => {
                                   </p>
                                 </div>
                               </div>
-
                               <div className="flex gap-2 justify-end mt-auto">
                                 <CustomButton
                                   className="px-2"
@@ -1191,7 +1183,6 @@ const ViewProcess = () => {
                                     <IconEye size={16} className="text-white" />
                                   }
                                 />
-
                                 <CustomButton
                                   variant="info"
                                   className="px-2"
@@ -1512,6 +1503,47 @@ const ViewProcess = () => {
         </CustomModal>
       ) : null}
 
+      {/* Custom Sign Modal (Remarks Optional) */}
+      <CustomModal
+        isOpen={customSignModal.open}
+        onClose={() => setCustomSignModal({ open: false, id: null, remarks: '' })}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+      >
+        <div className="p-4">
+          <h2 className="text-lg font-semibold mb-4">Sign Document</h2>
+          <p className="mb-4 text-gray-600">
+            Remarks are optional. You can leave it blank if you don't have any remarks.
+          </p>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Remarks (optional)
+            </label>
+            <textarea
+              value={customSignModal.remarks}
+              onChange={(e) =>
+                setCustomSignModal({ ...customSignModal, remarks: e.target.value })
+              }
+              className="w-full p-2 border border-gray-300 rounded-md"
+              rows={3}
+              placeholder="Enter optional remarks..."
+            />
+          </div>
+          <div className="flex justify-end space-x-2">
+            <CustomButton
+              variant="secondary"
+              text="Cancel"
+              click={() => setCustomSignModal({ open: false, id: null, remarks: '' })}
+            />
+            <CustomButton
+              variant="primary"
+              text="Sign Document"
+              click={() => handleSignDocument(customSignModal.id, customSignModal.remarks)}
+              disabled={actionsLoading}
+            />
+          </div>
+        </div>
+      </CustomModal>
+
       <CustomModal
         isOpen={openModal == 'query'}
         onClose={() => {
@@ -1533,6 +1565,7 @@ const ViewProcess = () => {
           documents={process.documents}
         />
       </CustomModal>
+
       <CustomModal
         isOpen={openModal == 'version-wise'}
         onClose={() => {
@@ -1545,6 +1578,7 @@ const ViewProcess = () => {
           close={() => setOpenModal('')}
         />
       </CustomModal>
+
       <CustomModal
         isOpen={openModal == 'document-upload'}
         onClose={() => {
@@ -1567,6 +1601,7 @@ const ViewProcess = () => {
           }}
         />
       </CustomModal>
+
       <CustomModal
         isOpen={existingQuery}
         onClose={() => {
@@ -1586,6 +1621,7 @@ const ViewProcess = () => {
           existingQuery={existingQuery}
         />
       </CustomModal>
+
       <CustomModal
         isOpen={openModal == 'recommend'}
         onClose={() => {
@@ -1602,6 +1638,7 @@ const ViewProcess = () => {
           documents={process.documents}
         />
       </CustomModal>
+
       <CustomModal
         isOpen={openModal == 're-open'}
         onClose={() => {
@@ -1619,6 +1656,7 @@ const ViewProcess = () => {
           documents={process.documents}
         />
       </CustomModal>
+
       <CustomModal
         isOpen={signAllModalOpen.open}
         onClose={() => {
@@ -1650,7 +1688,6 @@ const ViewProcess = () => {
               <span className="ml-2">With Remarks</span>
             </label>
           </div>
-
           {signAllModalOpen.withRemarks && (
             <div className="mb-4">
               <table className="w-full border">
@@ -1689,7 +1726,6 @@ const ViewProcess = () => {
               </table>
             </div>
           )}
-
           <div className="flex justify-end space-x-2">
             <CustomButton
               variant="secondary"
@@ -1717,22 +1753,15 @@ const ViewProcess = () => {
           </div>
         </div>
       </CustomModal>
-      <RemarksModal
-        open={remarksModalOpen.open === 'sign'}
-        title="Sign Remarks (optional)"
-        onClose={() => setRemarksModalOpen({ id: null, open: false })}
-        loading={actionsLoading}
-        onSubmit={(remarks) => handleSignDocument(remarks)}
-        showPassField={false}
-        remarksOptional={true}
-      />
+
+      {/* Reject Modal (Remarks Required) */}
       <RemarksModal
         open={remarksModalOpen.open === 'reject'}
         title="Reject Remarks"
         onClose={() => setRemarksModalOpen({ id: null, open: false })}
         loading={actionsLoading}
         onSubmit={(remarks) => handleRejectDocument(remarks)}
-        // remarksOptional={true}
+        remarksOptional={false}
       />
 
       {/* Delete Confirmation Modal */}

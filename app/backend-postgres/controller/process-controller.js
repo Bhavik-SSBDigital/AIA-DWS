@@ -4044,6 +4044,9 @@ export const complete_process_step = async (req, res) => {
       const stepInstance = await prisma.processStepInstance.findUnique({
         where: { id: stepInstanceId },
         include: {
+          pickedBy: {
+            select: { id: true, username: true, name: true, email: true },
+          },
           process: {
             include: {
               initiator: {
@@ -4079,10 +4082,8 @@ export const complete_process_step = async (req, res) => {
               stepId: nextStep.id,
               status: "IN_PROGRESS",
             },
-            include: {
-              assignedToUser: {
-                select: { id: true, email: true, username: true, name: true },
-              },
+            select: {
+              assignedTo: true,
             },
           });
 

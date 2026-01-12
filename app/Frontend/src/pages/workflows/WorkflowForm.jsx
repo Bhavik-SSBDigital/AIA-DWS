@@ -68,25 +68,26 @@ export default function WorkflowForm({
 
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [isDuplicate, setIsDuplicate] = useState(false);
+  const [duplicateWorkflow, setDuplicateWorkflow] = useState(null);
   const [currentStepIndex, setCurrentStepIndex] = useState(null);
   const [currentAssignmentIndex, setCurrentAssignmentIndex] = useState(null);
   const [editingAssignment, setEditingAssignment] = useState(null);
   const [workflowsList, setWorkflowsList] = useState([]);
 
   const handleAddAssignment = (stepIndex) => {
-    setIsDuplicate(false);
+    setDuplicateWorkflow(null);;
     setCurrentStepIndex(stepIndex);
     setShowAssignmentForm(true);
   };
   const handleMoveStepUp = (index) => {
-    setIsDuplicate(false);
+    setDuplicateWorkflow(null);;
     if (index > 0) {
       moveStep(index, index - 1); // Move step up
     }
   };
 
   const handleMoveStepDown = (index) => {
-    setIsDuplicate(false);
+    setDuplicateWorkflow(null);;
     if (index < stepFields.length - 1) {
       moveStep(index, index + 1); // Move step down
     }
@@ -95,7 +96,7 @@ export default function WorkflowForm({
   const handleAssignmentSubmit = (assignment, assignmentIndex = null) => {
     const updatedSteps = [...stepFields];
     const stepName = getValues(`steps.${currentStepIndex}.stepName`);
-    setIsDuplicate(false);
+    setDuplicateWorkflow(null);;
     if (assignmentIndex !== null) {
       // Update existing assignment
       updatedSteps[currentStepIndex].assignments[assignmentIndex] = {
@@ -117,38 +118,42 @@ export default function WorkflowForm({
     setEditingAssignment(null); // Reset editing state
     setCurrentAssignmentIndex(null); // Reset assignment index
   };
-  const createWorkflow = async (data) => {
-    setIsDuplicate(false);
-    if (!data?.steps || data.steps.length < 2) {
-      toast.info('Please add at least two steps to proceed.');
+const createWorkflow = async (data) => {
+  // Change all setDuplicateWorkflow(null); to setDuplicateWorkflow(null)
+  setDuplicateWorkflow(null);
+  
+  if (!data?.steps || data.steps.length < 2) {
+    toast.info('Please add at least two steps to proceed.');
+    return;
+  }
+
+  if (data?.steps?.find((item) => item.assignments.length == 0)) {
+    toast.info('Please add assignments');
+    return;
+  }
+
+  try {
+    const resD = await checkDuplicateWorkflow(data);
+    if (resD?.data?.is_workflow_duplicate) {
+      // Set the duplicate workflow details instead of just a boolean
+      setDuplicateWorkflow(resD.data.duplicate_workflow);
       return;
     }
-
-    if (data?.steps?.find((item) => item.assignments.length == 0)) {
-      toast.info('Please add assignments');
-      return;
-    }
-
-    try {
-      const resD = await checkDuplicateWorkflow(data);
-      if (resD?.data?.is_workflow_duplicate) {
-        setIsDuplicate(true);
-        return;
-      }
-      const res = editData
-        ? await EditWorkflow(editData?.id, data)
-        : await CreateWorkflow(data);
-      toast.success(res?.data?.message);
-      updateList();
-      handleCloseForm();
-      reset();
-      setEditData(null);
-    } catch (error) {
-      toast.error(error?.response?.data?.messaeg || error?.message);
-    }
-  };
+    const res = editData
+      ? await EditWorkflow(editData?.id, data)
+      : await CreateWorkflow(data);
+    toast.success(res?.data?.message);
+    updateList();
+    handleCloseForm();
+    reset();
+    setEditData(null);
+    setDuplicateWorkflow(null); // Reset on success
+  } catch (error) {
+    toast.error(error?.response?.data?.message || error?.message);
+  }
+};
   const handleEditAssignment = (stepIndex, assignmentIndex, selectedRoles) => {
-    setIsDuplicate(false);
+    setDuplicateWorkflow(null);;
     setCurrentStepIndex(stepIndex);
     setCurrentAssignmentIndex(assignmentIndex); // Store the index of the assignment being edited
     const assignment = stepFields[stepIndex].assignments[assignmentIndex];
@@ -158,9 +163,9 @@ export default function WorkflowForm({
   };
 
   const handleCopyWorkflow = async (id) => {
-    setIsDuplicate(false);
+    setDuplicateWorkflow(null);;
     setActionsLoading(true);
-    setIsDuplicate(false);
+    setDuplicateWorkflow(null);;
     try {
       const response = await CopyWorkflow(id);
       setValue('steps', response?.data);
@@ -176,7 +181,7 @@ export default function WorkflowForm({
     }
   };
   const getWorkflowsToCopy = async () => {
-    setIsDuplicate(false);
+    setDuplicateWorkflow(null);;
     try {
       const response = await GetWorkflowsList();
       setWorkflowsList(response.data);
@@ -414,7 +419,7 @@ export default function WorkflowForm({
           <button
             type="button"
             onClick={() => {
-              setIsDuplicate(false);
+              setDuplicateWorkflow(null);;
               appendStep({ stepName: '', assignments: [] });
             }}
             disabled={actionsLoading}
@@ -424,13 +429,35 @@ export default function WorkflowForm({
           </button>
         </div>
 
-        {/* Submit Buttons */}
-        <hr className="mt-15 border-t-2 border-gray-300" />
-        {isDuplicate && (
-          <div className="mt-4 p-3 px-5 bg-red-300 text-red-800 flex gap-3 rounded-2xl font-semibold">
-            <IconInfoCircleFilled />A workflow already exists.
+       {/* Submit Buttons */}
+<hr className="mt-15 border-t-2 border-gray-300" />
+{duplicateWorkflow && (
+  <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+    <div className="flex items-start gap-3 text-red-800">
+      <IconInfoCircleFilled className="mt-0.5 flex-shrink-0" />
+      <div>
+        <p className="font-semibold mb-2">A workflow with this configuration already exists!</p>
+        <div className="text-sm space-y-1 bg-red-100 p-3 rounded">
+          <div className="flex gap-2">
+            <span className="font-medium">Name:</span>
+            <span>{duplicateWorkflow.name}</span>
           </div>
-        )}
+          <div className="flex gap-2">
+            <span className="font-medium">Version:</span>
+            <span>{duplicateWorkflow.version}</span>
+          </div>
+          <div className="flex gap-2">
+            <span className="font-medium">ID:</span>
+            <span className="text-xs font-mono">{duplicateWorkflow.id}</span>
+          </div>
+          {/* <p className="mt-2 text-red-700">
+            Please choose a different workflow name or modify the steps to create a unique workflow.
+          </p> */}
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
         <div className="flex flex-col sm:flex-row justify-end space-y-2 sm:space-y-0 sm:space-x-2 mt-4">
           <CustomButton
