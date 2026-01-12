@@ -19,6 +19,7 @@ import CustomModal from '../../CustomComponents/CustomModal';
 import { useNavigate } from 'react-router-dom';
 
 export default function WorkflowVisualizer() {
+  const isAdmin = sessionStorage.getItem('isAdmin') == 'true';
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
   const [workflows, setWorkflows] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -105,8 +106,11 @@ export default function WorkflowVisualizer() {
           className="w-full sm:max-w-md p-3 border border-slate-400 rounded-lg transition"
         />
         <button
-          className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-3 px-6 transition"
+          className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition ${
+            !isAdmin ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
           onClick={() => setShowForm(true)}
+          disabled={!isAdmin}
         >
           + Add Workflow
         </button>
@@ -149,19 +153,24 @@ export default function WorkflowVisualizer() {
                     click={() => handleEdit(workflow, selectedVersion)}
                     text={<IconEdit size={20} />}
                     title={'Edit'}
+                    disabled={!isAdmin}
+                    className={!isAdmin ? 'pointer-events-none opacity-50' : ''}
                   />
                   <CustomButton
                     click={() => setDeleteItemId(selectedVersion?.id)}
                     text={<IconTrash size={20} />}
                     title={'Delete'}
-                    disabled={selectedVersion?.status == "Inactive"}
+                    disabled={selectedVersion?.status == 'Inactive' || !isAdmin}
                     variant={'danger'}
+                    className={!isAdmin ? 'pointer-events-none opacity-50' : ''}
                   />
                   <CustomButton
                     click={() => navigate(`/templates/${selectedVersion?.id}`)}
                     text={<IconFile size={20} />}
                     title={'Templates'}
                     variant={'secondary'}
+                    disabled={!isAdmin}
+                    className={!isAdmin ? 'pointer-events-none opacity-50' : ''}
                   />
                 </div>
 
