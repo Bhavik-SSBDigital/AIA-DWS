@@ -248,37 +248,78 @@ export const edit_workflow = async (req, res) => {
     const { name, description, steps, id: workflowId } = req.body;
 
     const updatedById = userData.id;
-    const oldWorkflow = await prisma.workflow.findUnique({
+    const workflow = await prisma.workflow.findUnique({
       where: { id: workflowId },
-      include: { steps: true },
+      include: {
+        steps: {
+          include: {
+            assignments: {
+              include: {
+                departmentRoles: true,
+              },
+            },
+          },
+        },
+      },
     });
 
-    if (!oldWorkflow) {
+    if (!workflow) {
       return res.status(404).json({ error: "Workflow not found" });
     }
 
-    const newWorkflow = await prisma.$transaction(async (tx) => {
-      const latestVersion = await tx.workflow.findFirst({
-        where: { name: oldWorkflow.name },
-        orderBy: { version: "desc" },
-      });
+    // Check if name changed and update if needed
+    if (name !== workflow.name) {
+      console.log("Workflow name changed, updating folder path");
+      // You might want to handle folder renaming logic here
+      // await renameFolder(`../${workflow.name}`, `../${name}`);
+    }
 
-      const newWorkflow = await tx.workflow.create({
+    // Update the workflow
+    const updatedWorkflow = await prisma.$transaction(async (tx) => {
+      // Update workflow metadata
+      const updatedWorkflow = await tx.workflow.update({
+        where: { id: workflowId },
         data: {
           name,
           description,
-          createdById: updatedById,
-          version: latestVersion ? latestVersion.version + 1 : 1,
-          previousVersionId: oldWorkflow.id,
-          isActive: true,
+          updatedById: updatedById,
         },
       });
 
+      // Delete existing assignments and their departmentRoleAssignments first
+      // (due to foreign key constraints)
+      if (workflow.steps.length > 0) {
+        const stepIds = workflow.steps.map((step) => step.id);
+
+        // Get all assignment IDs
+        const assignmentIds = workflow.steps.flatMap((step) =>
+          step.assignments.map((assignment) => assignment.id)
+        );
+
+        // Delete department role assignments first
+        if (assignmentIds.length > 0) {
+          await tx.departmentRoleAssignment.deleteMany({
+            where: { workflowAssignmentId: { in: assignmentIds } },
+          });
+        }
+
+        // Delete workflow assignments
+        await tx.workflowAssignment.deleteMany({
+          where: { stepId: { in: stepIds } },
+        });
+      }
+
+      // Delete existing steps
+      await tx.workflowStep.deleteMany({
+        where: { workflowId: workflowId },
+      });
+
+      // Create new steps
       const stepRecords = await Promise.all(
         steps.map(async (step, index) => {
           return tx.workflowStep.create({
             data: {
-              workflowId: newWorkflow.id,
+              workflowId: workflowId,
               stepNumber: index + 1,
               stepName: step.stepName,
               allowParallel: step.allowParallel ?? false,
@@ -288,6 +329,7 @@ export const edit_workflow = async (req, res) => {
         })
       );
 
+      // Create new assignments
       for (let i = 0; i < steps.length; i++) {
         const assignments = steps[i].assignments || [];
         if (assignments.length) {
@@ -380,6 +422,7 @@ export const edit_workflow = async (req, res) => {
             ...departmentAssignments,
           ];
 
+          // Create new assignments
           await tx.workflowAssignment.createMany({
             data: allAssignments.map((assignee) => ({
               stepId: stepRecords[i].id,
@@ -395,12 +438,14 @@ export const edit_workflow = async (req, res) => {
             })),
           });
 
+          // Get the created assignments to link department role assignments
           const createdAssignments = await tx.workflowAssignment.findMany({
             where: { stepId: stepRecords[i].id },
             select: { id: true, assigneeType: true },
-            orderBy: { id: "asc" }, // Ensure consistent order
+            orderBy: { id: "asc" },
           });
 
+          // Create department role assignments for DEPARTMENT type assignees
           const departmentRoleAssignments = assignments
             .filter((assignee) => assignee.assigneeType === "DEPARTMENT")
             .flatMap((assignee) => {
@@ -445,20 +490,12 @@ export const edit_workflow = async (req, res) => {
         }
       }
 
-      await tx.workflow.update({
-        where: { id: oldWorkflow.id },
-        data: { isActive: false },
-      });
-
-      console.log("updated path", `../${name}`);
-      const created = await createFolder(true, `../${name}`, userData);
-      console.log("created", created);
-      return newWorkflow;
+      return updatedWorkflow;
     });
 
     return res.status(200).json({
       message: "Workflow updated successfully",
-      workflow: newWorkflow,
+      workflow: updatedWorkflow,
     });
   } catch (error) {
     console.error(error);

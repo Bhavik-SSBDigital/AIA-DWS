@@ -162,7 +162,9 @@ export const sign_document = async (req, res, next) => {
     const existingPdfBytes = await fs.readFile(
       path.join(__dirname, "../../../../", "storage", documentPath)
     );
-    const pdfDoc = await PDFDocument.load(existingPdfBytes);
+    const pdfDoc = await PDFDocument.load(existingPdfBytes, {
+      ignoreEncryption: true,
+    });
     const pages = pdfDoc.getPages();
     const lastPageIndex = pages.length - 1;
     const lastPage = pages[lastPageIndex];
@@ -433,7 +435,9 @@ export const sign_documents = async (req, res, next) => {
         const existingPdfBytes = await fs.readFile(
           path.join(__dirname, "../../../../", "storage", documentPath)
         );
-        const pdfDoc = await PDFDocument.load(existingPdfBytes);
+        const pdfDoc = await PDFDocument.load(existingPdfBytes, {
+          ignoreEncryption: true,
+        });
         const pages = pdfDoc.getPages();
         const lastPageIndex = pages.length - 1;
         const lastPage = pages[lastPageIndex];
@@ -611,7 +615,9 @@ export const revoke_sign = async (req, res, next) => {
       document.path
     );
     const existingPdfBytes = await fs.readFile(documentPath);
-    const pdfDoc = await PDFDocument.load(existingPdfBytes);
+    const pdfDoc = await PDFDocument.load(existingPdfBytes, {
+      ignoreEncryption: true,
+    });
 
     const coordinates = await get_sign_coordinates_for_specific_step_in_process(
       documentId,
@@ -707,7 +713,9 @@ export const reject_document = async (req, res, next) => {
       ? Math.max(0, pageHeight - lastYCoordinate - 50)
       : 0;
 
-    const pdfDoc = await PDFDocument.load(existingPdfBytes);
+    const pdfDoc = await PDFDocument.load(existingPdfBytes, {
+      ignoreEncryption: true,
+    });
     const pages = pdfDoc.getPages();
     const lastPageIndex = pages.length - 1;
     const lastPage = pages[lastPageIndex];
@@ -840,7 +848,9 @@ export const revoke_rejection = async (req, res, next) => {
     const existingPdfBytes = await fs.readFile(
       path.join(__dirname, "../../../../", "storage", documentPath)
     );
-    const pdfDoc = await PDFDocument.load(existingPdfBytes);
+    const pdfDoc = await PDFDocument.load(existingPdfBytes, {
+      ignoreEncryption: true,
+    });
 
     const pages = pdfDoc.getPages();
     const lastPageIndex = pages.length - 1;

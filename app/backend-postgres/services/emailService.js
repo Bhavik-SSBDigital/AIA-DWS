@@ -488,6 +488,7 @@ export const sendProcessNotification = async (eventType, data) => {
     });
 
     await Promise.all(emailPromises);
+    console.log("successfully sent notification");
     return { success: true, recipients: recipients.length };
   } catch (error) {
     console.error(`Error sending ${eventType} notification:`, error);
