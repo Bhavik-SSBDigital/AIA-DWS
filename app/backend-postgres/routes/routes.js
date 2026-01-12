@@ -23,6 +23,7 @@ import {
 import {
   add_workflow,
   edit_workflow,
+  check_if_workflow_is_duplicate,
   view_workflow,
   delete_workflow,
   get_workflows,
@@ -242,6 +243,10 @@ router.put("/editUser/:userId", edit_user);
 router.get(
   "/workflows/:workflowId/getSteps",
   get_workflow_steps_with_assignments
+);
+router.post(
+  "/workflows/checkIfDuplicateWorkflow",
+  check_if_workflow_is_duplicate
 );
 router.post("/workflows/addWorkflow", add_workflow); // Create a new workflow
 router.put("/workflows/editWorkflow/:workflowId", edit_workflow); // Edit workflow (new version)

@@ -1894,3 +1894,315 @@ export const get_all_workflows_with_basics = async (req, res) => {
     });
   }
 };
+
+export const check_if_workflow_is_duplicate = async (req, res) => {
+  try {
+    const accessToken = req.headers["authorization"]?.substring(7);
+    const userData = await verifyUser(accessToken);
+    if (userData === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    const { name, steps } = req.body;
+
+    if (!steps || !steps.length) {
+      return res.status(400).json({ error: "Workflow steps are required." });
+    }
+
+    // Get all active workflows
+    const allActiveWorkflows = await prisma.workflow.findMany({
+      where: { isActive: true },
+      include: {
+        steps: {
+          include: {
+            assignments: {
+              include: {
+                departmentRoles: {
+                  include: { department: true, role: true },
+                },
+              },
+            },
+          },
+          orderBy: { stepNumber: "asc" },
+        },
+      },
+    });
+
+    // Helper function to normalize and compare steps
+    const normalizeStep = (step) => {
+      const normalizedAssignments = (step.assignments || []).map(
+        (assignment) => {
+          // For DEPARTMENT assignments, extract selectedRoles from departmentRoles
+          let selectedRoles = [];
+          if (
+            assignment.assigneeType === "DEPARTMENT" &&
+            assignment.departmentRoles
+          ) {
+            // Group roles by department
+            const deptRoles = {};
+            assignment.departmentRoles.forEach((dr) => {
+              if (!deptRoles[dr.departmentId]) {
+                deptRoles[dr.departmentId] = [];
+              }
+              deptRoles[dr.departmentId].push(dr.roleId);
+            });
+
+            // Convert to array format similar to the request payload
+            selectedRoles = Object.entries(deptRoles).map(
+              ([deptId, roles]) => ({
+                department: parseInt(deptId),
+                roles: roles.map((roleId) => ({ id: roleId })),
+                allowParallel: assignment.allowParallel,
+                direction: assignment.direction,
+              })
+            );
+          } else if (
+            assignment.selectedRoles &&
+            Array.isArray(assignment.selectedRoles)
+          ) {
+            // For non-DEPARTMENT assignments
+            selectedRoles = assignment.selectedRoles.map((roleId) => ({
+              id: roleId,
+            }));
+          }
+
+          return {
+            assigneeType: assignment.assigneeType,
+            assigneeIds: assignment.assigneeIds.map((id) => ({ id })),
+            actionType: assignment.actionType,
+            accessTypes: assignment.accessTypes.sort(),
+            direction: assignment.direction,
+            allowParallel: assignment.allowParallel,
+            selectedRoles: selectedRoles,
+          };
+        }
+      );
+
+      // Sort assignments to ensure consistent comparison
+      const sortedAssignments = normalizedAssignments.sort((a, b) => {
+        const aKey = JSON.stringify({
+          assigneeType: a.assigneeType,
+          actionType: a.actionType,
+          assigneeIds: a.assigneeIds.map((idObj) => idObj.id).sort(),
+        });
+        const bKey = JSON.stringify({
+          assigneeType: b.assigneeType,
+          actionType: b.actionType,
+          assigneeIds: b.assigneeIds.map((idObj) => idObj.id).sort(),
+        });
+        return aKey.localeCompare(bKey);
+      });
+
+      return {
+        stepName: step.stepName,
+        allowParallel: step.allowParallel,
+        requiresDocument: step.requiresDocument ?? true,
+        assignments: sortedAssignments,
+      };
+    };
+
+    // Normalize the input steps
+    const normalizedInputSteps = steps.map((step) => {
+      const normalizedAssignments = (step.assignments || []).map(
+        (assignment) => {
+          // Normalize assigneeIds
+          const assigneeIds = Array.isArray(assignment.assigneeIds)
+            ? assignment.assigneeIds
+                .map((item) => ({ id: item.id || item }))
+                .filter((item) => item.id != null)
+            : [];
+
+          // Normalize selectedRoles
+          let selectedRoles = [];
+          if (assignment.assigneeType === "DEPARTMENT") {
+            if (Array.isArray(assignment.selectedRoles)) {
+              selectedRoles = assignment.selectedRoles.map((roleEntry) => ({
+                department: roleEntry.department,
+                roles: Array.isArray(roleEntry.roles)
+                  ? roleEntry.roles
+                      .filter((role) => role.id != null)
+                      .map((role) => ({ id: role.id }))
+                  : [],
+                allowParallel:
+                  roleEntry.allowParallel ?? assignment.allowParallel ?? false,
+                direction: roleEntry.direction ?? assignment.direction,
+              }));
+            }
+          } else if (Array.isArray(assignment.selectedRoles)) {
+            selectedRoles = assignment.selectedRoles
+              .filter((role) => role.id != null)
+              .map((role) => ({ id: role.id }));
+          }
+
+          return {
+            assigneeType: assignment.assigneeType,
+            assigneeIds: assigneeIds.sort((a, b) => a.id - b.id),
+            actionType: assignment.actionType,
+            accessTypes: (assignment.accessTypes || []).sort(),
+            direction: assignment.direction,
+            allowParallel: assignment.allowParallel ?? false,
+            selectedRoles: selectedRoles,
+          };
+        }
+      );
+
+      // Sort assignments
+      const sortedAssignments = normalizedAssignments.sort((a, b) => {
+        const aKey = JSON.stringify({
+          assigneeType: a.assigneeType,
+          actionType: a.actionType,
+          assigneeIds: a.assigneeIds.map((idObj) => idObj.id).sort(),
+        });
+        const bKey = JSON.stringify({
+          assigneeType: b.assigneeType,
+          actionType: b.actionType,
+          assigneeIds: b.assigneeIds.map((idObj) => idObj.id).sort(),
+        });
+        return aKey.localeCompare(bKey);
+      });
+
+      return {
+        stepName: step.stepName,
+        allowParallel: step.allowParallel ?? false,
+        requiresDocument: step.requiresDocument ?? true,
+        assignments: sortedAssignments,
+      };
+    });
+
+    // Check each active workflow for duplicate steps
+    for (const workflow of allActiveWorkflows) {
+      // Skip if workflow has different number of steps
+      if (workflow.steps.length !== normalizedInputSteps.length) {
+        continue;
+      }
+
+      let isDuplicate = true;
+
+      // Compare each step
+      for (let i = 0; i < workflow.steps.length; i++) {
+        const dbStep = normalizeStep(workflow.steps[i]);
+        const inputStep = normalizedInputSteps[i];
+
+        // Compare step properties
+        if (
+          dbStep.stepName !== inputStep.stepName ||
+          dbStep.allowParallel !== inputStep.allowParallel ||
+          dbStep.requiresDocument !== inputStep.requiresDocument
+        ) {
+          isDuplicate = false;
+          break;
+        }
+
+        // Compare number of assignments
+        if (dbStep.assignments.length !== inputStep.assignments.length) {
+          isDuplicate = false;
+          break;
+        }
+
+        // Compare each assignment
+        for (let j = 0; j < dbStep.assignments.length; j++) {
+          const dbAssignment = dbStep.assignments[j];
+          const inputAssignment = inputStep.assignments[j];
+
+          // Compare basic assignment properties
+          if (
+            dbAssignment.assigneeType !== inputAssignment.assigneeType ||
+            dbAssignment.actionType !== inputAssignment.actionType ||
+            JSON.stringify(dbAssignment.accessTypes) !==
+              JSON.stringify(inputAssignment.accessTypes) ||
+            dbAssignment.direction !== inputAssignment.direction ||
+            dbAssignment.allowParallel !== inputAssignment.allowParallel
+          ) {
+            isDuplicate = false;
+            break;
+          }
+
+          // Compare assigneeIds
+          const dbAssigneeIds = dbAssignment.assigneeIds
+            .map((item) => item.id)
+            .sort();
+          const inputAssigneeIds = inputAssignment.assigneeIds
+            .map((item) => item.id)
+            .sort();
+
+          if (
+            JSON.stringify(dbAssigneeIds) !== JSON.stringify(inputAssigneeIds)
+          ) {
+            isDuplicate = false;
+            break;
+          }
+
+          // Compare selectedRoles
+          if (dbAssignment.assigneeType === "DEPARTMENT") {
+            // For DEPARTMENT, compare department-specific roles
+            if (
+              dbAssignment.selectedRoles.length !==
+              inputAssignment.selectedRoles.length
+            ) {
+              isDuplicate = false;
+              break;
+            }
+
+            // Sort both by department ID for comparison
+            const dbRolesByDept = {};
+            dbAssignment.selectedRoles.forEach((roleEntry) => {
+              dbRolesByDept[roleEntry.department] = roleEntry.roles
+                .map((r) => r.id)
+                .sort();
+            });
+
+            const inputRolesByDept = {};
+            inputAssignment.selectedRoles.forEach((roleEntry) => {
+              inputRolesByDept[roleEntry.department] = roleEntry.roles
+                .map((r) => r.id)
+                .sort();
+            });
+
+            if (
+              JSON.stringify(dbRolesByDept) !== JSON.stringify(inputRolesByDept)
+            ) {
+              isDuplicate = false;
+              break;
+            }
+          } else {
+            // For non-DEPARTMENT, compare role IDs directly
+            const dbRoleIds = dbAssignment.selectedRoles
+              .map((r) => r.id)
+              .sort();
+            const inputRoleIds = inputAssignment.selectedRoles
+              .map((r) => r.id)
+              .sort();
+
+            if (JSON.stringify(dbRoleIds) !== JSON.stringify(inputRoleIds)) {
+              isDuplicate = false;
+              break;
+            }
+          }
+        }
+
+        if (!isDuplicate) break;
+      }
+
+      if (isDuplicate) {
+        return res.status(200).json({
+          is_workflow_duplicate: true,
+          duplicate_workflow: {
+            id: workflow.id,
+            name: workflow.name,
+            version: workflow.version,
+          },
+        });
+      }
+    }
+
+    // No duplicate found
+    return res.status(200).json({
+      is_workflow_duplicate: false,
+    });
+  } catch (error) {
+    console.error("Error checking workflow duplicate:", error);
+    return res
+      .status(500)
+      .json({ error: "Failed to check workflow duplicate" });
+  }
+};
