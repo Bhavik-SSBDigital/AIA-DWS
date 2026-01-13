@@ -158,13 +158,13 @@ export default function ReOpenProcessModal({
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <h2 className="text-lg font-semibold">Reopen Process</h2>
 
-      <input
+      {/* <input
         {...register('issueNo', {
           required: 'SOP Issue/Revision No is required',
         })}
         placeholder="SOP Issue / Revision No"
         className="w-full border p-2 rounded"
-      />
+      /> */}
 
       {fields.map((field, index) => {
         const isNew = watch(`supersededDocuments.${index}.isNewDocument`);
@@ -312,7 +312,7 @@ export default function ReOpenProcessModal({
             {/* DOCUMENT ISSUE / REVISION */}
             <div>
               <label className="text-sm font-medium mb-1 block">
-                Document Issue / Revision No
+                Version Number
               </label>
               <input
                 {...register(`supersededDocuments.${index}.issueNo`)}
