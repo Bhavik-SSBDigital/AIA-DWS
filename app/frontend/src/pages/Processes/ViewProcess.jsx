@@ -54,9 +54,9 @@ const ViewProcess = () => {
   const [selectedDocs, setSelectedDocs] = useState([]);
   const [searchParams] = useSearchParams();
   const [remarksModalOpen, setRemarksModalOpen] = useState({
-  id: null,
-  open: false,
-});
+    id: null,
+    open: false,
+  });
   const isCompleted = searchParams.get('completed') === 'true';
   const username = sessionStorage.getItem('username');
   const [showActions, setShowActions] = useState(false);
@@ -211,13 +211,15 @@ const ViewProcess = () => {
   const [signAllModalOpen, setSignAllModalOpen] = useState({
     open: false,
     withRemarks: false,
+    stepId: null,
     listOfDocuments: [],
   });
 
-  const openModelSignAllDoec = async () => {
+  const openModelSignAllDoec = async (stepId) => {
     setSignAllModalOpen({
       open: true,
       withRemarks: false,
+      stepId,
       processStepInstanceId: process?.processStepInstanceId,
       processId: process?.processId,
       // filter only  active and pdf map details processStepInstanceId,documentId,processId,name, remarks
@@ -243,13 +245,17 @@ const ViewProcess = () => {
         }),
       );
       toast.success(res?.data?.message);
+      await handleCompleteProcess(signAllModalOpen.stepId);
       setProcess((prev) => ({
         ...prev,
         documents: prev.documents.map((doc) =>
           signAllModalOpen.listOfDocuments.some((y) => y.documentId === doc.id)
             ? {
                 ...doc,
-                signedBy: [...doc?.signedBy, { signedBy: username, remarks: '' }],
+                signedBy: [
+                  ...doc?.signedBy,
+                  { signedBy: username, remarks: '' },
+                ],
               }
             : doc,
         ),
@@ -687,13 +693,22 @@ const ViewProcess = () => {
           />
           <CustomButton
             variant={'danger'}
+            text={'Approve'}
+            click={() => openModelSignAllDoec(process?.processStepInstanceId)}
+            className={'min-w-[150px]'}
+            disabled={
+              actionsLoading || isCompleted || process?.toBePicked === true
+            }
+          />
+          {/* <CustomButton
+            variant={'danger'}
             text={'Complete'}
             click={() => handleCompleteProcess(process?.processStepInstanceId)}
             className={'min-w-[150px]'}
             disabled={
               actionsLoading || isCompleted || process?.toBePicked === true
             }
-          />
+          /> */}
         </div>
         <hr className="text-slate-200 my-2" />
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
@@ -722,12 +737,12 @@ const ViewProcess = () => {
             <div className="flex-grow border-t border-green-600"></div>
           </div>
 
-          <CustomButton
+          {/* <CustomButton
             // disabled={selectedDocs.length === 0}
             className="ml-auto mb-4 block"
             text={`Sign All Documents`}
             click={openModelSignAllDoec}
-          />
+          /> */}
 
           {/* View All Selected Button */}
           <CustomButton
@@ -1506,13 +1521,16 @@ const ViewProcess = () => {
       {/* Custom Sign Modal (Remarks Optional) */}
       <CustomModal
         isOpen={customSignModal.open}
-        onClose={() => setCustomSignModal({ open: false, id: null, remarks: '' })}
+        onClose={() =>
+          setCustomSignModal({ open: false, id: null, remarks: '' })
+        }
         className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
       >
         <div className="p-4">
           <h2 className="text-lg font-semibold mb-4">Sign Document</h2>
           <p className="mb-4 text-gray-600">
-            Remarks are optional. You can leave it blank if you don't have any remarks.
+            Remarks are optional. You can leave it blank if you don't have any
+            remarks.
           </p>
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1521,7 +1539,10 @@ const ViewProcess = () => {
             <textarea
               value={customSignModal.remarks}
               onChange={(e) =>
-                setCustomSignModal({ ...customSignModal, remarks: e.target.value })
+                setCustomSignModal({
+                  ...customSignModal,
+                  remarks: e.target.value,
+                })
               }
               className="w-full p-2 border border-gray-300 rounded-md"
               rows={3}
@@ -1532,12 +1553,16 @@ const ViewProcess = () => {
             <CustomButton
               variant="secondary"
               text="Cancel"
-              click={() => setCustomSignModal({ open: false, id: null, remarks: '' })}
+              click={() =>
+                setCustomSignModal({ open: false, id: null, remarks: '' })
+              }
             />
             <CustomButton
               variant="primary"
               text="Sign Document"
-              click={() => handleSignDocument(customSignModal.id, customSignModal.remarks)}
+              click={() =>
+                handleSignDocument(customSignModal.id, customSignModal.remarks)
+              }
               disabled={actionsLoading}
             />
           </div>
@@ -1669,8 +1694,8 @@ const ViewProcess = () => {
         className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
       >
         <div>
-          <h2 className="text-lg font-semibold mb-4">Sign All Documents</h2>
-          <p className="mb-4">Are you sure you want to sign all documents?</p>
+          <h2 className="text-lg font-semibold mb-4">Approve All Documents</h2>
+          <p className="mb-4">Are you sure you want to approve all documents?</p>
           {/* radiobuton for with remarks or without remarks */}
           <div className="mb-4">
             <label className="inline-flex items-center">
