@@ -282,7 +282,7 @@ export const edit_workflow = async (req, res) => {
         data: {
           name,
           description,
-          updatedById: updatedById,
+          // updatedById: updatedById,
         },
       });
 

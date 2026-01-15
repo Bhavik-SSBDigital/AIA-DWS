@@ -220,6 +220,7 @@ export const login = async (req, res) => {
       roles: roles.map((role) => role.role),
       isAdmin: isAdmin,
       isDepartmentHead: isDepartmentHead,
+      isRootUser: user.isRootLevel,
     });
   } catch (error) {
     console.error("Error during login", error);
