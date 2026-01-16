@@ -105,15 +105,17 @@ export default function WorkflowVisualizer() {
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full sm:max-w-md p-3 border border-slate-400 rounded-lg transition"
         />
-        <button
-          className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition ${
-            !isAdmin ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-          onClick={() => setShowForm(true)}
-          disabled={!isAdmin}
-        >
-          + Add Workflow
-        </button>
+        {isAdmin && (
+          <button
+            className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition ${
+              !isAdmin ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            onClick={() => setShowForm(true)}
+            disabled={!isAdmin}
+          >
+            + Add Workflow
+          </button>
+        )}
       </div>
 
       <CustomModal
@@ -149,29 +151,43 @@ export default function WorkflowVisualizer() {
             >
               <div className="w-full mb-2 flex flex-col ml-auto items-end">
                 <div className="flex absolute top-3 left-3 gap-2">
-                  <CustomButton
-                    click={() => handleEdit(workflow, selectedVersion)}
-                    text={<IconEdit size={20} />}
-                    title={'Edit'}
-                    disabled={!isAdmin}
-                    className={!isAdmin ? 'pointer-events-none opacity-50' : ''}
-                  />
-                  <CustomButton
-                    click={() => setDeleteItemId(selectedVersion?.id)}
-                    text={<IconTrash size={20} />}
-                    title={'Delete'}
-                    disabled={selectedVersion?.status == 'Inactive' || !isAdmin}
-                    variant={'danger'}
-                    className={!isAdmin ? 'pointer-events-none opacity-50' : ''}
-                  />
-                  <CustomButton
-                    click={() => navigate(`/templates/${selectedVersion?.id}`)}
-                    text={<IconFile size={20} />}
-                    title={'Templates'}
-                    variant={'secondary'}
-                    disabled={!isAdmin}
-                    className={!isAdmin ? 'pointer-events-none opacity-50' : ''}
-                  />
+                  {isAdmin && (
+                    <>
+                      <CustomButton
+                        click={() => handleEdit(workflow, selectedVersion)}
+                        text={<IconEdit size={20} />}
+                        title={'Edit'}
+                        disabled={!isAdmin}
+                        className={
+                          !isAdmin ? 'pointer-events-none opacity-50' : ''
+                        }
+                      />
+                      <CustomButton
+                        click={() => setDeleteItemId(selectedVersion?.id)}
+                        text={<IconTrash size={20} />}
+                        title={'Delete'}
+                        disabled={
+                          selectedVersion?.status == 'Inactive' || !isAdmin
+                        }
+                        variant={'danger'}
+                        className={
+                          !isAdmin ? 'pointer-events-none opacity-50' : ''
+                        }
+                      />
+                      <CustomButton
+                        click={() =>
+                          navigate(`/templates/${selectedVersion?.id}`)
+                        }
+                        text={<IconFile size={20} />}
+                        title={'Templates'}
+                        variant={'secondary'}
+                        disabled={!isAdmin}
+                        className={
+                          !isAdmin ? 'pointer-events-none opacity-50' : ''
+                        }
+                      />
+                    </>
+                  )}
                 </div>
 
                 <label className="text-sm w-fit font-medium text-gray-700">
