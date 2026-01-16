@@ -17,14 +17,16 @@ const DropdownMessage = () => {
         const now = new Date();
         const filtered = (res.data || [])
           .filter((n) => {
-            const createdAt = new Date(n.createdAt);
+            const createdAt = new Date(n.arrivedAt);
+            // const createdAt = new Date(n.createdAt);
             const diffInDays =
               (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
-            return diffInDays > 15; // only older than 15 days
+            return diffInDays > 7; // only older than 7 days
+            // return diffInDays > 15; // only older than 15 days
           })
           .sort(
             (a, b) =>
-              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+              new Date(b.arrivedAt).getTime() - new Date(a.arrivedAt).getTime(),
           );
         setAlerts(filtered);
       }
@@ -62,15 +64,15 @@ const DropdownMessage = () => {
     <li className="relative">
       {/* Bell Icon */}
       <div
-        className="border border-gray-300"
+        // className="border border-gray-300"
         style={{
           display: 'flex',
           position: 'relative',
           justifyContent: 'center',
           alignItems: 'center',
-          height: '35px',
-          width: '35px',
-          background: '#EFF4FB',
+          height: '40px',
+          width: '40px',
+          background: alerts.length ? '#fde1e1' : '#f3f4f6',
           borderRadius: '50%',
         }}
         onClick={() => setDropdownOpen(!dropdownOpen)}
@@ -82,7 +84,7 @@ const DropdownMessage = () => {
         >
           <span className="absolute -z-1 inline-flex h-full w-full animate-ping rounded-full bg-meta-1 opacity-75"></span>
         </span>
-
+        {/* 
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="24"
@@ -94,9 +96,27 @@ const DropdownMessage = () => {
           strokeLinecap="round"
           strokeLinejoin="round"
         >
+          <path stroke="none" d="M0 0h24v24H0z" fill="none"  />
+          <path d="M12 4v9" stroke="red" />
+          <path d="M12 18h.5" stroke="red" />
+        </svg> */}
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="40"
+          height="40"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          className="icon icon-tabler icons-tabler-outline icon-tabler-alert-circle"
+          style={{ color: alerts.length ? 'red' : '#999999' }}
+        >
           <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-          <path d="M12 8v4" />
-          <path d="M12 16h.01" />
+          <path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" />
+          <path d="M12 8v4" stroke-width="2" />
+          <path d="M12 16h.01" stroke-width="2" />
         </svg>
       </div>
 
