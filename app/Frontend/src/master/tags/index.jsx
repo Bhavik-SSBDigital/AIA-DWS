@@ -1,193 +1,65 @@
-// import { useState } from 'react';
-// import { IconPlus, IconX, IconTags } from '@tabler/icons-react';
-
-// export default function TagsManager({ tags = [], onChange, className = '' }) {
-//   const [input, setInput] = useState('');
-//   const [isFocused, setIsFocused] = useState(false);
-
-//   const addTag = () => {
-//     const trimmed = input.trim().toLowerCase();
-//     if (!trimmed) return;
-//     if (tags.includes(trimmed)) {
-//       setInput('');
-//       return;
-//     }
-
-//     const newTags = [...tags, trimmed];
-//     onChange(newTags);
-//     setInput('');
-//   };
-
-//   const removeTag = (tagToRemove) => {
-//     const newTags = tags.filter((tag) => tag !== tagToRemove);
-//     onChange(newTags);
-//   };
-
-//   const handleKeyDown = (e) => {
-//     if (e.key === 'Enter' || e.key === ',') {
-//       e.preventDefault();
-//       addTag();
-//     }
-//     if (e.key === 'Backspace' && input === '' && tags.length > 0) {
-//       const newTags = tags.slice(0, -1);
-//       onChange(newTags);
-//     }
-//   };
-
-//   return (
-//     <div className={`w-full ${className}`}>
-//       {/* Label */}
-//       <label className="mb-1.5 flex items-center gap-2 text-sm font-medium text-gray-700">
-//         <IconTags size={18} stroke={1.8} />
-//         Tags
-//       </label>
-
-//       {/* Main input container */}
-//       <div
-//         className={`
-//           min-h-[44px] w-full px-3 py-2.5 rounded-xl border-2
-//           transition-all duration-200 shadow-sm
-//           flex flex-wrap items-center gap-2.5 bg-white
-//           ${
-//             isFocused
-//               ? 'border-indigo-500 ring-2 ring-indigo-100/70'
-//               : 'border-gray-300 hover:border-gray-400'
-//           }
-//         `}
-//       >
-//         {/* Render existing tags */}
-//         {tags.map((tag) => (
-//           <div
-//             key={tag}
-//             className="
-//               group flex items-center gap-1.5 pl-3 pr-2 py-1
-//               bg-indigo-50 text-indigo-700 rounded-full
-//               text-sm font-medium transition-colors hover:bg-indigo-100
-//             "
-//           >
-//             <span>{tag}</span>
-//             <button
-//               type="button"
-//               onClick={() => removeTag(tag)}
-//               className="
-//                 p-1 rounded-full text-indigo-600 opacity-70
-//                 hover:opacity-100 hover:bg-indigo-200/60 transition-all
-//               "
-//               aria-label={`Remove ${tag}`}
-//             >
-//               <IconX size={14} stroke={2.5} />
-//             </button>
-//           </div>
-//         ))}
-
-//         {/* Input field + add button */}
-//         <div className="flex-1 min-w-[140px] flex items-center">
-//           <input
-//             type="text"
-//             value={input}
-//             onChange={(e) => setInput(e.target.value)}
-//             onKeyDown={handleKeyDown}
-//             onFocus={() => setIsFocused(true)}
-//             onBlur={() => setIsFocused(false)}
-//             placeholder={tags.length === 0 ? 'Add new tag...' : ''}
-//             className="
-//               flex-1 bg-transparent outline-none
-//               text-gray-800 placeholder-gray-400 text-sm
-//             "
-//           />
-
-//           {input.trim() && (
-//             <button
-//               type="button"
-//               onClick={addTag}
-//               className="
-//                 p-1.5 rounded-full bg-indigo-600 text-white
-//                 hover:bg-indigo-700 active:scale-95
-//                 transition-all duration-150 shadow-sm
-//               "
-//               title="Add tag"
-//             >
-//               <IconPlus size={16} stroke={2.5} />
-//             </button>
-//           )}
-//         </div>
-//       </div>
-
-//       {/* Helper text */}
-//       <div className="mt-1.5 text-xs text-gray-500 flex items-center gap-1.5">
-//         <span>Press</span>
-//         <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-gray-600 text-[0.7rem] font-mono">
-//           Enter
-//         </kbd>
-//         <span>or</span>
-//         <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-gray-600 text-[0.7rem] font-mono">
-//           ,
-//         </kbd>
-//         <span>to add • Backspace removes last</span>
-//       </div>
-//     </div>
-//   );
-// }
-
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { IconTags, IconPlus, IconX, IconLoader2 } from '@tabler/icons-react';
 import apiClient from '../../common/Apis';
+import CustomButton from '../../CustomComponents/CustomButton';
 
 export default function TagsMasterPage() {
   const [tags, setTags] = useState([]);
   const [newTags, setNewTags] = useState([]);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Fetch existing tags
-  const fetchTags = async () => {
+  const inputRef = useRef(null);
+
+  // Fetch tags
+  const fetchTags = useCallback(async () => {
     try {
       setLoading(true);
       const { data } = await apiClient.get('/tags');
       setTags(data.map((t) => t.name.toLowerCase()));
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error('Fetch tags failed:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchTags();
-  }, []);
+  }, [fetchTags]);
 
-  // Add tag on Enter or comma
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      addTag(input);
-    }
-  };
-
-  const addTag = (value) => {
-    const tag = value.trim().toLowerCase();
+  // Add tag (button only)
+  const addTag = useCallback(() => {
+    const tag = input.trim().toLowerCase();
     if (!tag) return;
-    if (newTags.includes(tag) || tags.includes(tag)) return;
 
-    setNewTags([...newTags, tag]);
+    if (newTags.includes(tag) || tags.includes(tag)) {
+      setInput('');
+      // inputRef.current.focus();
+      return;
+    }
+
+    setNewTags((prev) => [...prev, tag]);
     setInput('');
-  };
+    // inputRef.current.focus();
+  }, [input, newTags, tags]);
 
   const removeTag = (tag) => {
-    setNewTags(newTags.filter((t) => t !== tag));
+    setNewTags((prev) => prev.filter((t) => t !== tag));
   };
 
+  // Submit tags
   const handleSubmit = async () => {
-    if (newTags.length === 0) return;
-    setSubmitting(true);
+    if (!newTags.length) return;
 
     try {
+      setSubmitting(true);
       await apiClient.post('/tags', { tags: newTags });
       setNewTags([]);
       fetchTags();
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error('Submit tags failed:', err);
     } finally {
       setSubmitting(false);
     }
@@ -209,33 +81,52 @@ export default function TagsMasterPage() {
 
         {/* Add Tags */}
         <div className="bg-white rounded-xl shadow-lg p-6 space-y-4">
-          {/* Tag Input */}
-          <div className="flex flex-wrap gap-2 items-center border rounded-lg p-3 focus-within:ring-2 focus-within:ring-indigo-400">
-            {newTags.map((tag) => (
-              <span
-                key={tag}
-                className="flex items-center gap-1 px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm"
-              >
-                {tag}
-                <button onClick={() => removeTag(tag)}>
-                  <IconX size={14} />
-                </button>
-              </span>
-            ))}
+          <div className="flex gap-2 items-center">
+            <div className="flex flex-1 flex-wrap gap-2 items-center border rounded-lg p-1 focus-within:ring-2 focus-within:ring-indigo-400">
+              {newTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="flex items-center gap-1 px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm"
+                >
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => removeTag(tag)}
+                    className="hover:text-red-500"
+                  >
+                    <IconX size={14} />
+                  </button>
+                </span>
+              ))}
 
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type tag & press Enter"
-              className="flex-1 min-w-[160px] outline-none text-sm"
-            />
+              <input
+                value={input}
+                ref={inputRef}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Type tag"
+                className="flex-1 min-w-[160px] outline-none text-sm"
+              />
+
+              {/* <CustomButton text="Add" className="px-4 py-2" click={addTag} /> */}
+            </div>
+            <button
+              onClick={addTag}
+              disabled={submitting}
+              className="flex items-center h-10 gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
+            >
+              {submitting ? (
+                <IconLoader2 size={18} className="animate-spin" />
+              ) : (
+                <IconPlus size={18} />
+              )}
+              Add
+            </button>
           </div>
 
           {/* Submit */}
           <button
             onClick={handleSubmit}
-            disabled={submitting || newTags.length === 0}
+            disabled={submitting || !newTags.length}
             className="flex items-center gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
           >
             {submitting ? (
