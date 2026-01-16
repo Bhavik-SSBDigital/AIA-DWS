@@ -604,7 +604,7 @@ function AssignmentForm({
   const { register, handleSubmit, watch, control, setValue } = useForm({
     defaultValues: editingAssignment || {
       assigneeType: 'USER',
-      actionType: 'APPROVAL',
+      actionType: 'REVIEW',
       assigneeIds: [],
       direction: null,
     },
@@ -719,8 +719,8 @@ function AssignmentForm({
               className="border p-2 w-full rounded-sm mb-3"
             >
               <option value="USER">User</option>
-              <option value="ROLE">Role</option>
-              <option value="DEPARTMENT">Department</option>
+              {/* <option value="ROLE">Role</option>
+              <option value="DEPARTMENT">Department</option> */}
             </select>
 
             {/* Assignee Selection */}
