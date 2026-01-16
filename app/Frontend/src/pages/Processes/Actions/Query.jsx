@@ -119,6 +119,8 @@ export default function Query({
       const filteredSummaries = data.documentSummaries.filter(
         (summary) => summary.feedbackText?.trim() !== '',
       );
+      delete data.assignedStepName;
+      delete data.assignedAssigneeId;
 
       const finalData = {
         ...data,
@@ -137,7 +139,9 @@ export default function Query({
     <div className="space-y-3">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
         <div>
-          <label className="block text-sm font-medium mb-1">Query Text</label>
+          <label className="block text-sm font-medium mb-1">
+            Rejection Text
+          </label>
           <textarea
             {...register('queryText')}
             required
@@ -146,7 +150,7 @@ export default function Query({
             placeholder="Write your query here"
           />
         </div>
-        <div>
+        {/* <div>
           <label className="block text-sm font-medium mb-1">Select Step</label>
           <select
             {...register('assignedStepName')}
@@ -185,7 +189,7 @@ export default function Query({
               </option>
             ))}
           </select>
-        </div>
+        </div> */}
         <div>
           <h3 className="text-lg font-semibold mb-2">Document Summaries</h3>
           <table className="w-full border border-gray-300 text-sm">
@@ -215,7 +219,8 @@ export default function Query({
                   </td>
                 </tr>
               ))}
-            </tbody>\
+            </tbody>
+            \
           </table>
         </div>
         {/* <div>
