@@ -206,6 +206,12 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
             icon: <IconFile size={26} />,
             active: pathname.includes('reports'),
           },
+          {
+            path: '/master/tags',
+            label: 'Master Tags',
+            icon: <IconTags size={26} />,
+            active: pathname == '/master/tags',
+          },
         ]
       : []),
     {
@@ -238,12 +244,7 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
       ],
       active: pathname.includes('process'),
     },
-    {
-      path: '/master/tags',
-      label: 'Master Tags',
-      icon: <IconTags size={26} />,
-      active: pathname == '/master/tags',
-    },
+
     {
       path: '/logs',
       label: 'Logs',
