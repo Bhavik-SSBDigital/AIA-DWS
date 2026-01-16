@@ -658,7 +658,7 @@ const ViewProcess = () => {
             click={() => setOpenModal('document-upload')}
             disabled={actionsLoading || !isCompleted || disableActions}
           />
-          <CustomButton
+          {/*<CustomButton
             variant={'primary'}
             text={'Claim'}
             className={'min-w-[150px]'}
@@ -669,7 +669,7 @@ const ViewProcess = () => {
               isCompleted ||
               process?.toBePicked === false
             }
-          />
+          />*/}
           <CustomButton
             variant={'secondary'}
             text={'Reject'}
@@ -900,7 +900,7 @@ const ViewProcess = () => {
                       }
                       disabled={
                         actionsLoading ||
-                        doc?.signedBy?.length < 1 ||
+                        doc?.signedBy?.length > 0 ||
                         // doc?.type?.toUpperCase() !== 'PDF' ||
                         doc?.rejectionDetails ||
                         !isCompleted ||
@@ -1695,7 +1695,9 @@ const ViewProcess = () => {
       >
         <div>
           <h2 className="text-lg font-semibold mb-4">Approve All Documents</h2>
-          <p className="mb-4">Are you sure you want to approve all documents?</p>
+          <p className="mb-4">
+            Are you sure you want to approve all documents?
+          </p>
           {/* radiobuton for with remarks or without remarks */}
           <div className="mb-4">
             <label className="inline-flex items-center">
