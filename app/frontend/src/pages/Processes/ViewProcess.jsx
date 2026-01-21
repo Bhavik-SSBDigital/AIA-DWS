@@ -645,12 +645,29 @@ const ViewProcess = () => {
       <CustomCard>
         <div className="flex justify-end flex-row gap-2 flex-wrap">
           <CustomButton
-            variant={'primary'}
-            text={'Re-Open'}
+            text={'Approve'}
+            click={() => openModelSignAllDoec(process?.processStepInstanceId)}
             className={'min-w-[150px]'}
-            click={() => setOpenModal('re-open')}
-            disabled={actionsLoading || !isCompleted || disableActions}
+            // disabled={
+            //   actionsLoading || isCompleted || process?.toBePicked === true
+            // }
           />
+          <CustomButton
+            variant={'danger'}
+            text={'Reject'}
+            className={'min-w-[150px]'}
+            click={() => setOpenModal('query')}
+            disabled={actionsLoading || isCompleted || disableActions}
+          />
+          {(isCompleted || !disableActions) && (
+            <CustomButton
+              variant={'primary'}
+              text={'Re-Open'}
+              className={'min-w-[150px]'}
+              click={() => setOpenModal('re-open')}
+              disabled={actionsLoading}
+            />
+          )}
           <CustomButton
             variant={'primary'}
             text={'Upload Document'}
@@ -670,13 +687,7 @@ const ViewProcess = () => {
               process?.toBePicked === false
             }
           />*/}
-          <CustomButton
-            variant={'secondary'}
-            text={'Reject'}
-            className={'min-w-[150px]'}
-            click={() => setOpenModal('query')}
-            disabled={actionsLoading || isCompleted || disableActions}
-          />
+
           <CustomButton
             variant={'secondary'}
             text={'Ask Recommendation'}
@@ -691,15 +702,7 @@ const ViewProcess = () => {
             className={'min-w-[150px]'}
             disabled={actionsLoading}
           />
-          <CustomButton
-            variant={'danger'}
-            text={'Approve'}
-            click={() => openModelSignAllDoec(process?.processStepInstanceId)}
-            className={'min-w-[150px]'}
-            disabled={
-              actionsLoading || isCompleted || process?.toBePicked === true
-            }
-          />
+
           {/* <CustomButton
             variant={'danger'}
             text={'Complete'}
