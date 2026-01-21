@@ -659,7 +659,7 @@ const ViewProcess = () => {
             click={() => setOpenModal('query')}
             disabled={actionsLoading || isCompleted || disableActions}
           />
-          {(isCompleted || !disableActions) && (
+          {isCompleted && !disableActions && (
             <CustomButton
               variant={'primary'}
               text={'Re-Open'}
