@@ -9,25 +9,58 @@ import {
   uploadDocumentInProcess,
   useTemplateDocument,
   ViewDocument,
+  extractEMLDetails, 
 } from '../../common/Apis';
 import { upload } from '../../components/drop-file-input/FileUploadDownload';
 import Show from '../workflows/Show';
 import apiClient from '../../common/Apis';
 import { toast } from 'react-toastify';
-import { IconInfoCircle, IconX, IconChevronDown, IconChevronUp } from '@tabler/icons-react';
+import { 
+  IconInfoCircle, 
+  IconX, 
+  IconChevronDown, 
+  IconChevronUp,
+  IconMail,
+  IconEye,
+  IconPaperclip,
+  IconFileText,
+    IconUser,
+    IconClock
+} from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import CustomButton from '../../CustomComponents/CustomButton';
 import TopLoader from '../../common/Loader/TopLoader';
 import ViewFile from '../view/View';
 import CustomCard from '../../CustomComponents/CustomCard';
 import Title from '../../CustomComponents/Title';
+import EmailThreadModal from './EmailThreadModal';
 
 export default function InitiateProcess() {
-  console.log('called');
   const navigate = useNavigate();
   const [workflowData, setWorkflowData] = useState([]);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+   const formatDate = (date) => {
+    const now = new Date();
+    const emailDate = new Date(date);
+    const diffTime = Math.abs(now - emailDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+      return `Today at ${emailDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    } else if (diffDays === 1) {
+      return `Yesterday at ${emailDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    } else if (diffDays <= 7) {
+      return `${diffDays} days ago`;
+    }
+    return emailDate.toLocaleDateString([], { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
   const [fileDetails, setFileDetails] = useState({
     tags: [],
     partNumber: '',
@@ -40,6 +73,19 @@ export default function InitiateProcess() {
   const [templates, setTemplates] = useState([]);
   const [actionsLoading, setActionsLoading] = useState(false);
   const [fileView, setFileView] = useState(null);
+
+  const toggleEmailThreadExpansion = (threadId) => {
+    setExpandedEmailThreads(prev => ({
+      ...prev,
+      [threadId]: !prev[threadId]
+    }));
+  };
+  
+  // Email extraction states
+  const [emailThreads, setEmailThreads] = useState([]);
+  const [showEmailThreadModal, setShowEmailThreadModal] = useState(false);
+  const [selectedEmailThread, setSelectedEmailThread] = useState(null);
+  const [isExtractingEmail, setIsExtractingEmail] = useState(false);
 
   const defaultvalues = {
     workflowId: '',
@@ -86,7 +132,6 @@ export default function InitiateProcess() {
   };
 
   useEffect(() => {
-    console.log('called');
     const getWorkflowsData = async () => {
       try {
         const response = await GetWorkflows();
@@ -99,6 +144,7 @@ export default function InitiateProcess() {
     getWorkflowsData();
   }, []);
 
+  const [expandedEmailThreads, setExpandedEmailThreads] = useState({});
   const [allTags, setAllTags] = useState([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -108,7 +154,6 @@ export default function InitiateProcess() {
     const fetchTags = async () => {
       try {
         const { data } = await apiClient.get('/tags');
-        console.log("data", data)
         setAllTags(data.map((t) => t.name.toLowerCase()));
       } catch (e) {
         console.error(e);
@@ -158,6 +203,97 @@ export default function InitiateProcess() {
   };
 
   const inputRef = useRef(null);
+  
+  // Enhanced EML extraction function
+// Enhanced EML extraction function
+const handleEMLExtraction = async (documentId) => {
+  setIsExtractingEmail(true);
+  try {
+    console.log('Starting EML extraction for document:', documentId);
+    const response = await extractEMLDetails(documentId);
+    console.log('EML extraction response:', response);
+    
+    if (response.data.success) {
+      const data = response.data.data;
+      
+      // Handle different response formats
+      let emails = [];
+      
+      // Format 1: Direct emails array
+      if (Array.isArray(data.emails) && data.emails.length > 0) {
+        emails = data.emails;
+      }
+      // Format 2: OriginalEmail object
+      else if (data.originalEmail) {
+        emails = [{
+          subject: data.originalEmail.subject,
+          from: data.originalEmail.from,
+          date: data.originalEmail.date,
+          bodyText: data.threadText || "",
+          attachments: data.attachmentsMapping || []
+        }];
+      }
+      // Format 3: Thread text only
+      else if (data.threadText) {
+        emails = [{
+          subject: "Extracted Email",
+          from: "Unknown",
+          date: new Date().toISOString(),
+          bodyText: data.threadText,
+          attachments: data.attachmentsMapping || []
+        }];
+      }
+      
+      const newThread = {
+        id: `thread-${Date.now()}`,
+        originalDocumentId: documentId,
+        threadText: data.threadText || "Email thread",
+        emails: emails,
+        attachmentsMapping: data.attachmentsMapping || [],
+        extractedAt: new Date().toISOString(),
+      };
+      
+      setEmailThreads(prev => [...prev, newThread]);
+      
+      // Add extracted attachments to the documents list
+      if (data.extractedDocumentIds && data.extractedDocumentIds.length > 0) {
+        data.extractedDocumentIds.forEach((attDocId, index) => {
+          const attachment = data.attachmentsMapping?.[index];
+          if (attachment) {
+            const emailSubject = emails[0]?.subject || data.originalEmail?.subject || 'Unknown subject';
+            const emailFrom = emails[0]?.from || data.originalEmail?.from || 'Unknown sender';
+            
+            addDocument({
+              documentId: attDocId,
+              name: attachment.originalFilename || `attachment_${index}`,
+              tags: [...fileDetails.tags, 'extracted-from-email'],
+              description: `Extracted from email: ${emailSubject}`,
+              fromEmail: true,
+              emailSubject: emailSubject,
+              emailFrom: emailFrom,
+              partNumber: fileDetails.partNumber,
+              preApproved: fileDetails.preApproved,
+              issueNo: fileDetails.issueNo,
+            });
+          }
+        });
+        
+        toast.success(`Email extracted successfully! ${data.extractedDocumentIds.length} attachment(s) added.`);
+      } else {
+        toast.info('Email extracted successfully!');
+      }
+    } else {
+      toast.error('Failed to extract email: ' + response.data.message);
+    }
+  } catch (error) {
+    console.error('EML extraction error:', error);
+    toast.error(error?.response?.data?.message || 'Failed to extract email. Please try again.');
+  } finally {
+    setIsExtractingEmail(false);
+  }
+};
+
+  // Modified handleUpload function
   const handleUpload = async () => {
     if (!workflowId) {
       toast.info('Please select workflow.');
@@ -166,16 +302,17 @@ export default function InitiateProcess() {
 
     if (!selectedFile) return;
 
+    console.log('Uploading file:', selectedFile.name);
+    console.log('File extension:', selectedFile.name.split('.').pop().toLowerCase());
+    
     setActionsLoading(true);
 
     try {
       // Generate file name from backend
-
       const generatedName = fileDetails.preApproved
         ? {
             data: {
-              documentName:
-                fileDetails.name + '.' + selectedFile.name.split('.').pop(),
+              documentName: fileDetails.name + '.' + selectedFile.name.split('.').pop(),
             },
           }
         : await GenerateDocumentName(
@@ -184,6 +321,8 @@ export default function InitiateProcess() {
             selectedFile.name.split('.').pop(),
           );
 
+      console.log('Generated document name:', generatedName?.data?.documentName);
+      
       // Upload file using generated name and tags
       const res = await uploadDocumentInProcess(
         [selectedFile],
@@ -191,20 +330,55 @@ export default function InitiateProcess() {
         fileDetails?.tags,
       );
 
-      // Success logic
-      toast.success('File uploaded successfully');
+      console.log('Upload response:', res);
 
-      addDocument({
-        documentId: res[0],
-        name: generatedName?.data?.documentName,
-        tags: fileDetails.tags,
-        description: fileDetails.fileDescription,
-        partNumber: fileDetails.partNumber,
-        preApproved: fileDetails.preApproved,
-        issueNo: fileDetails.issueNo,
-      });
+      // Check if file is EML
+      const fileExt = selectedFile.name.split('.').pop().toLowerCase();
+      console.log("file ext", fileExt)
+      const isEmailFile = ['eml', 'msg', 'email'].includes(fileExt);
+      
+      if (isEmailFile) {
+        // EML file - extract it
+        const uploadedDocumentId = res[0]; // Get the document ID from upload response
+        toast.info('Email file detected. Extracting attachments...');
+        
+        // Wait a moment for the file to be fully processed
+        setTimeout(async () => {
+          await handleEMLExtraction(uploadedDocumentId);
+          
+          // Reset form after successful extraction
+          setFileDetails({
+            tags: [],
+            partNumber: '',
+            preApproved: false,
+            fileDescription: '',
+            issueNo: '',
+          });
+          setNewTag('');
+          setSelectedFile(null);
+          if (inputRef.current) inputRef.current.value = null;
+          
+          setActionsLoading(false);
+        }, 1000);
+        
+        return; // Don't continue with regular file handling
+      } else {
+        // Regular file upload
+        toast.success('File uploaded successfully');
+        
+        addDocument({
+          documentId: res[0],
+          name: generatedName?.data?.documentName,
+          tags: fileDetails.tags,
+          description: fileDetails.fileDescription,
+          partNumber: fileDetails.partNumber,
+          preApproved: fileDetails.preApproved,
+          issueNo: fileDetails.issueNo,
+          fromEmail: false,
+        });
+      }
 
-      // Reset form
+      // Reset form for non-email files
       setFileDetails({
         tags: [],
         partNumber: '',
@@ -217,30 +391,43 @@ export default function InitiateProcess() {
       setSelectedFile(null);
       if (inputRef.current) inputRef.current.value = null;
     } catch (err) {
-      // Show relevant error
-      toast.error(err?.response?.data?.message || err.message);
+      console.error('Upload error:', err);
+      toast.error(err?.response?.data?.message || err.message || 'Upload failed');
     } finally {
       setActionsLoading(false);
     }
   };
 
-  const onSubmit = async (data) => {
-    if (data?.documents?.length === 0) {
-      toast.info('Please upload documents for process');
-      return;
-    }
-    setActionsLoading(true);
-    try {
-      const res = await ProcessInitiate(data);
-      toast.success(res?.data?.message);
-      console.log(data);
-      navigate('/processes/work');
-    } catch (error) {
-      toast.error(error?.response?.data?.message || error?.message);
-    } finally {
-      setActionsLoading(false);
-    }
+  // Modified onSubmit to include email threads
+const onSubmit = async (data) => {
+  if (data?.documents?.length === 0) {
+    toast.info('Please upload documents for process');
+    return;
+  }
+  
+  // Prepare data with email threads - FIXED STRUCTURE
+  const submitData = {
+    ...data,
+    // Send minimal email thread data to match backend expectations
+    emailThreads: emailThreads.map(thread => ({
+      threadText: thread.threadText || "Email thread extracted from EML",
+      emails: [], // Empty array as we don't have parsed emails
+      attachmentsMapping: thread.attachmentsMapping || [],
+      extractedAt: thread.extractedAt,
+    })),
   };
+  
+  setActionsLoading(true);
+  try {
+    const res = await ProcessInitiate(submitData);
+    toast.success(res?.data?.message);
+    navigate('/processes/work');
+  } catch (error) {
+    toast.error(error?.response?.data?.message || error?.message);
+  } finally {
+    setActionsLoading(false);
+  }
+};
 
   const handleUseTemplate = async (template) => {
     setActionsLoading(true);
@@ -276,6 +463,30 @@ export default function InitiateProcess() {
     }
   };
 
+  // Function to view email thread
+  const handleViewEmailThread = (thread) => {
+    setSelectedEmailThread(thread);
+    setShowEmailThreadModal(true);
+  };
+
+  // Function to remove email thread
+  const handleRemoveEmailThread = (threadId) => {
+    setEmailThreads(prev => prev.filter(t => t.id !== threadId));
+    
+    // Also remove any documents that were from this thread
+    const thread = emailThreads.find(t => t.id === threadId);
+    if (thread && thread.attachmentsMapping) {
+      thread.attachmentsMapping.forEach(att => {
+        const docIndex = documentFields.findIndex(doc => doc.documentId === att.documentId);
+        if (docIndex !== -1) {
+          removeDocument(docIndex);
+        }
+      });
+    }
+    
+    toast.info('Email thread and associated attachments removed');
+  };
+
   useEffect(() => {
     if (workflowId) {
       const getTemplates = async () => {
@@ -292,11 +503,11 @@ export default function InitiateProcess() {
 
   return (
     <>
-      {actionsLoading ? <TopLoader /> : null}
+      {actionsLoading || isExtractingEmail ? <TopLoader /> : null}
       <CustomCard className="max-w-7xl mx-auto p-6">
         <Title text={'Initiate Process'} />
 
-        <form className="space-y-10">
+        <form className="space-y-10" onSubmit={(e) => e.preventDefault()}>
           {/* Process Info Section */}
           <section className="bg-white p-6">
             <h3 className="text-xl font-semibold text-gray-700 mb-4">
@@ -373,7 +584,6 @@ export default function InitiateProcess() {
                   </p>
                 )}
               </div>
-              {/* Show Workflow Steps */}
             </div>
             {workflowId && (
               <div className="border mt-3 w-full border-gray-400 rounded-md p-4 shadow-lg">
@@ -388,7 +598,94 @@ export default function InitiateProcess() {
             )}
           </section>
 
-          {/* Templates */}
+          {/* Email Threads Section - Show extracted threads */}
+          {/* Email Threads Section - CORRECTED */}
+{/* Email Threads Section - Show extracted threads */}
+// Update the Email Threads Section in InitiateProcess.js
+{emailThreads?.length > 0 && (
+  <section className="mt-8">
+    <div className="flex items-center mb-6">
+      <div className="flex-grow border-t border-blue-300"></div>
+      <span className="mx-4 text-sm font-semibold text-blue-700 uppercase tracking-wide flex items-center gap-2 bg-blue-50 px-4 py-2 rounded-full">
+        <IconMail size={16} className="text-blue-600" />
+        Email Conversations ({emailThreads.length})
+      </span>
+      <div className="flex-grow border-t border-blue-300"></div>
+    </div>
+    
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {emailThreads.map((thread, index) => {
+        const threadId = thread.id || index;
+        const isExpanded = expandedEmailThreads[threadId];
+        
+        return (
+          <div
+            key={threadId}
+            className="group relative bg-gradient-to-br from-white to-blue-50 border border-blue-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-lg transition-all duration-300"
+          >
+            {/* Thread status indicator */}
+            <div className="absolute top-4 right-4">
+              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                thread.attachmentsMapping?.length > 0 
+                  ? 'bg-green-100 text-green-800 border border-green-200' 
+                  : 'bg-blue-100 text-blue-800 border border-blue-200'
+              }`}>
+                {thread.attachmentsMapping?.length > 0 ? `${thread.attachmentsMapping.length} files` : 'No files'}
+              </span>
+            </div>
+            
+            <div className="flex items-start gap-4">
+              <div className="flex-shrink-0">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md">
+                  <IconMail className="text-white" size={24} />
+                </div>
+              </div>
+              
+              <div className="flex-1 min-w-0">
+                <div className="mb-3">
+                  <h3 className="font-semibold text-gray-900 text-lg mb-2 truncate">
+                    {thread.threadText || "Email Conversation"}
+                  </h3>
+                  
+                  {/* Thread stats */}
+                  <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3">
+                    <div className="flex items-center gap-1">
+                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                      <span className="font-medium">Extracted from EML</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <IconPaperclip size={14} />
+                      <span className="font-medium">{thread.attachmentsMapping?.length || 0} attachments</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <IconClock size={14} />
+                      <span>{formatDate(thread.extractedAt)}</span>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* View Thread Button Only */}
+                <div className="flex items-center justify-end">
+                  <CustomButton
+                    variant="outline"
+                    size="sm"
+                    text="View Thread"
+                    click={() => handleViewEmailThread(thread)}
+                    className="px-4"
+                    disabled={actionsLoading}
+                    icon={<IconEye size={16} />}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </section>
+)}
+
+          {/* Templates Section */}
           {templates?.length > 0 && (
             <section className="bg-white p-4 sm:p-6">
               <h3 className="text-xl font-semibold text-gray-700 mb-4">
@@ -425,10 +722,13 @@ export default function InitiateProcess() {
             </section>
           )}
 
-          {/* Upload File */}
+          {/* Upload File Section */}
           <section className="bg-white p-6">
             <h3 className="text-xl font-semibold text-gray-700 mb-4">
               Upload Document
+              <span className="text-sm font-normal text-gray-500 ml-2">
+                (Email files like .eml, .msg will be automatically extracted)
+              </span>
             </h3>
 
             <label className="block text-sm font-medium text-gray-700">
@@ -443,14 +743,22 @@ export default function InitiateProcess() {
                   ref={inputRef}
                   className="hidden"
                   onChange={handleFileChange}
+                  accept=".eml,.msg,.email,.pdf,.doc,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png,.zip,.rar"
                 />
               </label>
 
               {selectedFile && (
                 <div className="mt-2 w-full text-center">
-                  <span className="text-gray-800 font-medium text-sm truncate block">
-                    {selectedFile.name}
-                  </span>
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="text-gray-800 font-medium text-sm truncate block max-w-xs">
+                      {selectedFile.name}
+                    </span>
+                    {['eml', 'msg', 'email'].includes(selectedFile.name.split('.').pop().toLowerCase()) && (
+                      <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                        Email File
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     className="text-red-500 text-xs mt-1 hover:underline"
@@ -466,7 +774,6 @@ export default function InitiateProcess() {
             <div className="mt-4">
               <label className="text-sm font-medium text-gray-700">Tags</label>
               <div className="relative" ref={dropdownRef}>
-                {/* Selected tags and input */}
                 <div className="flex items-center flex-wrap gap-2 border rounded-lg p-2">
                   {fileDetails.tags.map((tag) => (
                     <span
@@ -616,8 +923,8 @@ export default function InitiateProcess() {
             <CustomButton
               type="button"
               click={handleUpload}
-              text={'Upload Document'}
-              disabled={!selectedFile || actionsLoading}
+              text={isExtractingEmail ? 'Extracting Email...' : 'Upload Document'}
+              disabled={!selectedFile || actionsLoading || isExtractingEmail}
               className="w-full mt-6"
             />
           </section>
@@ -625,33 +932,56 @@ export default function InitiateProcess() {
           {/* Uploaded Document List */}
           <section className="bg-white p-4 sm:p-6">
             <h3 className="text-xl font-semibold text-gray-700 mb-4">
-              Uploaded Documents
+              Uploaded Documents ({documentFields.length})
             </h3>
 
             {documentFields.length === 0 ? (
-              <div className="flex items-center gap-2 text-sm text-gray-500 mt-2 bg-purple-100 p-3 rounded-md text-black">
+              <div className="flex items-center gap-2 text-sm text-gray-500 mt-2 bg-purple-100 p-3 rounded-md">
                 <IconInfoCircle color="blue" /> No documents uploaded yet.
               </div>
             ) : (
               <ul className="mt-4 space-y-4">
                 {documentFields.map((doc, index) => (
                   <li
-                    key={doc.documentId}
-                    className="p-4 bg-white border rounded-lg shadow-sm space-y-3"
+                    key={doc.documentId || index}
+                    className={`p-4 bg-white border rounded-lg shadow-sm space-y-3 ${
+                      doc.fromEmail ? 'border-l-4 border-l-blue-500 bg-blue-50' : ''
+                    }`}
                   >
-                    {/* Row 1: File details */}
                     <div className="flex items-start gap-4">
-                      <div className="min-w-10 min-h-10 w-10 h-10 bg-purple-400 flex items-center justify-center rounded-full text-white text-lg">
-                        📄
+                      <div className={`min-w-10 min-h-10 w-10 h-10 flex items-center justify-center rounded-full text-white ${doc.fromEmail ? 'bg-blue-400' : 'bg-purple-400'}`}>
+                        {doc.fromEmail ? <IconMail size={20} /> : '📄'}
                       </div>
-                      <div className="text-sm min-w-0">
-                        <p className="text-base font-medium text-gray-900 break-words">
-                          {doc.name || 'Unnamed Document'}
-                        </p>
-                        <p className="text-gray-700">ID: {doc.documentId}</p>
+                      <div className="text-sm min-w-0 flex-1">
+                        <div className="flex justify-between">
+                          <p className="text-base font-medium text-gray-900 break-words">
+                            {doc.name || 'Unnamed Document'}
+                            {doc.fromEmail && (
+                              <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                                From Email
+                              </span>
+                            )}
+                          </p>
+                          {doc.fromEmail && doc.emailSubject && (
+                            <span className="text-xs text-gray-500">
+                              From: {doc.emailFrom}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-gray-700">Document ID: {doc.documentId}</p>
                         <p className="text-gray-700">
                           Tags: {doc.tags?.join(', ') || 'None'}
                         </p>
+                        {doc.emailSubject && (
+                          <p className="text-sm text-blue-700">
+                            Subject: {doc.emailSubject}
+                          </p>
+                        )}
+                        {doc.description && (
+                          <p className="text-sm text-gray-600">
+                            {doc.description}
+                          </p>
+                        )}
                         {doc.info && (
                           <p className="text-sm text-blue-700 bg-blue-50 px-2 py-1 rounded-md mt-1 w-fit">
                             ℹ️ {doc.info}
@@ -660,7 +990,6 @@ export default function InitiateProcess() {
                       </div>
                     </div>
 
-                    {/* Row 2: Actions */}
                     <div className="flex flex-wrap justify-end gap-2">
                       <CustomButton
                         type="button"
@@ -685,7 +1014,7 @@ export default function InitiateProcess() {
                           handleDeleteDocument(index, doc.documentId)
                         }
                         variant="danger"
-                        text="✖"
+                        text="Delete"
                         className="w-auto"
                       />
                     </div>
@@ -698,19 +1027,30 @@ export default function InitiateProcess() {
           <CustomButton
             type="button"
             click={handleSubmit(onSubmit)}
-            disabled={actionsLoading}
-            text="Submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            disabled={actionsLoading || isExtractingEmail || documentFields.length === 0}
+            text="Initiate Process"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3"
           />
         </form>
       </CustomCard>
 
-      {/* Section 4: File Viewer Modal */}
+      {/* File Viewer Modal */}
       {fileView && (
         <ViewFile
           docu={fileView}
           setFileView={setFileView}
           handleViewClose={() => setFileView(null)}
+        />
+      )}
+
+      {/* Email Thread Modal */}
+      {showEmailThreadModal && selectedEmailThread && (
+        <EmailThreadModal
+          thread={selectedEmailThread}
+          onClose={() => {
+            setShowEmailThreadModal(false);
+            setSelectedEmailThread(null);
+          }}
         />
       )}
     </>

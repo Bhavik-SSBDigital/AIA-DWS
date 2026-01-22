@@ -113,6 +113,7 @@ model User {
   createdById           Int?
   signaturePicFileName  String?
   profilePicFileName    String?
+  emailThreads EmailThread[]
   dscFileName           String?
   createdBy             User?                    @relation("CreatedByRelation", fields: [createdById], references: [id], onDelete: Cascade)
   createdUsers          User[]                   @relation("CreatedByRelation")
@@ -301,6 +302,7 @@ model ProcessInstance {
   description      String?
   issueNo          String?
   initiatorId      Int
+  emailThreads  EmailThread[] 
   currentStepId    String?
   status           ProcessStatus @default(PENDING)
   customizations   Json?
@@ -321,6 +323,45 @@ model ProcessInstance {
   departmentStepProgresses DepartmentStepProgress[] @relation()
   documentHistory  DocumentHistory[] @relation("ProcessDocumentHistory")
   storagePath     String    @default("")
+}
+
+model EmailThread {
+  id             Int              @id @default(autoincrement())
+
+  processId      String
+  process        ProcessInstance  @relation(fields: [processId], references: [id], onDelete: Cascade)
+  metadata      Json? 
+  originalEmails EmailItem[]
+  threadText     String?
+  extractedAt    DateTime         @default(now())
+
+  createdById    Int
+  createdBy      User             @relation(fields: [createdById], references: [id])
+
+  @@unique([processId])
+}
+
+
+
+model EmailItem {
+  id              Int       @id @default(autoincrement())
+  emailThreadId   Int
+  emailThread     EmailThread @relation(fields: [emailThreadId], references: [id], onDelete: Cascade)
+  subject         String
+  from            String
+  to              String[]
+  cc              String[]
+  bcc             String[]
+  date            DateTime
+  bodyText        String?
+  bodyHtml        String?
+  attachments     Json      // Store attachment metadata
+  headers         Json      // Store email headers
+  messageId       String?
+  inReplyTo       String?
+  references      String[]
+  
+  @@index([emailThreadId])
 }
 
 model AssignmentProgress {

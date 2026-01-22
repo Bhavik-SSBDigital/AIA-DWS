@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-
 import {
   ClaimProcess,
   CompleteProcess,
@@ -16,7 +14,6 @@ import {
   SignRevoke,
   ViewDocument,
 } from '../../common/Apis';
-
 import {
   IconEye,
   IconCheck,
@@ -30,8 +27,16 @@ import {
   IconMenu2,
   IconPencil,
   IconTrash,
+  IconMail,
+  IconUsers,
+  IconCalendar,
+  IconPaperclip,
+  IconChevronRight,
+  IconChevronDown,
+  IconUser,
+  IconClock,
+  IconAt,
 } from '@tabler/icons-react';
-
 import CustomCard from '../../CustomComponents/CustomCard';
 import ComponentLoader from '../../common/Loader/ComponentLoader';
 import CustomButton from '../../CustomComponents/CustomButton';
@@ -49,6 +54,7 @@ import ReOpenProcessModal from './Actions/ReOpenProcessModal';
 import DocumentsVersionWise from './DocumentsVersionWise';
 import ProcessDocumentUpload from '../../CustomComponents/ProcessDocumentUpload';
 import DeleteConfirmationModal from '../../CustomComponents/DeleteConfirmation';
+import EmailThreadModal from './EmailThreadModal';
 
 const ViewProcess = () => {
   const [selectedDocs, setSelectedDocs] = useState([]);
@@ -70,9 +76,35 @@ const ViewProcess = () => {
   const [fileView, setFileView] = useState(null);
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
   const [existingQuery, setExistingQuery] = useState(null);
+    const formatDate = (date) => {
+    const now = new Date();
+    const emailDate = new Date(date);
+    const diffTime = Math.abs(now - emailDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+      return `Today at ${emailDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    } else if (diffDays === 1) {
+      return `Yesterday at ${emailDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    } else if (diffDays <= 7) {
+      return `${diffDays} days ago`;
+    }
+    return emailDate.toLocaleDateString([], { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
   const [openModal, setOpenModal] = useState('');
   const [recommendations, setRecommendations] = useState([]);
   const [canEdit, setCanEdit] = useState({});
+  
+  // Email thread states - MODIFIED
+  const [showEmailThreadModal, setShowEmailThreadModal] = useState(false);
+  const [selectedEmailThread, setSelectedEmailThread] = useState(null);
+  const [expandedEmailThreads, setExpandedEmailThreads] = useState({});
 
   const [customSignModal, setCustomSignModal] = useState({
     open: false,
@@ -104,10 +136,6 @@ const ViewProcess = () => {
       label: 'Created At',
       value: new Date(process?.createdAt).toLocaleString(),
     },
-    // {
-    //   label: 'Arrived At',
-    //   value: new Date(process?.arrivedAt).toLocaleString(),
-    // },
     {
       label: 'Updated At',
       value: process?.updatedAt
@@ -394,7 +422,19 @@ const ViewProcess = () => {
     });
   };
 
-  function extractDocumentsByReopenCycle(processData) {
+  const handleViewEmailThread = (thread) => {
+    setSelectedEmailThread(thread);
+    setShowEmailThreadModal(true);
+  };
+
+  const toggleEmailThreadExpansion = (threadId) => {
+    setExpandedEmailThreads(prev => ({
+      ...prev,
+      [threadId]: !prev[threadId]
+    }));
+  };
+
+function extractDocumentsByReopenCycle(processData) {
     const { documentVersioning } = processData;
     const allReopenCycles = new Set();
     const lineageMap = new Map();
@@ -402,54 +442,71 @@ const ViewProcess = () => {
 
     // Step 1: Normalize data
     documentVersioning.forEach((group) => {
-      const versions = [...group.versions].sort(
-        (a, b) => a.reopenCycle - b.reopenCycle,
-      );
-      versions.forEach((v) => allReopenCycles.add(v.reopenCycle));
-      const hasOriginal = versions.some((v) => v.reopenCycle === 0);
-      if (hasOriginal) {
-        lineageMap.set(group.latestDocumentId, versions);
-      } else {
-        // ✅ NEW DOCUMENT (no reopenCycle 0)
-        newDocuments.push(versions[0]);
-      }
+        if (group.chains) {
+            // New structure with chains
+            group.chains.forEach((chain) => {
+                const versions = [...chain.versions].sort(
+                    (a, b) => a.reopenCycle - b.reopenCycle,
+                );
+                versions.forEach((v) => allReopenCycles.add(v.reopenCycle));
+                const hasOriginal = versions.some((v) => v.reopenCycle === 0);
+                if (hasOriginal) {
+                    lineageMap.set(chain.latestDocumentId, versions);
+                } else {
+                    // ✅ NEW DOCUMENT (no reopenCycle 0)
+                    newDocuments.push(versions[0]);
+                }
+            });
+        } else {
+            // Old structure (direct versions)
+            const versions = [...group.versions].sort(
+                (a, b) => a.reopenCycle - b.reopenCycle,
+            );
+            versions.forEach((v) => allReopenCycles.add(v.reopenCycle));
+            const hasOriginal = versions.some((v) => v.reopenCycle === 0);
+            if (hasOriginal) {
+                lineageMap.set(group.latestDocumentId || versions[versions.length-1].id, versions);
+            } else {
+                newDocuments.push(versions[0]);
+            }
+        }
     });
 
     const reopenCycles = [...allReopenCycles].sort((a, b) => a - b);
 
     // Step 2: Build cycles
     return reopenCycles.map((cycle) => {
-      const documents = [];
-      // Existing lineages (original + replacements)
-      lineageMap.forEach((versions) => {
-        let selected = null;
-        for (let i = versions.length - 1; i >= 0; i--) {
-          if (versions[i].reopenCycle <= cycle) {
-            selected = versions[i];
-            break;
-          }
-        }
-        if (selected) documents.push(selected);
-      });
+        const documents = [];
+        // Existing lineages (original + replacements)
+        lineageMap.forEach((versions) => {
+            let selected = null;
+            for (let i = versions.length - 1; i >= 0; i--) {
+                if (versions[i].reopenCycle <= cycle) {
+                    selected = versions[i];
+                    break;
+                }
+            }
+            if (selected) documents.push(selected);
+        });
 
-      // New documents appear only from their cycle onward
-      newDocuments.forEach((doc) => {
-        if (doc.reopenCycle <= cycle) {
-          documents.push(doc);
-        }
-      });
+        // New documents appear only from their cycle onward
+        newDocuments.forEach((doc) => {
+            if (doc.reopenCycle <= cycle) {
+                documents.push(doc);
+            }
+        });
 
-      // SOP Issue No resolution
-      const sopMatch = documents.find(
-        (d) => d.reopenCycle === cycle && d.SOPIssueNo,
-      );
-      return {
-        reopenCycle: cycle,
-        SOPIssueNo: sopMatch?.SOPIssueNo || documents[0]?.SOPIssueNo || '--',
-        documents,
-      };
+        // SOP Issue No resolution
+        const sopMatch = documents.find(
+            (d) => d.reopenCycle === cycle && d.SOPIssueNo,
+        );
+        return {
+            reopenCycle: cycle,
+            SOPIssueNo: sopMatch?.SOPIssueNo || documents[0]?.SOPIssueNo || '--',
+            documents,
+        };
     });
-  }
+}
 
   const DocumentsCycle = (process) => {
     // Extract cycles
@@ -471,7 +528,6 @@ const ViewProcess = () => {
             <thead className="bg-gray-100">
               <tr>
                 <th className="py-2 px-4 border">System Process Version</th>
-                {/* <th className="py-2 px-4 border">Manual Process Version</th> */}
                 {Array.from({ length: maxDocs }).map((_, idx) => (
                   <th key={idx} className="py-2 px-4 border">
                     Document {idx + 1}
@@ -490,9 +546,6 @@ const ViewProcess = () => {
                     <td className="py-2 px-4 border font-medium">
                       {cycle.reopenCycle}
                     </td>
-                    {/* <td className="py-2 px-4 border font-medium">
-                      {cycle.SOPIssueNo || '--'}
-                    </td> */}
                     {Array.from({ length: maxDocs }).map((_, idx) => {
                       const doc = cycle.documents[idx];
                       return (
@@ -643,76 +696,73 @@ const ViewProcess = () => {
     <div className="mx-auto">
       {actionsLoading && <TopLoader />}
       <CustomCard>
-        <div className="flex justify-end flex-row gap-2 flex-wrap">
-          <CustomButton
-            text={'Approve'}
-            click={() => openModelSignAllDoec(process?.processStepInstanceId)}
-            className={'min-w-[150px]'}
-            // disabled={
-            //   actionsLoading || isCompleted || process?.toBePicked === true
-            // }
-          />
-          <CustomButton
-            variant={'danger'}
-            text={'Reject'}
-            className={'min-w-[150px]'}
-            click={() => setOpenModal('query')}
-            disabled={actionsLoading || isCompleted || disableActions}
-          />
-          {isCompleted && !disableActions && (
-            <CustomButton
-              variant={'primary'}
-              text={'Re-Open'}
-              className={'min-w-[150px]'}
-              click={() => setOpenModal('re-open')}
-              disabled={actionsLoading}
-            />
-          )}
-          <CustomButton
-            variant={'primary'}
-            text={'Upload Document'}
-            className={'min-w-[150px] hidden'}
-            click={() => setOpenModal('document-upload')}
-            disabled={actionsLoading || !isCompleted || disableActions}
-          />
-          {/*<CustomButton
-            variant={'primary'}
-            text={'Claim'}
-            className={'min-w-[150px]'}
-            click={handleClaim}
-            disabled={
-              disableActions ||
-              actionsLoading ||
-              isCompleted ||
-              process?.toBePicked === false
-            }
-          />*/}
+       <div className="flex justify-end flex-row gap-2 flex-wrap">
+  <CustomButton
+    text={'Approve'}
+    click={() => openModelSignAllDoec(process?.processStepInstanceId)}
+    className={'min-w-[150px]'}
+    // disabled={
+    //   actionsLoading || isCompleted || process?.toBePicked === true
+    // }
+  />
+  <CustomButton
+    variant={'danger'}
+    text={'Reject'}
+    className={'min-w-[150px]'}
+    click={() => setOpenModal('query')}
+    disabled={actionsLoading || isCompleted || disableActions}
+  />
+  {isCompleted && !disableActions && (
+    <CustomButton
+      variant={'primary'}
+      text={'Re-Open'}
+      className={'min-w-[150px]'}
+      click={() => setOpenModal('re-open')}
+      disabled={actionsLoading}
+    />
+  )}
+  <CustomButton
+    variant={'primary'}
+    text={'Upload Document'}
+    className={'min-w-[150px] hidden'}
+    click={() => setOpenModal('document-upload')}
+    disabled={actionsLoading || !isCompleted || disableActions}
+  />
+  {/* <CustomButton
+    variant={'primary'}
+    text={'Claim'}
+    className={'min-w-[150px]'}
+    click={handleClaim}
+    disabled={
+      disableActions ||
+      actionsLoading ||
+      isCompleted ||
+      process?.toBePicked === false
+    }
+  /> */}
 
-          <CustomButton
-            variant={'secondary'}
-            text={'Ask Recommendation'}
-            className={'min-w-[150px]'}
-            click={() => setOpenModal('recommend')}
-            disabled={actionsLoading || isCompleted || disableActions}
-          />
-          <CustomButton
-            variant={'secondary'}
-            text={'Timeline'}
-            click={() => navigate(`/timeline/${process?.processId}`)}
-            className={'min-w-[150px]'}
-            disabled={actionsLoading}
-          />
-
-          {/* <CustomButton
-            variant={'danger'}
-            text={'Complete'}
-            click={() => handleCompleteProcess(process?.processStepInstanceId)}
-            className={'min-w-[150px]'}
-            disabled={
-              actionsLoading || isCompleted || process?.toBePicked === true
-            }
-          /> */}
-        </div>
+  <CustomButton
+    variant={'secondary'}
+    text={'Reject'}
+    className={'min-w-[150px]'}
+    click={() => setOpenModal('query')}
+    disabled={actionsLoading || isCompleted || disableActions}
+  />
+  <CustomButton
+    variant={'secondary'}
+    text={'Ask Recommendation'}
+    className={'min-w-[150px]'}
+    click={() => setOpenModal('recommend')}
+    disabled={actionsLoading || isCompleted || disableActions}
+  />
+  <CustomButton
+    variant={'secondary'}
+    text={'Timeline'}
+    click={() => navigate(`/timeline/${process?.processId}`)}
+    className={'min-w-[150px]'}
+    disabled={actionsLoading}
+  />
+</div>
         <hr className="text-slate-200 my-2" />
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           {processDetails.map((detail, index) => (
@@ -727,27 +777,258 @@ const ViewProcess = () => {
         </div>
       </CustomCard>
 
-      {/* active document section */}
+      {/* Email Threads Section */}
+     {/* Email Threads Section - IMPROVED */}
+{process?.emailThreads?.length > 0 && (
+  <section className="mt-8">
+    <div className="flex items-center mb-6">
+      <div className="flex-grow border-t border-blue-300"></div>
+      <span className="mx-4 text-sm font-semibold text-blue-700 uppercase tracking-wide flex items-center gap-2 bg-blue-50 px-4 py-2 rounded-full">
+        <IconMail size={16} className="text-blue-600" />
+        Email Conversations ({process.emailThreads.length})
+      </span>
+      <div className="flex-grow border-t border-blue-300"></div>
+    </div>
+    
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {process.emailThreads.map((thread, index) => {
+        const participants = new Set();
+        const threadEmails = thread.emails || [];
+        const totalEmails = threadEmails.length;
+        const totalAttachments = (thread.attachmentsMapping?.length || 0) + 
+          threadEmails.reduce((sum, email) => sum + (email.attachments?.length || 0), 0);
+        
+        // Extract participants from all emails
+        threadEmails.forEach(email => {
+          if (email.from) participants.add(email.from.split('<')[0]?.trim());
+          if (email.to) email.to.forEach(to => participants.add(to.split('<')[0]?.trim()));
+        });
+        
+        const participantsList = Array.from(participants).slice(0, 3);
+        const hasMoreParticipants = participants.size > 3;
+        const latestEmail = threadEmails[threadEmails.length - 1];
+        const firstEmail = threadEmails[0];
+        
+        return (
+          <div
+            key={thread.id || index}
+            className="group relative bg-gradient-to-br from-white to-blue-50 border border-blue-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-lg transition-all duration-300"
+          >
+            {/* Thread status indicator */}
+            <div className="absolute top-4 right-4">
+              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                totalAttachments > 0 
+                  ? 'bg-green-100 text-green-800 border border-green-200' 
+                  : 'bg-blue-100 text-blue-800 border border-blue-200'
+              }`}>
+                {totalAttachments > 0 ? `${totalAttachments} files` : 'No files'}
+              </span>
+            </div>
+            
+            <div className="flex items-start gap-4">
+              <div className="flex-shrink-0">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md">
+                  <IconMail className="text-white" size={24} />
+                </div>
+              </div>
+              
+              <div className="flex-1 min-w-0">
+                <div className="mb-3">
+                  <h3 className="font-semibold text-gray-900 text-lg mb-2 truncate">
+                    {firstEmail?.subject || "Email Conversation"}
+                  </h3>
+                  
+                  {/* Thread stats */}
+                  <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3">
+                    <div className="flex items-center gap-1">
+                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                      <span className="font-medium">{totalEmails} messages</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <IconUser size={14} />
+                      <span className="font-medium">{participants.size} participants</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <IconClock size={14} />
+                      <span>{formatDate(thread.extractedAt)}</span>
+                    </div>
+                  </div>
+                  
+                  {/* Participants preview */}
+                  {participantsList.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 text-sm text-gray-700 mb-2">
+                        <IconUsers size={14} />
+                        <span className="font-medium">Participants:</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {participantsList.map((participant, idx) => (
+                          <span
+                            key={idx}
+                            className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-blue-50 hover:border-blue-200 transition-colors"
+                          >
+                            {participant}
+                          </span>
+                        ))}
+                        {hasMoreParticipants && (
+                          <span className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-sm">
+                            +{participants.size - 3} more
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Email preview */}
+                  {threadEmails.length > 0 && (
+                    <div className="space-y-3">
+                      {!expandedEmailThreads[thread.id || index] ? (
+                        <div className="bg-white border border-gray-200 rounded-lg p-4">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                              <span className="text-xs font-semibold text-blue-600">1</span>
+                            </div>
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-800 mb-1">
+                                {firstEmail?.from?.split('<')[0]?.trim()}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {firstEmail?.subject?.substring(0, 60)}
+                                {firstEmail?.subject?.length > 60 ? '...' : ''}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-3">
+                            <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                              <span className="text-xs font-semibold text-green-600">{totalEmails}</span>
+                            </div>
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-800 mb-1">
+                                {latestEmail?.from?.split('<')[0]?.trim()}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Latest: {latestEmail?.subject?.substring(0, 60)}
+                                {latestEmail?.subject?.length > 60 ? '...' : ''}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {threadEmails.slice(0, 3).map((email, idx) => (
+                            <div key={idx} className="bg-white border border-gray-200 rounded-lg p-3">
+                              <div className="flex justify-between items-start mb-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
+                                    <span className="text-xs font-semibold text-blue-600">{idx + 1}</span>
+                                  </div>
+                                  <div className="text-sm font-medium text-gray-800 truncate">
+                                    {email.from?.split('<')[0]?.trim()}
+                                  </div>
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {new Date(email.date).toLocaleDateString()}
+                                </div>
+                              </div>
+                              <div className="text-sm text-gray-600 line-clamp-2">
+                                {email.bodyText?.substring(0, 120)}
+                                {email.bodyText?.length > 120 ? '...' : ''}
+                              </div>
+                            </div>
+                          ))}
+                          {threadEmails.length > 3 && (
+                            <div className="text-center py-2">
+                              <span className="text-sm text-gray-500">
+                                + {threadEmails.length - 3} more messages
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      <div className="flex items-center justify-between mt-4">
+                        <button
+                          type="button"
+                          onClick={() => toggleEmailThreadExpansion(thread.id || index)}
+                          className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
+                        >
+                          {expandedEmailThreads[thread.id || index] ? (
+                            <>
+                              <IconChevronUp size={16} />
+                              Show Less
+                            </>
+                          ) : (
+                            <>
+                              <IconChevronDown size={16} />
+                              Show Conversation Preview
+                            </>
+                          )}
+                        </button>
+                        
+                        <div className="flex items-center gap-2">
+                          <CustomButton
+                            variant="outline"
+                            size="sm"
+                            text="View Thread"
+                            click={() => handleViewEmailThread(thread)}
+                            className="px-4"
+                            disabled={actionsLoading}
+                            icon={<IconEye size={16} />}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Extracted documents preview */}
+                {thread.attachmentsMapping && thread.attachmentsMapping.length > 0 && (
+                  <div className="mt-4 pt-4 border-t">
+                    <div className="flex items-center gap-2 mb-2">
+                      <IconPaperclip size={16} className="text-green-600" />
+                      <span className="text-sm font-medium text-gray-700">
+                        Extracted Documents ({thread.attachmentsMapping.length})
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {thread.attachmentsMapping.slice(0, 3).map((att, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-1.5 bg-green-50 text-green-800 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors truncate max-w-[150px]"
+                          title={`Document: ${att.originalFilename}`}
+                        >
+                          {att.originalFilename}
+                        </span>
+                      ))}
+                      {thread.attachmentsMapping.length > 3 && (
+                        <span className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs">
+                          +{thread.attachmentsMapping.length - 3} more
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </section>
+)}
+
+      {/* Active Documents Section */}
       {process?.documents?.length > 0 && (
         <>
-          {/* Section Header */}
           <div className="flex items-center mt-12 mb-2">
             <div className="flex-grow border-t border-green-600"></div>
             <span className="flex items-center gap-2 mx-4 text-sm text-green-700 uppercase tracking-wide font-semibold">
               <IconFileText size={16} className="text-green-700" />
-              Active Documents
+              Active Documents ({process.documents.length})
             </span>
             <div className="flex-grow border-t border-green-600"></div>
           </div>
 
-          {/* <CustomButton
-            // disabled={selectedDocs.length === 0}
-            className="ml-auto mb-4 block"
-            text={`Sign All Documents`}
-            click={openModelSignAllDoec}
-          /> */}
-
-          {/* View All Selected Button */}
           <CustomButton
             disabled={selectedDocs.length === 0}
             className="ml-auto mb-4 block"
@@ -755,7 +1036,6 @@ const ViewProcess = () => {
             click={handleViewAllSelectedFiles}
           />
 
-          {/* Document Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             {process.documents.map((doc) => {
               const isSelected = selectedDocs.includes(doc.id);
@@ -772,7 +1052,6 @@ const ViewProcess = () => {
                   key={doc.id}
                   className="relative flex flex-col justify-between"
                 >
-                  {/* Top-Right Status Badge */}
                   <div className="absolute top-2 right-2">
                     {doc.rejectionDetails ? (
                       <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded-full shadow-sm">
@@ -785,9 +1064,7 @@ const ViewProcess = () => {
                     )}
                   </div>
 
-                  {/* Document Header */}
                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                    {/* Left: Checkbox + Icon + Info */}
                     <div className="flex items-start gap-3 w-full">
                       <input
                         type="checkbox"
@@ -795,7 +1072,6 @@ const ViewProcess = () => {
                         checked={isSelected}
                         onChange={toggleSelect}
                       />
-                      {/* File Icon */}
                       <div className="w-10 h-10 shrink-0 rounded-full bg-gray-100 border flex items-center justify-center">
                         <img
                           width={28}
@@ -803,7 +1079,6 @@ const ViewProcess = () => {
                           alt="icon"
                         />
                       </div>
-                      {/* File Info */}
                       <div className="flex flex-col min-w-0 mr-9">
                         <p className="font-semibold text-gray-900 break-words">
                           {doc.name}
@@ -811,11 +1086,15 @@ const ViewProcess = () => {
                         <p className="text-sm text-gray-500">
                           Type: {extension}
                         </p>
+                        {doc.issueNo && (
+                          <p className="text-xs text-blue-600">
+                            Version: {doc.issueNo}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Action Buttons */}
                   <div className="mt-4 flex flex-wrap justify-end gap-2">
                     <CustomButton
                       className="px-2"
@@ -832,13 +1111,6 @@ const ViewProcess = () => {
                       title="View Document"
                       text={<IconEye size={18} className="text-white" />}
                     />
-                    {/* <CustomButton
-                      className="px-2"
-                      click={() => handleDownloadFile(doc.name, doc.path)}
-                      disabled={actionsLoading}
-                      title="Download Document"
-                      text={<IconDownload size={18} className="text-white" />}
-                    /> */}
                     <CustomButton
                       variant="success"
                       className="px-2"
@@ -904,7 +1176,6 @@ const ViewProcess = () => {
                       disabled={
                         actionsLoading ||
                         doc?.signedBy?.length > 0 ||
-                        // doc?.type?.toUpperCase() !== 'PDF' ||
                         doc?.rejectionDetails ||
                         !isCompleted ||
                         disableActions
@@ -922,145 +1193,13 @@ const ViewProcess = () => {
 
       {process && DocumentsCycle(process)}
 
-      {/* {process?.documentVersioning?.length > 0 && (
-        <div className="mt-12">
-          <div className="flex items-center mb-4">
-            <div className="flex-grow border-t border-green-600"></div>
-            <span className="mx-4 text-sm text-green-700 uppercase tracking-wide font-semibold">
-              Documents Version History
-            </span>
-            <div className="flex-grow border-t border-green-600"></div>
-          </div>
-          <CustomButton
-            type={'button'}
-            className={'mb-1 ml-auto block'}
-            text={'Version Wise'}
-            click={() => setOpenModal('version-wise')}
-          />
-          <div className="space-y-6">
-            {process.documentVersioning.map((docGroup, index) => {
-              const activeDoc = docGroup.versions.find(
-                (v) => v.id === docGroup.latestDocumentId,
-              );
-              const olderVersions = docGroup.versions.filter(
-                (v) => v.id !== docGroup.latestDocumentId,
-              );
-              return (
-                <CustomCard
-                  key={index}
-                  className="border border-green-200 !bg-green-50 rounded-md shadow-sm p-4"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-3">
-                    <div className="flex items-center gap-3 w-full">
-                      <div className="w-10 h-10 rounded-full bg-white border flex items-center justify-center text-green-700 text-xl shrink-0">
-                        <img
-                          width={30}
-                          src={
-                            ImageConfig[
-                              activeDoc?.name?.split('.').pop()?.toLowerCase()
-                            ] || ImageConfig['default']
-                          }
-                          alt="icon"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-gray-800 flex items-center gap-2 break-words break-all">
-                          {activeDoc?.name}
-                          <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full shrink-0">
-                            Active
-                          </span>
-                        </p>
-                        <p className="text-sm text-gray-500 truncate">
-                          {activeDoc?.path}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  {olderVersions.length > 0 && (
-                    <div className="mt-4 pl-5 border-l-2 border-dashed border-green-300">
-                      <p className="text-sm font-medium text-gray-600 mb-2">
-                        Previous Versions:
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                        {olderVersions.map((ver) => (
-                          <CustomCard
-                            key={ver.id}
-                            className="flex flex-col justify-between"
-                          >
-                            <div className="flex gap-3 mb-3">
-                              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
-                                <img
-                                  width={24}
-                                  src={
-                                    ImageConfig[
-                                      ver?.name?.split('.').pop()?.toLowerCase()
-                                    ] || ImageConfig['default']
-                                  }
-                                  alt="icon"
-                                />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium text-gray-800 break-words">
-                                  {ver.name}
-                                </p>
-                                <p className="text-xs text-gray-500 truncate max-w-full">
-                                  {ver.path}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex gap-2 justify-end mt-auto">
-                              <CustomButton
-                                className="px-2"
-                                variant="info"
-                                size="xs"
-                                click={() =>
-                                  handleViewFile(
-                                    ver.name,
-                                    ver.path,
-                                    ver.id,
-                                    ver.name?.split('.').pop(),
-                                  )
-                                }
-                                title="View Document"
-                                text={
-                                  <IconEye size={16} className="text-white" />
-                                }
-                              />
-                              <CustomButton
-                                className="px-2"
-                                variant="secondary"
-                                size="xs"
-                                click={() =>
-                                  handleDownloadFile(ver.name, ver.path)
-                                }
-                                title="Download Document"
-                                text={
-                                  <IconDownload
-                                    size={16}
-                                    className="text-white"
-                                  />
-                                }
-                              />
-                            </div>
-                          </CustomCard>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </CustomCard>
-              );
-            })}
-          </div>
-        </div>
-      )} */}
-
+      {/* Superseded Documents Section */}
       {process?.sededDocuments?.length > 0 && (
         <div className="mt-12">
-          {/* Section Title */}
           <div className="flex items-center mb-4">
             <div className="flex-grow border-t border-rose-400"></div>
             <span className="mx-4 text-sm text-rose-600 uppercase tracking-wide font-semibold">
-              Superseded Documents
+              Superseded Documents ({process.sededDocuments.length})
             </span>
             <div className="flex-grow border-t border-rose-400"></div>
           </div>
@@ -1076,14 +1215,12 @@ const ViewProcess = () => {
                   key={index}
                   className="relative border !border-rose-300 !bg-rose-50 shadow-sm p-4"
                 >
-                  {/* Top-right label */}
                   <div className="absolute bottom-2 right-2">
                     <span className="text-xs border bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
                       Superseded
                     </span>
                   </div>
 
-                  {/* Superseded Document */}
                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-full bg-white border flex items-center justify-center text-rose-700 text-xl">
@@ -1097,9 +1234,14 @@ const ViewProcess = () => {
                         <p className="font-semibold text-gray-800 break-words">
                           {docGroup.documentWhichSuperseded.name}
                         </p>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm text-gray-500 truncate">
                           {docGroup.documentWhichSuperseded.path}
                         </p>
+                        {docGroup.documentWhichSuperseded.issueNo && (
+                          <p className="text-xs text-rose-600">
+                            Version: {docGroup.documentWhichSuperseded.issueNo}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex gap-2">
@@ -1131,26 +1273,13 @@ const ViewProcess = () => {
                           />
                         }
                       />
-                      {/* <CustomButton
-                        className="px-2"
-                        variant="secondary"
-                        click={() =>
-                          handleDownloadFile(
-                            docGroup.documentWhichSuperseded.name,
-                            docGroup.documentWhichSuperseded.path,
-                          )
-                        }
-                        title="Download Document"
-                        text={<IconDownload size={18} className="text-white" />}
-                      /> */}
                     </div>
                   </div>
 
-                  {/* All Versions (no filtering) */}
                   {docGroup.versions.length > 0 && (
                     <div className="mt-4 pl-5 border-l-2 border-dashed border-rose-300">
                       <p className="text-sm font-medium text-gray-600 mb-2">
-                        Version History:
+                        Version History ({docGroup.versions.length} versions):
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                         {docGroup.versions.map((ver) => {
@@ -1181,6 +1310,11 @@ const ViewProcess = () => {
                                   <p className="text-xs text-gray-500 truncate max-w-full">
                                     {ver.path}
                                   </p>
+                                  {ver.issueNo && (
+                                    <p className="text-xs text-blue-600">
+                                      Version: {ver.issueNo}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex gap-2 justify-end mt-auto">
@@ -1214,21 +1348,6 @@ const ViewProcess = () => {
                                     />
                                   }
                                 />
-                                {/* <CustomButton
-                                  className="px-2"
-                                  variant="secondary"
-                                  size="xs"
-                                  click={() =>
-                                    handleDownloadFile(ver.name, ver.path)
-                                  }
-                                  title="Download Document"
-                                  text={
-                                    <IconDownload
-                                      size={16}
-                                      className="text-white"
-                                    />
-                                  }
-                                /> */}
                               </div>
                             </CustomCard>
                           );
@@ -1243,12 +1362,13 @@ const ViewProcess = () => {
         </div>
       )}
 
+      {/* Queries Section */}
       {process?.queryDetails?.length > 0 && (
         <>
           <div className="flex items-center mt-12 mb-2">
             <div className="flex-grow border-t border-slate-400"></div>
             <span className="mx-4 text-sm text-gray-500 uppercase tracking-wide font-medium">
-              Queries
+              Queries ({process.queryDetails.length})
             </span>
             <div className="flex-grow border-t border-slate-400"></div>
           </div>
@@ -1287,6 +1407,12 @@ const ViewProcess = () => {
                         {query.queryText}
                       </p>
                     )}
+                    {query.answerText && (
+                      <p className="text-sm text-gray-700">
+                        <span className="font-semibold">Answer Text:</span>{' '}
+                        {query.answerText}
+                      </p>
+                    )}
                     {query.createdAt && (
                       <p className="text-sm text-gray-700">
                         <span className="font-semibold">Created At:</span>{' '}
@@ -1296,8 +1422,8 @@ const ViewProcess = () => {
                   </div>
                   <div className="mt-4 flex justify-end">
                     <CustomButton
-                      disabled={actionsLoading || isCompleted || disableActions}
-                      text="Solve Query"
+                      disabled={actionsLoading || isCompleted || disableActions || query.answerText}
+                      text={query.answerText ? "Already Solved" : "Solve Query"}
                       variant="primary"
                       click={() => handleSolveQuery(query)}
                     />
@@ -1309,12 +1435,13 @@ const ViewProcess = () => {
         </>
       )}
 
+      {/* Recommendations Section */}
       {process?.recommendationDetails?.length > 0 && (
         <>
           <div className="flex items-center mt-12 mb-2">
             <div className="flex-grow border-t border-slate-400"></div>
             <span className="mx-4 text-sm text-gray-500 uppercase tracking-wide font-medium">
-              Recommendations
+              Recommendations ({process.recommendationDetails.length})
             </span>
             <div className="flex-grow border-t border-slate-400"></div>
           </div>
@@ -1401,6 +1528,7 @@ const ViewProcess = () => {
         </>
       )}
 
+      {/* All Modals */}
       {fileView && (
         <ViewFile
           docu={fileView}
@@ -1452,7 +1580,6 @@ const ViewProcess = () => {
                 label="Part-Number"
                 value={documentModalOpen?.partNumber || '--'}
               />
-              {/* <DetailItem label="Tags" value={documentModalOpen?.tags} /> */}
               <DetailItem
                 label="Type"
                 value={documentModalOpen?.type?.toUpperCase() || '--'}
@@ -1521,7 +1648,7 @@ const ViewProcess = () => {
         </CustomModal>
       ) : null}
 
-      {/* Custom Sign Modal (Remarks Optional) */}
+      {/* Custom Sign Modal */}
       <CustomModal
         isOpen={customSignModal.open}
         onClose={() =>
@@ -1572,6 +1699,18 @@ const ViewProcess = () => {
         </div>
       </CustomModal>
 
+      {/* Email Thread Modal - FIXED: Only renders when showEmailThreadModal is true */}
+      {showEmailThreadModal && selectedEmailThread && (
+        <EmailThreadModal
+          thread={selectedEmailThread}
+          onClose={() => {
+            setShowEmailThreadModal(false);
+            setSelectedEmailThread(null);
+          }}
+        />
+      )}
+
+      {/* Query Modal */}
       <CustomModal
         isOpen={openModal == 'query'}
         onClose={() => {
@@ -1594,6 +1733,7 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
+      {/* Documents Version Wise Modal */}
       <CustomModal
         isOpen={openModal == 'version-wise'}
         onClose={() => {
@@ -1607,6 +1747,7 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
+      {/* Document Upload Modal */}
       <CustomModal
         isOpen={openModal == 'document-upload'}
         onClose={() => {
@@ -1630,6 +1771,7 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
+      {/* Query Solve Modal */}
       <CustomModal
         isOpen={existingQuery}
         onClose={() => {
@@ -1650,6 +1792,7 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
+      {/* Ask Recommendation Modal */}
       <CustomModal
         isOpen={openModal == 'recommend'}
         onClose={() => {
@@ -1667,6 +1810,7 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
+      {/* Re-Open Process Modal */}
       <CustomModal
         isOpen={openModal == 're-open'}
         onClose={() => {
@@ -1685,6 +1829,7 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
+      {/* Sign All Documents Modal */}
       <CustomModal
         isOpen={signAllModalOpen.open}
         onClose={() => {
@@ -1701,7 +1846,6 @@ const ViewProcess = () => {
           <p className="mb-4">
             Are you sure you want to approve all documents?
           </p>
-          {/* radiobuton for with remarks or without remarks */}
           <div className="mb-4">
             <label className="inline-flex items-center">
               <input

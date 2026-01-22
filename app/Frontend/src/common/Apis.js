@@ -39,6 +39,17 @@ export const downloadLoginLogoutReport = async (fromDate, toDate) => {
   });
 };
 
+export const extractEMLDetails = async (documentId) => {
+  try {
+    const response = await apiClient.post('/extract-eml', {
+      documentId,
+    });
+    return response;
+  } catch (error) {
+    throw error;
+  }
+};
+
 export const exportFileLogs = async (fromDate, toDate) => {
   console.log(fromDate);
   return apiClient.get('/exportFileLogs', {
@@ -226,12 +237,15 @@ export const SignDocument = async (
     remarks,
   });
 };
-export const SignDocumentAll = async (processId,
-  processStepInstanceId, documents) => {
+export const SignDocumentAll = async (
+  processId,
+  processStepInstanceId,
+  documents,
+) => {
   return apiClient.post('/signDocuments', {
     processId,
     processStepInstanceId,
-    documents
+    documents,
   });
 };
 export const SignRevoke = async (processId, documentId) => {
@@ -522,6 +536,5 @@ export const updatePhysicalRequest = async (id, data) => {
 export const getPhysicalRequestMessages = async (id) => {
   return apiClient.get(`/getPhysicalRequestMessages/${id}`);
 };
-
 
 export default apiClient;

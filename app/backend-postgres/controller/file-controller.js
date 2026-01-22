@@ -73,7 +73,7 @@ async function executeTextExtractionScript(filePath) {
   const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
   const pythonScriptPath = path.join(
     __dirname,
-    "../../support/text_extraction.py"
+    "../../support/text_extraction.py",
   );
 
   const command = `${pythonEnvPath} ${pythonScriptPath} "${filePath}"`;
@@ -248,7 +248,7 @@ export const file_upload = async (req, res) => {
               const absolutePath = path.join(
                 __dirname,
                 STORAGE_PATH,
-                newDocument.path
+                newDocument.path,
               );
               try {
                 await fs.access(absolutePath);
@@ -274,9 +274,8 @@ export const file_upload = async (req, res) => {
               const ext = path.extname(absolutePath).toLowerCase();
               let content = "";
               try {
-                const extractionResult = await executeTextExtractionScript(
-                  absolutePath
-                );
+                const extractionResult =
+                  await executeTextExtractionScript(absolutePath);
                 if (extractionResult.success) {
                   content = extractionResult.text;
                 }
@@ -290,7 +289,7 @@ export const file_upload = async (req, res) => {
 
               await SearchIndexService.indexDocumentContent(
                 newDocument.id,
-                content
+                content,
               );
 
               logger.info({
@@ -483,7 +482,7 @@ export const createFolder = async (isProject, path_, userData) => {
             await createUserPermissions(
               newDocument.id,
               userData.username,
-              true
+              true,
             );
 
             const parentPath = getParentPath(path_);
@@ -616,7 +615,7 @@ export const file_copy = async (req, res) => {
     const absoluteDestinationPath = path.join(
       __dirname,
       STORAGE_PATH,
-      destinationPath
+      destinationPath,
     );
 
     const sourceStream = createReadStream(absoluteSourcePath, {
@@ -761,7 +760,7 @@ export const file_cut = async (req, res) => {
     const absoluteDestinationPath = path.join(
       __dirname,
       STORAGE_PATH,
-      destinationPath
+      destinationPath,
     );
 
     const sourceStream = createReadStream(absoluteSourcePath, {
@@ -920,7 +919,7 @@ export const documentIdCleanUpFromDocument = async (idToRemove) => {
   }
 
   console.log(
-    `Removed document with ID ${idToRemove} from parent relationships.`
+    `Removed document with ID ${idToRemove} from parent relationships.`,
   );
 };
 
@@ -1009,7 +1008,7 @@ const storeDocumentDetailsToDatabase = async (
   cabinetNo,
   workName,
   year,
-  departmentName
+  departmentName,
 ) => {
   try {
     // Fetch the user using Prisma Client
@@ -1153,7 +1152,7 @@ export const folder_download = async (req, res) => {
     res.setHeader("Content-Type", "application/zip");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${zipFileName}"`
+      `attachment; filename="${zipFileName}"`,
     );
 
     const archive = archiver("zip", { zlib: { level: 9 } });
@@ -1209,7 +1208,7 @@ export const file_delete = async (req, res) => {
     let absolutePath = path.join(
       __dirname,
       process.env.STORAGE_PATH,
-      document.path
+      document.path,
     );
 
     // Check if file exists in the filesystem
@@ -1258,22 +1257,16 @@ export const file_though_url = async (req, res) => {
     });
 
     if (!filePath) {
-      logger.warn({
-        action: "FILE_NOT_FOUND_FOR_VIEW",
-        details: { filePath },
-      });
       return res.status(400).json({ message: "File path is missing" });
     }
+
+    console.log("file path", filePath);
 
     const document = await prisma.document.findUnique({
       where: { path: filePath },
     });
 
     if (!document) {
-      logger.warn({
-        action: "FILE_NOT_FOUND_FOR_VIEW",
-        details: { filePath, userId: userData.id },
-      });
       return res.status(404).json({ message: "File not found in database" });
     }
 
@@ -1588,7 +1581,7 @@ export const archive_file = async (req, res) => {
 
     let absolutePath = path.join(
       __dirname,
-      process.env.STORAGE_PATH + document.path
+      process.env.STORAGE_PATH + document.path,
     );
 
     // Check if file exists in the filesystem
@@ -1764,7 +1757,7 @@ export const unarchive_file = async (req, res) => {
 
     let absolutePath = path.join(
       __dirname,
-      process.env.STORAGE_PATH + document.path
+      process.env.STORAGE_PATH + document.path,
     );
 
     // Check if file exists in the filesystem
@@ -1863,7 +1856,7 @@ export const recover_from_recycle_bin = async (req, res) => {
 
     let absolutePath = path.join(
       __dirname,
-      process.env.STORAGE_PATH + document.path
+      process.env.STORAGE_PATH + document.path,
     );
 
     // Check if file exists in the filesystem
@@ -2028,7 +2021,7 @@ export const getFileDataByDocumentId = async (req, res) => {
     const filePath = join(
       __dirname,
       process.env.STORAGE_PATH || "",
-      document.path
+      document.path,
     );
 
     const stat = await fs.stat(filePath);
@@ -2106,7 +2099,7 @@ export const wopiFiles = async (req, res) => {
     const filePath = join(
       __dirname,
       process.env.STORAGE_PATH || "",
-      document.path
+      document.path,
     );
 
     const stat = await fs.stat(filePath);
@@ -2165,7 +2158,7 @@ export const wopiFilePost = async (req, res) => {
     const filePath = join(
       __dirname,
       process.env.STORAGE_PATH || "",
-      document.path
+      document.path,
     );
 
     console.log("file path", filePath);
@@ -2305,7 +2298,7 @@ export const downloadWatermarkedFile = async (req, res) => {
     tempFilePath = path.join(
       __dirname,
       STORAGE_PATH,
-      `temp_${Date.now()}_${path.basename(absoluteFilePath, ext)}.pdf`
+      `temp_${Date.now()}_${path.basename(absoluteFilePath, ext)}.pdf`,
     );
 
     if (allowedExtensions.includes(ext)) {
@@ -2320,7 +2313,7 @@ export const downloadWatermarkedFile = async (req, res) => {
           const fontSize = Math.max(Math.min(width, height) * 0.07, 20);
           const textWidth = helveticaFont.widthOfTextAtSize(
             watermarkText,
-            fontSize
+            fontSize,
           );
           page.drawText(watermarkText, {
             x: width / 2 - textWidth / 2,
@@ -2337,7 +2330,7 @@ export const downloadWatermarkedFile = async (req, res) => {
         watermarkedFilePath = path.join(
           __dirname,
           STORAGE_PATH,
-          `watermarked_${Date.now()}_${path.basename(absoluteFilePath)}`
+          `watermarked_${Date.now()}_${path.basename(absoluteFilePath)}`,
         );
         await fs.writeFile(watermarkedFilePath, watermarkedPdfBytes);
       } else {
@@ -2345,15 +2338,15 @@ export const downloadWatermarkedFile = async (req, res) => {
         const metadata = await image.metadata();
         const fontSize = Math.max(
           Math.min(metadata.width || 0, metadata.height || 0) * 0.07,
-          20
+          20,
         );
         const svg = `
           <svg width="${metadata.width}" height="${
-          metadata.height
-        }" xmlns="http://www.w3.org/2000/svg">
+            metadata.height
+          }" xmlns="http://www.w3.org/2000/svg">
             <text x="50%" y="50%" font-family="Helvetica" font-size="${fontSize}" fill="#808080" fill-opacity="0.5" text-anchor="middle" dominant-baseline="middle" transform="rotate(-45, ${
-          metadata.width / 2
-        }, ${metadata.height / 2})">${watermarkText}</text>
+              metadata.width / 2
+            }, ${metadata.height / 2})">${watermarkText}</text>
           </svg>
         `;
         const svgBuffer = Buffer.from(svg);
@@ -2378,7 +2371,7 @@ export const downloadWatermarkedFile = async (req, res) => {
         tempImagePath = path.join(
           __dirname,
           STORAGE_PATH,
-          `temp_image_${Date.now()}${ext}`
+          `temp_image_${Date.now()}${ext}`,
         );
         await outputImage.toFile(tempImagePath);
 
@@ -2406,14 +2399,14 @@ export const downloadWatermarkedFile = async (req, res) => {
           STORAGE_PATH,
           `watermarked_${Date.now()}_${path.basename(
             absoluteFilePath,
-            ext
-          )}.pdf`
+            ext,
+          )}.pdf`,
         );
         await fs.writeFile(watermarkedFilePath, pdfBytes);
       }
 
       await execSync(
-        `qpdf --encrypt "${password}" "${password}" 256 -- "${watermarkedFilePath}" "${tempFilePath}"`
+        `qpdf --encrypt "${password}" "${password}" 256 -- "${watermarkedFilePath}" "${tempFilePath}"`,
       );
     } else {
       await fs.copyFile(absoluteFilePath, tempFilePath);
@@ -2425,7 +2418,7 @@ export const downloadWatermarkedFile = async (req, res) => {
       "Content-Length": tempStats.size,
       "Content-Disposition": `attachment; filename="${path.basename(
         absoluteFilePath,
-        ext
+        ext,
       )}.pdf"`,
       "Accept-Ranges": "bytes",
       "X-Content-Type-Options": "nosniff",
@@ -2715,7 +2708,7 @@ export const mergeFilesToPdf = async (req, res) => {
       // Save file temporarily
       const tempFilePath = path.join(
         tempDir,
-        `temp_${Date.now()}_${i}${fileExtension}`
+        `temp_${Date.now()}_${i}${fileExtension}`,
       );
       await fs.writeFile(tempFilePath, fileBuffer);
       tempFiles.push(tempFilePath);
@@ -2726,7 +2719,7 @@ export const mergeFilesToPdf = async (req, res) => {
           const pdfDoc = await PDFDocument.load(fileBuffer);
           const copiedPages = await mergedPdf.copyPages(
             pdfDoc,
-            pdfDoc.getPageIndices()
+            pdfDoc.getPageIndices(),
           );
           copiedPages.forEach((page) => mergedPdf.addPage(page));
 
@@ -2740,7 +2733,7 @@ export const mergeFilesToPdf = async (req, res) => {
           });
         } else if (
           [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"].includes(
-            fileExtension
+            fileExtension,
           )
         ) {
           // For image files, convert to PDF page
@@ -2784,7 +2777,7 @@ export const mergeFilesToPdf = async (req, res) => {
           });
         } else if (
           [".txt", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt"].includes(
-            fileExtension
+            fileExtension,
           )
         ) {
           // For text/office documents, extract text and create text page
@@ -2794,9 +2787,8 @@ export const mergeFilesToPdf = async (req, res) => {
 
             let extractedText = "";
             try {
-              const extractionResult = await executeTextExtractionScript(
-                tempFilePath
-              );
+              const extractionResult =
+                await executeTextExtractionScript(tempFilePath);
               if (extractionResult.success && extractionResult.text) {
                 extractedText = extractionResult.text;
               }
@@ -2814,7 +2806,7 @@ export const mergeFilesToPdf = async (req, res) => {
             // Create a text page
             const page = mergedPdf.addPage([595.28, 841.89]); // A4 size
             const helveticaFont = await mergedPdf.embedFont(
-              StandardFonts.Helvetica
+              StandardFonts.Helvetica,
             );
 
             // Draw file name as header
@@ -2851,7 +2843,7 @@ export const mergeFilesToPdf = async (req, res) => {
                   const testLine = currentLine + word + " ";
                   const testWidth = helveticaFont.widthOfTextAtSize(
                     testLine,
-                    12
+                    12,
                   );
 
                   if (testWidth > maxWidth && currentLine !== "") {
@@ -2909,7 +2901,7 @@ export const mergeFilesToPdf = async (req, res) => {
             // Add a placeholder page
             const page = mergedPdf.addPage([595.28, 841.89]);
             const helveticaFont = await mergedPdf.embedFont(
-              StandardFonts.Helvetica
+              StandardFonts.Helvetica,
             );
             page.drawText(`File: ${originalName}`, {
               x: 50,
@@ -2928,7 +2920,7 @@ export const mergeFilesToPdf = async (req, res) => {
           // For unsupported file types, create an informational page
           const page = mergedPdf.addPage([595.28, 841.89]);
           const helveticaFont = await mergedPdf.embedFont(
-            StandardFonts.Helvetica
+            StandardFonts.Helvetica,
           );
           page.drawText(`File: ${originalName}`, {
             x: 50,
@@ -2943,7 +2935,7 @@ export const mergeFilesToPdf = async (req, res) => {
               y: 370,
               size: 12,
               font: helveticaFont,
-            }
+            },
           );
 
           logger.info({
@@ -2995,7 +2987,7 @@ export const mergeFilesToPdf = async (req, res) => {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="merged_documents_${timestamp}.pdf"`
+      `attachment; filename="merged_documents_${timestamp}.pdf"`,
     );
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -3111,7 +3103,7 @@ async function cleanupTempFiles(tempFiles, mergedPdfPath) {
         if (err.code !== "ENOENT") {
           console.error(
             `Error deleting merged PDF ${mergedPdfPath}:`,
-            err.message
+            err.message,
           );
         }
       }
