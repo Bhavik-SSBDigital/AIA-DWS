@@ -267,7 +267,7 @@ export default function InitiateProcess() {
   const handleEMLExtraction = async (documentId) => {
     setIsExtractingEmail(true);
     try {
-      const response = await extractEMLDetails(documentId);
+      const response = await extractEMLDetails(documentId, workflowId);
 
       if (response.data.success) {
         const data = response.data.data;

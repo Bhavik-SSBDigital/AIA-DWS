@@ -39,10 +39,11 @@ export const downloadLoginLogoutReport = async (fromDate, toDate) => {
   });
 };
 
-export const extractEMLDetails = async (documentId) => {
+export const extractEMLDetails = async (documentId, workflowId) => {
   try {
     const response = await apiClient.post('/extract-eml', {
       documentId,
+      workflowId
     });
     return response;
   } catch (error) {
