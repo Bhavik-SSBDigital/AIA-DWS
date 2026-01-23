@@ -15,7 +15,7 @@ import {
   ViewDocument,
 } from '../../common/Apis';
 
-import Grid2 from "@mui/material/Grid2";
+import Grid2 from '@mui/material/Grid2';
 
 import {
   IconEye,
@@ -79,7 +79,7 @@ const ViewProcess = () => {
   const [fileView, setFileView] = useState(null);
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
   const [existingQuery, setExistingQuery] = useState(null);
-    const formatDate = (date) => {
+  const formatDate = (date) => {
     const now = new Date();
     const emailDate = new Date(date);
     const diffTime = Math.abs(now - emailDate);
@@ -92,22 +92,77 @@ const ViewProcess = () => {
     } else if (diffDays <= 7) {
       return `${diffDays} days ago`;
     }
-    return emailDate.toLocaleDateString([], { 
-      year: 'numeric', 
-      month: 'short', 
+    return emailDate.toLocaleDateString([], {
+      year: 'numeric',
+      month: 'short',
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
     });
   };
   const [openModal, setOpenModal] = useState('');
   const [recommendations, setRecommendations] = useState([]);
   const [canEdit, setCanEdit] = useState({});
-  
+
   // Email thread states - MODIFIED
   const [showEmailThreadModal, setShowEmailThreadModal] = useState(false);
   const [selectedEmailThread, setSelectedEmailThread] = useState(null);
   const [expandedEmailThreads, setExpandedEmailThreads] = useState({});
+  const threadExample = {
+    id: 'thread_12345',
+    threadText: 'Discussion regarding project timeline and deliverables.',
+    extractedAt: '2026-01-23T10:15:30.000Z',
+    createdBy: {
+      id: 'user_001',
+      username: 'john_doe',
+      name: 'John Doe',
+      email: 'john.doe@example.com',
+    },
+    metadata: {
+      priority: 'high',
+      source: 'gmail',
+      labels: ['project', 'timeline'],
+    },
+    emails: [
+      {
+        id: 'email_1001',
+        subject: 'Project Timeline Update',
+        from: 'manager@example.com',
+        to: ['john.doe@example.com'],
+        cc: ['team@example.com'],
+        bcc: [],
+        date: '2026-01-20T08:30:00.000Z',
+        bodyText: 'Please find the updated project timeline attached.',
+        bodyHtml:
+          '<p>Please find the <strong>updated project timeline</strong> attached.</p>',
+        attachments: [
+          {
+            filename: 'timeline.pdf',
+            mimeType: 'application/pdf',
+            size: 245760,
+          },
+        ],
+        messageId: '<msg-1001@example.com>',
+        inReplyTo: null,
+        references: [],
+      },
+      {
+        id: 'email_1002',
+        subject: 'Re: Project Timeline Update',
+        from: 'john.doe@example.com',
+        to: ['manager@example.com'],
+        cc: [],
+        bcc: [],
+        date: '2026-01-21T11:45:00.000Z',
+        bodyText: 'Thanks for the update. I have reviewed the timeline.',
+        bodyHtml: '<p>Thanks for the update. I have reviewed the timeline.</p>',
+        attachments: [],
+        messageId: '<msg-1002@example.com>',
+        inReplyTo: '<msg-1001@example.com>',
+        references: ['<msg-1001@example.com>'],
+      },
+    ],
+  };
 
   const [customSignModal, setCustomSignModal] = useState({
     open: false,
@@ -156,7 +211,10 @@ const ViewProcess = () => {
   const fetchProcess = async () => {
     try {
       const response = await GetProcessData(id);
-      setProcess(response?.data?.process);
+      setProcess({
+        ...response?.data?.process,
+        // emailThreads: [threadExample] || [],
+      });
       // Check edit permissions for each document
       const editChecks = {};
       await Promise.all(
@@ -431,13 +489,13 @@ const ViewProcess = () => {
   };
 
   const toggleEmailThreadExpansion = (threadId) => {
-    setExpandedEmailThreads(prev => ({
+    setExpandedEmailThreads((prev) => ({
       ...prev,
-      [threadId]: !prev[threadId]
+      [threadId]: !prev[threadId],
     }));
   };
 
-function extractDocumentsByReopenCycle(processData) {
+  function extractDocumentsByReopenCycle(processData) {
     const { documentVersioning } = processData;
     const allReopenCycles = new Set();
     const lineageMap = new Map();
@@ -445,71 +503,74 @@ function extractDocumentsByReopenCycle(processData) {
 
     // Step 1: Normalize data
     documentVersioning.forEach((group) => {
-        if (group.chains) {
-            // New structure with chains
-            group.chains.forEach((chain) => {
-                const versions = [...chain.versions].sort(
-                    (a, b) => a.reopenCycle - b.reopenCycle,
-                );
-                versions.forEach((v) => allReopenCycles.add(v.reopenCycle));
-                const hasOriginal = versions.some((v) => v.reopenCycle === 0);
-                if (hasOriginal) {
-                    lineageMap.set(chain.latestDocumentId, versions);
-                } else {
-                    // ✅ NEW DOCUMENT (no reopenCycle 0)
-                    newDocuments.push(versions[0]);
-                }
-            });
+      if (group.chains) {
+        // New structure with chains
+        group.chains.forEach((chain) => {
+          const versions = [...chain.versions].sort(
+            (a, b) => a.reopenCycle - b.reopenCycle,
+          );
+          versions.forEach((v) => allReopenCycles.add(v.reopenCycle));
+          const hasOriginal = versions.some((v) => v.reopenCycle === 0);
+          if (hasOriginal) {
+            lineageMap.set(chain.latestDocumentId, versions);
+          } else {
+            // ✅ NEW DOCUMENT (no reopenCycle 0)
+            newDocuments.push(versions[0]);
+          }
+        });
+      } else {
+        // Old structure (direct versions)
+        const versions = [...group.versions].sort(
+          (a, b) => a.reopenCycle - b.reopenCycle,
+        );
+        versions.forEach((v) => allReopenCycles.add(v.reopenCycle));
+        const hasOriginal = versions.some((v) => v.reopenCycle === 0);
+        if (hasOriginal) {
+          lineageMap.set(
+            group.latestDocumentId || versions[versions.length - 1].id,
+            versions,
+          );
         } else {
-            // Old structure (direct versions)
-            const versions = [...group.versions].sort(
-                (a, b) => a.reopenCycle - b.reopenCycle,
-            );
-            versions.forEach((v) => allReopenCycles.add(v.reopenCycle));
-            const hasOriginal = versions.some((v) => v.reopenCycle === 0);
-            if (hasOriginal) {
-                lineageMap.set(group.latestDocumentId || versions[versions.length-1].id, versions);
-            } else {
-                newDocuments.push(versions[0]);
-            }
+          newDocuments.push(versions[0]);
         }
+      }
     });
 
     const reopenCycles = [...allReopenCycles].sort((a, b) => a - b);
 
     // Step 2: Build cycles
     return reopenCycles.map((cycle) => {
-        const documents = [];
-        // Existing lineages (original + replacements)
-        lineageMap.forEach((versions) => {
-            let selected = null;
-            for (let i = versions.length - 1; i >= 0; i--) {
-                if (versions[i].reopenCycle <= cycle) {
-                    selected = versions[i];
-                    break;
-                }
-            }
-            if (selected) documents.push(selected);
-        });
+      const documents = [];
+      // Existing lineages (original + replacements)
+      lineageMap.forEach((versions) => {
+        let selected = null;
+        for (let i = versions.length - 1; i >= 0; i--) {
+          if (versions[i].reopenCycle <= cycle) {
+            selected = versions[i];
+            break;
+          }
+        }
+        if (selected) documents.push(selected);
+      });
 
-        // New documents appear only from their cycle onward
-        newDocuments.forEach((doc) => {
-            if (doc.reopenCycle <= cycle) {
-                documents.push(doc);
-            }
-        });
+      // New documents appear only from their cycle onward
+      newDocuments.forEach((doc) => {
+        if (doc.reopenCycle <= cycle) {
+          documents.push(doc);
+        }
+      });
 
-        // SOP Issue No resolution
-        const sopMatch = documents.find(
-            (d) => d.reopenCycle === cycle && d.SOPIssueNo,
-        );
-        return {
-            reopenCycle: cycle,
-            SOPIssueNo: sopMatch?.SOPIssueNo || documents[0]?.SOPIssueNo || '--',
-            documents,
-        };
+      // SOP Issue No resolution
+      const sopMatch = documents.find(
+        (d) => d.reopenCycle === cycle && d.SOPIssueNo,
+      );
+      return {
+        reopenCycle: cycle,
+        SOPIssueNo: sopMatch?.SOPIssueNo || documents[0]?.SOPIssueNo || '--',
+        documents,
+      };
     });
-}
+  }
 
   const DocumentsCycle = (process) => {
     // Extract cycles
@@ -699,39 +760,39 @@ function extractDocumentsByReopenCycle(processData) {
     <div className="mx-auto">
       {actionsLoading && <TopLoader />}
       <CustomCard>
-       <div className="flex justify-end flex-row gap-2 flex-wrap">
-  <CustomButton
-    text={'Approve'}
-    click={() => openModelSignAllDoec(process?.processStepInstanceId)}
-    className={'min-w-[150px]'}
-    // disabled={
-    //   actionsLoading || isCompleted || process?.toBePicked === true
-    // }
-  />
-  <CustomButton
-    variant={'danger'}
-    text={'Reject'}
-    className={'min-w-[150px]'}
-    click={() => setOpenModal('query')}
-    disabled={actionsLoading || isCompleted || disableActions}
-  />
-  {isCompleted && !disableActions && (
-    <CustomButton
-      variant={'primary'}
-      text={'Re-Open'}
-      className={'min-w-[150px]'}
-      click={() => setOpenModal('re-open')}
-      disabled={actionsLoading}
-    />
-  )}
-  <CustomButton
-    variant={'primary'}
-    text={'Upload Document'}
-    className={'min-w-[150px] hidden'}
-    click={() => setOpenModal('document-upload')}
-    disabled={actionsLoading || !isCompleted || disableActions}
-  />
-  {/* <CustomButton
+        <div className="flex justify-end flex-row gap-2 flex-wrap">
+          <CustomButton
+            text={'Approve'}
+            click={() => openModelSignAllDoec(process?.processStepInstanceId)}
+            className={'min-w-[150px]'}
+            // disabled={
+            //   actionsLoading || isCompleted || process?.toBePicked === true
+            // }
+          />
+          <CustomButton
+            variant={'danger'}
+            text={'Reject'}
+            className={'min-w-[150px]'}
+            click={() => setOpenModal('query')}
+            disabled={actionsLoading || isCompleted || disableActions}
+          />
+          {isCompleted && !disableActions && (
+            <CustomButton
+              variant={'primary'}
+              text={'Re-Open'}
+              className={'min-w-[150px]'}
+              click={() => setOpenModal('re-open')}
+              disabled={actionsLoading}
+            />
+          )}
+          <CustomButton
+            variant={'primary'}
+            text={'Upload Document'}
+            className={'min-w-[150px] hidden'}
+            click={() => setOpenModal('document-upload')}
+            disabled={actionsLoading || !isCompleted || disableActions}
+          />
+          {/* <CustomButton
     variant={'primary'}
     text={'Claim'}
     className={'min-w-[150px]'}
@@ -744,28 +805,28 @@ function extractDocumentsByReopenCycle(processData) {
     }
   /> */}
 
-  <CustomButton
-    variant={'secondary'}
-    text={'Reject'}
-    className={'min-w-[150px]'}
-    click={() => setOpenModal('query')}
-    disabled={actionsLoading || isCompleted || disableActions}
-  />
-  <CustomButton
-    variant={'secondary'}
-    text={'Ask Recommendation'}
-    className={'min-w-[150px]'}
-    click={() => setOpenModal('recommend')}
-    disabled={actionsLoading || isCompleted || disableActions}
-  />
-  <CustomButton
-    variant={'secondary'}
-    text={'Timeline'}
-    click={() => navigate(`/timeline/${process?.processId}`)}
-    className={'min-w-[150px]'}
-    disabled={actionsLoading}
-  />
-</div>
+          <CustomButton
+            variant={'secondary'}
+            text={'Reject'}
+            className={'min-w-[150px]'}
+            click={() => setOpenModal('query')}
+            disabled={actionsLoading || isCompleted || disableActions}
+          />
+          <CustomButton
+            variant={'secondary'}
+            text={'Ask Recommendation'}
+            className={'min-w-[150px]'}
+            click={() => setOpenModal('recommend')}
+            disabled={actionsLoading || isCompleted || disableActions}
+          />
+          <CustomButton
+            variant={'secondary'}
+            text={'Timeline'}
+            click={() => navigate(`/timeline/${process?.processId}`)}
+            className={'min-w-[150px]'}
+            disabled={actionsLoading}
+          />
+        </div>
         <hr className="text-slate-200 my-2" />
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           {processDetails.map((detail, index) => (
@@ -781,244 +842,287 @@ function extractDocumentsByReopenCycle(processData) {
       </CustomCard>
 
       {/* Email Threads Section */}
-     {/* Email Threads Section - IMPROVED */}
-{process?.emailThreads?.length > 0 && (
-  <section className="mt-8">
-    <div className="flex items-center mb-6">
-      <div className="flex-grow border-t border-blue-300"></div>
-      <span className="mx-4 text-sm font-semibold text-blue-700 uppercase tracking-wide flex items-center gap-2 bg-blue-50 px-4 py-2 rounded-full">
-        <IconMail size={16} className="text-blue-600" />
-        Email Conversations ({process.emailThreads.length})
-      </span>
-      <div className="flex-grow border-t border-blue-300"></div>
-    </div>
-    
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {process.emailThreads.map((thread, index) => {
-        const participants = new Set();
-        const threadEmails = thread.emails || [];
-        const totalEmails = threadEmails.length;
-        const totalAttachments = (thread.attachmentsMapping?.length || 0) + 
-          threadEmails.reduce((sum, email) => sum + (email.attachments?.length || 0), 0);
-        
-        // Extract participants from all emails
-        threadEmails.forEach(email => {
-          if (email.from) participants.add(email.from.split('<')[0]?.trim());
-          if (email.to) email.to.forEach(to => participants.add(to.split('<')[0]?.trim()));
-        });
-        
-        const participantsList = Array.from(participants).slice(0, 3);
-        const hasMoreParticipants = participants.size > 3;
-        const latestEmail = threadEmails[threadEmails.length - 1];
-        const firstEmail = threadEmails[0];
-        
-        return (
-          <div
-            key={thread.id || index}
-            className="group relative bg-gradient-to-br from-white to-blue-50 border border-blue-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-lg transition-all duration-300"
-          >
-            {/* Thread status indicator */}
-            <div className="absolute top-4 right-4">
-              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                totalAttachments > 0 
-                  ? 'bg-green-100 text-green-800 border border-green-200' 
-                  : 'bg-blue-100 text-blue-800 border border-blue-200'
-              }`}>
-                {totalAttachments > 0 ? `${totalAttachments} files` : 'No files'}
-              </span>
-            </div>
-            
-            <div className="flex items-start gap-4">
-              <div className="flex-shrink-0">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md">
-                  <IconMail className="text-white" size={24} />
-                </div>
-              </div>
-              
-              <div className="flex-1 min-w-0">
-                <div className="mb-3">
-                  <h3 className="font-semibold text-gray-900 text-lg mb-2 truncate">
-                    {firstEmail?.subject || "Email Conversation"}
-                  </h3>
-                  
-                  {/* Thread stats */}
-                  <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3">
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                      <span className="font-medium">{totalEmails} messages</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <IconUser size={14} />
-                      <span className="font-medium">{participants.size} participants</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <IconClock size={14} />
-                      <span>{formatDate(thread.extractedAt)}</span>
-                    </div>
+      {/* Email Threads Section - IMPROVED */}
+      {process?.emailThreads?.length > 0 && (
+        <section className="mt-8">
+          <div className="flex items-center mb-6">
+            <div className="flex-grow border-t border-blue-300"></div>
+            <span className="mx-4 text-sm font-semibold text-blue-700 uppercase tracking-wide flex items-center gap-2 bg-blue-50 px-4 py-2 rounded-full">
+              <IconMail size={16} className="text-blue-600" />
+              Email Conversations ({process.emailThreads.length})
+            </span>
+            <div className="flex-grow border-t border-blue-300"></div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {process.emailThreads.map((thread, index) => {
+              const participants = new Set();
+              const threadEmails = thread.emails || [];
+              const totalEmails = threadEmails.length;
+              const totalAttachments =
+                (thread.attachmentsMapping?.length || 0) +
+                threadEmails.reduce(
+                  (sum, email) => sum + (email.attachments?.length || 0),
+                  0,
+                );
+
+              // Extract participants from all emails
+              threadEmails.forEach((email) => {
+                if (email.from)
+                  participants.add(email.from.split('<')[0]?.trim());
+                if (email.to)
+                  email.to.forEach((to) =>
+                    participants.add(to.split('<')[0]?.trim()),
+                  );
+              });
+
+              const participantsList = Array.from(participants).slice(0, 3);
+              const hasMoreParticipants = participants.size > 3;
+              const latestEmail = threadEmails[threadEmails.length - 1];
+              const firstEmail = threadEmails[0];
+
+              return (
+                <div
+                  key={thread.id || index}
+                  className="group relative bg-gradient-to-br from-white to-blue-50 border border-blue-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-lg transition-all duration-300"
+                >
+                  {/* Thread status indicator */}
+                  <div className="absolute top-4 right-4">
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        totalAttachments > 0
+                          ? 'bg-green-100 text-green-800 border border-green-200'
+                          : 'bg-blue-100 text-blue-800 border border-blue-200'
+                      }`}
+                    >
+                      {totalAttachments > 0
+                        ? `${totalAttachments} files`
+                        : 'No files'}
+                    </span>
                   </div>
-                  
-                  {/* Participants preview */}
-                  {participantsList.length > 0 && (
-                    <div className="mb-4">
-                      <div className="flex items-center gap-2 text-sm text-gray-700 mb-2">
-                        <IconUsers size={14} />
-                        <span className="font-medium">Participants:</span>
+
+                  <div className="flex items-start gap-4">
+                    <div className="flex-shrink-0">
+                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md">
+                        <IconMail className="text-white" size={24} />
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {participantsList.map((participant, idx) => (
-                          <span
-                            key={idx}
-                            className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-blue-50 hover:border-blue-200 transition-colors"
-                          >
-                            {participant}
-                          </span>
-                        ))}
-                        {hasMoreParticipants && (
-                          <span className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-sm">
-                            +{participants.size - 3} more
-                          </span>
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="mb-3">
+                        <h3 className="font-semibold text-gray-900 text-lg mb-2 truncate">
+                          {firstEmail?.subject || 'Email Conversation'}
+                        </h3>
+
+                        {/* Thread stats */}
+                        <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3">
+                          <div className="flex items-center gap-1">
+                            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                            <span className="font-medium">
+                              {totalEmails} messages
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <IconUser size={14} />
+                            <span className="font-medium">
+                              {participants.size} participants
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <IconClock size={14} />
+                            <span>{formatDate(thread.extractedAt)}</span>
+                          </div>
+                        </div>
+
+                        {/* Participants preview */}
+                        {participantsList.length > 0 && (
+                          <div className="mb-4">
+                            <div className="flex items-center gap-2 text-sm text-gray-700 mb-2">
+                              <IconUsers size={14} />
+                              <span className="font-medium">Participants:</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {participantsList.map((participant, idx) => (
+                                <span
+                                  key={idx}
+                                  className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-blue-50 hover:border-blue-200 transition-colors"
+                                >
+                                  {participant}
+                                </span>
+                              ))}
+                              {hasMoreParticipants && (
+                                <span className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-sm">
+                                  +{participants.size - 3} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Email preview */}
+                        {threadEmails.length > 0 && (
+                          <div className="space-y-3">
+                            {/* {!expandedEmailThreads[thread.id || index] ? (
+                              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                <div className="flex items-start gap-3 mb-3">
+                                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                                    <span className="text-xs font-semibold text-blue-600">
+                                      1
+                                    </span>
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="text-sm font-medium text-gray-800 mb-1">
+                                      {firstEmail?.from?.split('<')[0]?.trim()}
+                                    </div>
+                                    <div className="text-xs text-gray-500">
+                                      {firstEmail?.subject?.substring(0, 60)}
+                                      {firstEmail?.subject?.length > 60
+                                        ? '...'
+                                        : ''}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-start gap-3">
+                                  <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                                    <span className="text-xs font-semibold text-green-600">
+                                      {totalEmails}
+                                    </span>
+                                  </div>
+                                  <div className="flex-1">
+                                    <div className="text-sm font-medium text-gray-800 mb-1">
+                                      {latestEmail?.from?.split('<')[0]?.trim()}
+                                    </div>
+                                    <div className="text-xs text-gray-500">
+                                      Latest:{' '}
+                                      {latestEmail?.subject?.substring(0, 60)}
+                                      {latestEmail?.subject?.length > 60
+                                        ? '...'
+                                        : ''}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {threadEmails.slice(0, 3).map((email, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="bg-white border border-gray-200 rounded-lg p-3"
+                                  >
+                                    <div className="flex justify-between items-start mb-2">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
+                                          <span className="text-xs font-semibold text-blue-600">
+                                            {idx + 1}
+                                          </span>
+                                        </div>
+                                        <div className="text-sm font-medium text-gray-800 truncate">
+                                          {email.from?.split('<')[0]?.trim()}
+                                        </div>
+                                      </div>
+                                      <div className="text-xs text-gray-500">
+                                        {new Date(
+                                          email.date,
+                                        ).toLocaleDateString()}
+                                      </div>
+                                    </div>
+                                    <div className="text-sm text-gray-600 line-clamp-2">
+                                      {email.bodyText?.substring(0, 120)}
+                                      {email.bodyText?.length > 120
+                                        ? '...'
+                                        : ''}
+                                    </div>
+                                  </div>
+                                ))}
+                                {threadEmails.length > 3 && (
+                                  <div className="text-center py-2">
+                                    <span className="text-sm text-gray-500">
+                                      + {threadEmails.length - 3} more messages
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            )} */}
+
+                            <div className="flex items-center justify-between mt-4">
+                              {/* <button
+                                type="button"
+                                onClick={() =>
+                                  toggleEmailThreadExpansion(thread.id || index)
+                                }
+                                className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
+                              >
+                                {expandedEmailThreads[thread.id || index] ? (
+                                  <>
+                                    <IconChevronUp size={16} />
+                                    Show Less
+                                  </>
+                                ) : (
+                                  <>
+                                    <IconChevronDown size={16} />
+                                    Show Conversation Preview
+                                  </>
+                                )}
+                              </button> */}
+                              <div></div>
+                              <div className="flex items-center gap-2">
+                                <CustomButton
+                                  variant="outline"
+                                  size="sm"
+                                  text="View Thread"
+                                  click={() => handleViewEmailThread(thread)}
+                                  className="px-4"
+                                  disabled={actionsLoading}
+                                  icon={<IconEye size={16} />}
+                                />
+                              </div>
+                            </div>
+                          </div>
                         )}
                       </div>
-                    </div>
-                  )}
-                  
-                  {/* Email preview */}
-                  {threadEmails.length > 0 && (
-                    <div className="space-y-3">
-                      {!expandedEmailThreads[thread.id || index] ? (
-                        <div className="bg-white border border-gray-200 rounded-lg p-4">
-                          <div className="flex items-start gap-3 mb-3">
-                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                              <span className="text-xs font-semibold text-blue-600">1</span>
-                            </div>
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-gray-800 mb-1">
-                                {firstEmail?.from?.split('<')[0]?.trim()}
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                {firstEmail?.subject?.substring(0, 60)}
-                                {firstEmail?.subject?.length > 60 ? '...' : ''}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-start gap-3">
-                            <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                              <span className="text-xs font-semibold text-green-600">{totalEmails}</span>
-                            </div>
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-gray-800 mb-1">
-                                {latestEmail?.from?.split('<')[0]?.trim()}
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                Latest: {latestEmail?.subject?.substring(0, 60)}
-                                {latestEmail?.subject?.length > 60 ? '...' : ''}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {threadEmails.slice(0, 3).map((email, idx) => (
-                            <div key={idx} className="bg-white border border-gray-200 rounded-lg p-3">
-                              <div className="flex justify-between items-start mb-2">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
-                                    <span className="text-xs font-semibold text-blue-600">{idx + 1}</span>
-                                  </div>
-                                  <div className="text-sm font-medium text-gray-800 truncate">
-                                    {email.from?.split('<')[0]?.trim()}
-                                  </div>
-                                </div>
-                                <div className="text-xs text-gray-500">
-                                  {new Date(email.date).toLocaleDateString()}
-                                </div>
-                              </div>
-                              <div className="text-sm text-gray-600 line-clamp-2">
-                                {email.bodyText?.substring(0, 120)}
-                                {email.bodyText?.length > 120 ? '...' : ''}
-                              </div>
-                            </div>
-                          ))}
-                          {threadEmails.length > 3 && (
-                            <div className="text-center py-2">
-                              <span className="text-sm text-gray-500">
-                                + {threadEmails.length - 3} more messages
+
+                      {/* Extracted documents preview */}
+                      {thread.attachmentsMapping &&
+                        thread.attachmentsMapping.length > 0 && (
+                          <div className="mt-4 pt-4 border-t">
+                            <div className="flex items-center gap-2 mb-2">
+                              <IconPaperclip
+                                size={16}
+                                className="text-green-600"
+                              />
+                              <span className="text-sm font-medium text-gray-700">
+                                Extracted Documents (
+                                {thread.attachmentsMapping.length})
                               </span>
                             </div>
-                          )}
-                        </div>
-                      )}
-                      
-                      <div className="flex items-center justify-between mt-4">
-                        <button
-                          type="button"
-                          onClick={() => toggleEmailThreadExpansion(thread.id || index)}
-                          className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
-                        >
-                          {expandedEmailThreads[thread.id || index] ? (
-                            <>
-                              <IconChevronUp size={16} />
-                              Show Less
-                            </>
-                          ) : (
-                            <>
-                              <IconChevronDown size={16} />
-                              Show Conversation Preview
-                            </>
-                          )}
-                        </button>
-                        
-                        <div className="flex items-center gap-2">
-                          <CustomButton
-                            variant="outline"
-                            size="sm"
-                            text="View Thread"
-                            click={() => handleViewEmailThread(thread)}
-                            className="px-4"
-                            disabled={actionsLoading}
-                            icon={<IconEye size={16} />}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Extracted documents preview */}
-                {thread.attachmentsMapping && thread.attachmentsMapping.length > 0 && (
-                  <div className="mt-4 pt-4 border-t">
-                    <div className="flex items-center gap-2 mb-2">
-                      <IconPaperclip size={16} className="text-green-600" />
-                      <span className="text-sm font-medium text-gray-700">
-                        Extracted Documents ({thread.attachmentsMapping.length})
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {thread.attachmentsMapping.slice(0, 3).map((att, idx) => (
-                        <span
-                          key={idx}
-                          className="px-3 py-1.5 bg-green-50 text-green-800 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors truncate max-w-[150px]"
-                          title={`Document: ${att.originalFilename}`}
-                        >
-                          {att.originalFilename}
-                        </span>
-                      ))}
-                      {thread.attachmentsMapping.length > 3 && (
-                        <span className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs">
-                          +{thread.attachmentsMapping.length - 3} more
-                        </span>
-                      )}
+                            <div className="flex flex-wrap gap-2">
+                              {thread.attachmentsMapping
+                                .slice(0, 3)
+                                .map((att, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="px-3 py-1.5 bg-green-50 text-green-800 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors truncate max-w-[150px]"
+                                    title={`Document: ${att.originalFilename}`}
+                                  >
+                                    {att.originalFilename}
+                                  </span>
+                                ))}
+                              {thread.attachmentsMapping.length > 3 && (
+                                <span className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs">
+                                  +{thread.attachmentsMapping.length - 3} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
                     </div>
                   </div>
-                )}
-              </div>
-            </div>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
-    </div>
-  </section>
-)}
+        </section>
+      )}
 
       {/* Active Documents Section */}
       {process?.documents?.length > 0 && (
@@ -1425,8 +1529,13 @@ function extractDocumentsByReopenCycle(processData) {
                   </div>
                   <div className="mt-4 flex justify-end">
                     <CustomButton
-                      disabled={actionsLoading || isCompleted || disableActions || query.answerText}
-                      text={query.answerText ? "Already Solved" : "Solve Query"}
+                      disabled={
+                        actionsLoading ||
+                        isCompleted ||
+                        disableActions ||
+                        query.answerText
+                      }
+                      text={query.answerText ? 'Already Solved' : 'Solve Query'}
                       variant="primary"
                       click={() => handleSolveQuery(query)}
                     />
