@@ -35,12 +35,14 @@ import ViewFile from '../view/View';
 import CustomCard from '../../CustomComponents/CustomCard';
 import Title from '../../CustomComponents/Title';
 import EmailThreadModal from './EmailThreadModal';
+import CustomModal from '../../CustomComponents/CustomModal';
 
 export default function InitiateProcess() {
   const navigate = useNavigate();
   const [workflowData, setWorkflowData] = useState([]);
   const [selectedWorkflow, setSelectedWorkflow] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+
   const formatDate = (date) => {
     const now = new Date();
     const emailDate = new Date(date);
@@ -62,12 +64,14 @@ export default function InitiateProcess() {
       minute: '2-digit',
     });
   };
+
   const [fileDetails, setFileDetails] = useState({
     tags: [],
     partNumber: '',
     preApproved: false,
     fileDescription: '',
     issueNo: '',
+    name: '', // added for pre-approved case
   });
 
   const [newTag, setNewTag] = useState('');
@@ -75,72 +79,7 @@ export default function InitiateProcess() {
   const [actionsLoading, setActionsLoading] = useState(false);
   const [fileView, setFileView] = useState(null);
 
-  const toggleEmailThreadExpansion = (threadId) => {
-    setExpandedEmailThreads((prev) => ({
-      ...prev,
-      [threadId]: !prev[threadId],
-    }));
-  };
-
-  // Email extraction states
-  const [emailThreads, setEmailThreads] = useState([
-    // {
-    //   id: 'thread_12345',
-    //   threadText: 'Discussion regarding project timeline and deliverables.',
-    //   extractedAt: '2026-01-23T10:15:30.000Z',
-    //   createdBy: {
-    //     id: 'user_001',
-    //     username: 'john_doe',
-    //     name: 'John Doe',
-    //     email: 'john.doe@example.com',
-    //   },
-    //   metadata: {
-    //     priority: 'high',
-    //     source: 'gmail',
-    //     labels: ['project', 'timeline'],
-    //   },
-    //   emails: [
-    //     {
-    //       id: 'email_1001',
-    //       subject: 'Project Timeline Update',
-    //       from: 'manager@example.com',
-    //       to: ['john.doe@example.com'],
-    //       cc: ['team@example.com'],
-    //       bcc: [],
-    //       date: '2026-01-20T08:30:00.000Z',
-    //       bodyText: 'Please find the updated project timeline attached.',
-    //       bodyHtml:
-    //         '<p>Please find the <strong>updated project timeline</strong> attached.</p>',
-    //       attachments: [
-    //         {
-    //           filename: 'timeline.pdf',
-    //           mimeType: 'application/pdf',
-    //           size: 245760,
-    //         },
-    //       ],
-    //       messageId: '<msg-1001@example.com>',
-    //       inReplyTo: null,
-    //       references: [],
-    //     },
-    //     {
-    //       id: 'email_1002',
-    //       subject: 'Re: Project Timeline Update',
-    //       from: 'john.doe@example.com',
-    //       to: ['manager@example.com'],
-    //       cc: [],
-    //       bcc: [],
-    //       date: '2026-01-21T11:45:00.000Z',
-    //       bodyText: 'Thanks for the update. I have reviewed the timeline.',
-    //       bodyHtml:
-    //         '<p>Thanks for the update. I have reviewed the timeline.</p>',
-    //       attachments: [],
-    //       messageId: '<msg-1002@example.com>',
-    //       inReplyTo: '<msg-1001@example.com>',
-    //       references: ['<msg-1001@example.com>'],
-    //     },
-    //   ],
-    // },
-  ]);
+  const [emailThreads, setEmailThreads] = useState([]);
   const [showEmailThreadModal, setShowEmailThreadModal] = useState(false);
   const [selectedEmailThread, setSelectedEmailThread] = useState(null);
   const [isExtractingEmail, setIsExtractingEmail] = useState(false);
@@ -166,6 +105,7 @@ export default function InitiateProcess() {
   });
 
   const [workflowId] = watch(['workflowId']);
+
   const {
     fields: documentFields,
     append: addDocument,
@@ -189,18 +129,47 @@ export default function InitiateProcess() {
     }
   };
 
+  // ────────────────────────────────────────────────
+  // Auto-select first workflow and first version
+  // ────────────────────────────────────────────────
   useEffect(() => {
     const getWorkflowsData = async () => {
       try {
         const response = await GetWorkflows();
-        setWorkflowData(response?.data?.workflows || []);
+        const workflows = response?.data?.workflows || [];
+        setWorkflowData(workflows);
+
+        if (workflows.length > 0) {
+          const firstWorkflow = workflows[0];
+          setSelectedWorkflow(firstWorkflow);
+
+          if (firstWorkflow.versions?.length > 0) {
+            setValue('workflowId', firstWorkflow.versions[0].id, {
+              shouldValidate: true,
+            });
+          }
+        }
       } catch (error) {
         console.log(error);
       }
     };
 
     getWorkflowsData();
-  }, []);
+  }, [setValue]);
+
+  // Auto-select first version when workflow changes (fallback / safety)
+  useEffect(() => {
+    if (selectedWorkflow?.versions?.length > 0) {
+      const current = getValues('workflowId');
+      const exists = selectedWorkflow.versions.some((v) => v.id === current);
+
+      if (!current || !exists) {
+        setValue('workflowId', selectedWorkflow.versions[0].id, {
+          shouldValidate: true,
+        });
+      }
+    }
+  }, [selectedWorkflow, setValue, getValues]);
 
   const [expandedEmailThreads, setExpandedEmailThreads] = useState({});
   const [allTags, setAllTags] = useState([]);
@@ -220,18 +189,14 @@ export default function InitiateProcess() {
     fetchTags();
   }, []);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setOpen(false);
       }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const addTag = (tag) => {
@@ -262,8 +227,6 @@ export default function InitiateProcess() {
 
   const inputRef = useRef(null);
 
-  // Enhanced EML extraction function
-  // Enhanced EML extraction function
   const handleEMLExtraction = async (documentId) => {
     setIsExtractingEmail(true);
     try {
@@ -271,16 +234,11 @@ export default function InitiateProcess() {
 
       if (response.data.success) {
         const data = response.data.data;
-
-        // Handle different response formats
         let emails = [];
 
-        // Format 1: Direct emails array
         if (Array.isArray(data.emails) && data.emails.length > 0) {
           emails = data.emails;
-        }
-        // Format 2: OriginalEmail object
-        else if (data.originalEmail) {
+        } else if (data.originalEmail) {
           emails = [
             {
               subject: data.originalEmail.subject,
@@ -290,9 +248,7 @@ export default function InitiateProcess() {
               attachments: data.attachmentsMapping || [],
             },
           ];
-        }
-        // Format 3: Thread text only
-        else if (data.threadText) {
+        } else if (data.threadText) {
           emails = [
             {
               subject: 'Extracted Email',
@@ -308,33 +264,28 @@ export default function InitiateProcess() {
           id: `thread-${Date.now()}`,
           originalDocumentId: documentId,
           threadText: data.threadText || 'Email thread',
-          emails: emails,
+          emails,
           attachmentsMapping: data.attachmentsMapping || [],
           extractedAt: new Date().toISOString(),
         };
 
         setEmailThreads((prev) => [...prev, newThread]);
 
-        // Add extracted attachments to the documents list
-        if (data.extractedDocumentIds && data.extractedDocumentIds.length > 0) {
-          data.extractedDocumentIds.forEach((attDocId, index) => {
-            const attachment = data.attachmentsMapping?.[index];
+        if (data.extractedDocumentIds?.length > 0) {
+          data.extractedDocumentIds.forEach((attDocId, idx) => {
+            const attachment = data.attachmentsMapping?.[idx];
             if (attachment) {
-              const emailSubject =
-                emails[0]?.subject ||
-                data.originalEmail?.subject ||
-                'Unknown subject';
-              const emailFrom =
-                emails[0]?.from || data.originalEmail?.from || 'Unknown sender';
+              const emailSubject = emails[0]?.subject || 'Unknown subject';
+              const emailFrom = emails[0]?.from || 'Unknown sender';
 
               addDocument({
                 documentId: attDocId,
-                name: attachment.originalFilename || `attachment_${index}`,
+                name: attachment.originalFilename || `attachment_${idx}`,
                 tags: [...fileDetails.tags, 'extracted-from-email'],
                 description: `Extracted from email: ${emailSubject}`,
                 fromEmail: true,
-                emailSubject: emailSubject,
-                emailFrom: emailFrom,
+                emailSubject,
+                emailFrom,
                 partNumber: fileDetails.partNumber,
                 preApproved: fileDetails.preApproved,
                 issueNo: fileDetails.issueNo,
@@ -343,7 +294,7 @@ export default function InitiateProcess() {
           });
 
           toast.success(
-            `Email extracted successfully! ${data.extractedDocumentIds.length} attachment(s) added.`,
+            `Email extracted! ${data.extractedDocumentIds.length} attachment(s) added.`,
           );
         } else {
           toast.info('Email extracted successfully!');
@@ -353,33 +304,26 @@ export default function InitiateProcess() {
       }
     } catch (error) {
       console.error('EML extraction error:', error);
-      toast.error(
-        error?.response?.data?.message ||
-          'Failed to extract email. Please try again.',
-      );
+      toast.error(error?.response?.data?.message || 'Failed to extract email.');
     } finally {
       setIsExtractingEmail(false);
     }
   };
 
-  // Modified handleUpload function
   const handleUpload = async () => {
     if (!workflowId) {
       toast.info('Please select workflow.');
       return;
     }
-
     if (!selectedFile) return;
 
     setActionsLoading(true);
 
     try {
-      // Generate file name from backend
       const generatedName = fileDetails.preApproved
         ? {
             data: {
-              documentName:
-                fileDetails.name + '.' + selectedFile.name.split('.').pop(),
+              documentName: `${fileDetails.name}.${selectedFile.name.split('.').pop()}`,
             },
           }
         : await GenerateDocumentName(
@@ -388,66 +332,59 @@ export default function InitiateProcess() {
             selectedFile.name.split('.').pop(),
           );
 
-      // Upload file using generated name and tags
       const res = await uploadDocumentInProcess(
         [selectedFile],
         generatedName?.data?.documentName,
         fileDetails?.tags,
       );
 
-      // Check if file is EML
       const fileExt = selectedFile.name.split('.').pop().toLowerCase();
-
       const isEmailFile = ['eml', 'msg', 'email'].includes(fileExt);
 
       if (isEmailFile) {
-        // EML file - extract it
-        const uploadedDocumentId = res[0]; // Get the document ID from upload response
+        const uploadedDocumentId = res[0];
         toast.info('Email file detected. Extracting attachments...');
 
-        // Wait a moment for the file to be fully processed
         setTimeout(async () => {
           await handleEMLExtraction(uploadedDocumentId);
 
-          // Reset form after successful extraction
           setFileDetails({
             tags: [],
             partNumber: '',
             preApproved: false,
             fileDescription: '',
             issueNo: '',
+            name: '',
           });
           setNewTag('');
           setSelectedFile(null);
           if (inputRef.current) inputRef.current.value = null;
-
           setActionsLoading(false);
         }, 1000);
 
-        return; // Don't continue with regular file handling
-      } else {
-        // Regular file upload
-        toast.success('File uploaded successfully');
-
-        addDocument({
-          documentId: res[0],
-          name: generatedName?.data?.documentName,
-          tags: fileDetails.tags,
-          description: fileDetails.fileDescription,
-          partNumber: fileDetails.partNumber,
-          preApproved: fileDetails.preApproved,
-          issueNo: fileDetails.issueNo,
-          fromEmail: false,
-        });
+        return;
       }
 
-      // Reset form for non-email files
+      toast.success('File uploaded successfully');
+
+      addDocument({
+        documentId: res[0],
+        name: generatedName?.data?.documentName,
+        tags: fileDetails.tags,
+        description: fileDetails.fileDescription,
+        partNumber: fileDetails.partNumber,
+        preApproved: fileDetails.preApproved,
+        issueNo: fileDetails.issueNo,
+        fromEmail: false,
+      });
+
       setFileDetails({
         tags: [],
         partNumber: '',
         preApproved: false,
         fileDescription: '',
         issueNo: '',
+        name: '',
       });
 
       setNewTag('');
@@ -463,17 +400,14 @@ export default function InitiateProcess() {
     }
   };
 
-  // Modified onSubmit to include email threads
   const onSubmit = async (data) => {
     if (data?.documents?.length === 0) {
       toast.info('Please upload documents for process');
       return;
     }
 
-    // Prepare data with email threads - FIXED STRUCTURE
     const submitData = {
       ...data,
-      // Send minimal email thread data to match backend expectations
       emailThreads: emailThreads.map((thread) => ({
         threadText: thread.threadText || 'Email thread extracted from EML',
         emails: thread.emails || [],
@@ -507,7 +441,7 @@ export default function InitiateProcess() {
         name: res?.data?.documentName,
         tags: [],
         documentPath: res?.data?.documentPath,
-        info: 'This document is prepared from template document, please edit if you want to add the latest data in the document',
+        info: 'This document is prepared from template document, please edit if you want to add the latest data.',
       });
     } catch (error) {
       toast.error(error?.response?.data?.message || error.message);
@@ -528,25 +462,29 @@ export default function InitiateProcess() {
     }
   };
 
-  // Function to view email thread
   const handleViewEmailThread = (thread) => {
     setSelectedEmailThread(thread);
     setShowEmailThreadModal(true);
   };
 
-  // Function to remove email thread
-  const handleRemoveEmailThread = (threadId) => {
+  // ────────────────────────────────────────────────
+  // Delete thread with confirmation + remove attachments
+  // ────────────────────────────────────────────────
+
+  const [removeEmailThredModel, setRemoveEmailThredModel] = useState('');
+
+  const handleremoveEmailThread = (threadId) => {
+    const thread = emailThreads.find((t) => t.id === threadId);
+
     setEmailThreads((prev) => prev.filter((t) => t.id !== threadId));
 
-    // Also remove any documents that were from this thread
-    const thread = emailThreads.find((t) => t.id === threadId);
-    if (thread && thread.attachmentsMapping) {
+    if (thread.attachmentsMapping?.length > 0) {
       thread.attachmentsMapping.forEach((att) => {
-        const docIndex = documentFields.findIndex(
+        const index = documentFields.findIndex(
           (doc) => doc.documentId === att.documentId,
         );
-        if (docIndex !== -1) {
-          removeDocument(docIndex);
+        if (index !== -1) {
+          removeDocument(index);
         }
       });
     }
@@ -568,12 +506,35 @@ export default function InitiateProcess() {
     }
   }, [workflowId]);
 
-  const handleDeleteEmailThread = (threadId) => {
-    setEmailThreads((prev) => prev.filter((t) => t.id !== threadId));
-  };
-
   return (
     <>
+      <CustomModal
+        isOpen={!!removeEmailThredModel}
+        onClose={() => setRemoveEmailThredModel('')}
+        size="md"
+      >
+        <div>
+          <h2 className="text-lg font-semibold mb-4">Confirm Deletion</h2>
+          <p>Are you sure you want to remove this email thread?</p>
+          <div className="flex justify-end mt-4">
+            <button
+              className="px-4 py-2 bg-red-500 text-white rounded-md mr-2"
+              onClick={() => {
+                handleremoveEmailThread(removeEmailThredModel);
+                setRemoveEmailThredModel('');
+              }}
+            >
+              Confirm
+            </button>
+            <button
+              className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md border border-gray-300"
+              onClick={() => setRemoveEmailThredModel('')}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </CustomModal>
       {actionsLoading || isExtractingEmail ? <TopLoader /> : null}
       <CustomCard className="max-w-7xl mx-auto p-6">
         <Title text={'Initiate Process'} />
@@ -610,6 +571,7 @@ export default function InitiateProcess() {
                 </label>
                 <select
                   className="w-full border border-gray-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={selectedWorkflow?.name || ''}
                   onChange={(e) => {
                     const selected = workflowData.find(
                       (wf) => wf.name === e.target.value,
@@ -656,6 +618,7 @@ export default function InitiateProcess() {
                 )}
               </div>
             </div>
+
             {workflowId && (
               <div className="border mt-3 w-full border-gray-400 rounded-md p-4 shadow-lg">
                 <Show
@@ -669,17 +632,12 @@ export default function InitiateProcess() {
             )}
           </section>
 
-          {/* Email Threads Section - Show extracted threads */}
-          {/* Email Threads Section - CORRECTED */}
-          {/* Email Threads Section - Show extracted threads */}
-
           {/* Templates Section */}
           {templates?.length > 0 && (
             <section className="bg-white p-4 sm:p-6">
               <h3 className="text-xl font-semibold text-gray-700 mb-4">
                 Templates
               </h3>
-
               <ul className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
                 {templates.map((template) => (
                   <li
@@ -809,7 +767,6 @@ export default function InitiateProcess() {
                   </div>
                 </div>
 
-                {/* Dropdown */}
                 {open && (
                   <div className="absolute z-20 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-48 overflow-auto">
                     {filteredTags.length > 0 ? (
@@ -872,7 +829,7 @@ export default function InitiateProcess() {
                   placeholder="Enter Version Number"
                 />
               </div>
-              {fileDetails.preApproved ? (
+              {fileDetails.preApproved && (
                 <div>
                   <label className="text-sm font-medium text-gray-700">
                     Document Name
@@ -890,7 +847,7 @@ export default function InitiateProcess() {
                     placeholder="Enter Name"
                   />
                 </div>
-              ) : null}
+              )}
             </div>
 
             <div className="mt-4 flex items-center gap-2">
@@ -925,6 +882,7 @@ export default function InitiateProcess() {
             />
           </section>
 
+          {/* Email Threads Section */}
           {emailThreads?.length > 0 && (
             <section className="mt-8">
               <div className="flex items-center mb-6">
@@ -937,10 +895,8 @@ export default function InitiateProcess() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {emailThreads.map((thread, index) => {
-                  const threadId = thread.id || index;
-                  const isExpanded = expandedEmailThreads[threadId];
-
+                {emailThreads.map((thread) => {
+                  const threadId = thread.id;
                   return (
                     <div
                       key={threadId}
@@ -949,23 +905,10 @@ export default function InitiateProcess() {
                       <div className="flex justify-end mb-4">
                         <IconTrash
                           color="red"
-                          onClick={() => handleDeleteEmailThread(threadId)}
+                          className="cursor-pointer hover:opacity-80"
+                          onClick={() => setRemoveEmailThredModel(threadId)}
                         />
                       </div>
-                      {/* Thread status indicator */}
-                      {/* <div className="absolute top-4 right-4">
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                            thread.attachmentsMapping?.length > 0
-                              ? 'bg-green-100 text-green-800 border border-green-200'
-                              : 'bg-blue-100 text-blue-800 border border-blue-200'
-                          }`}
-                        >
-                          {thread.attachmentsMapping?.length > 0
-                            ? `${thread.attachmentsMapping.length} files`
-                            : 'No files'}
-                        </span>
-                      </div> */}
 
                       <div className="flex items-start gap-4">
                         <div className="flex-shrink-0">
@@ -981,7 +924,6 @@ export default function InitiateProcess() {
                                 'Email Conversation'}
                             </h3>
 
-                            {/* Thread stats */}
                             <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3">
                               <div className="flex items-center gap-1">
                                 <div className="w-2 h-2 rounded-full bg-blue-500"></div>
@@ -1003,7 +945,6 @@ export default function InitiateProcess() {
                             </div>
                           </div>
 
-                          {/* View Thread Button Only */}
                           <div className="flex items-center justify-end">
                             <CustomButton
                               variant="outline"
@@ -1047,7 +988,9 @@ export default function InitiateProcess() {
                   >
                     <div className="flex items-start gap-4">
                       <div
-                        className={`min-w-10 min-h-10 w-10 h-10 flex items-center justify-center rounded-full text-white ${doc.fromEmail ? 'bg-blue-400' : 'bg-purple-400'}`}
+                        className={`min-w-10 min-h-10 w-10 h-10 flex items-center justify-center rounded-full text-white ${
+                          doc.fromEmail ? 'bg-blue-400' : 'bg-purple-400'
+                        }`}
                       >
                         {doc.fromEmail ? <IconMail size={20} /> : '📄'}
                       </div>
@@ -1137,7 +1080,6 @@ export default function InitiateProcess() {
         </form>
       </CustomCard>
 
-      {/* File Viewer Modal */}
       {fileView && (
         <ViewFile
           docu={fileView}
@@ -1146,7 +1088,6 @@ export default function InitiateProcess() {
         />
       )}
 
-      {/* Email Thread Modal */}
       {showEmailThreadModal && selectedEmailThread && (
         <EmailThreadModal
           thread={selectedEmailThread}
