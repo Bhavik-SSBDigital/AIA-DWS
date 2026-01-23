@@ -588,7 +588,7 @@ export default function InitiateProcess() {
                 </select>
               </div>
 
-              <div>
+              {/* <div>
                 <label className="block text-sm font-medium text-gray-700">
                   Select Version
                 </label>
@@ -616,7 +616,7 @@ export default function InitiateProcess() {
                     {errors.workflowId.message}
                   </p>
                 )}
-              </div>
+              </div> */}
             </div>
 
             {workflowId && (
