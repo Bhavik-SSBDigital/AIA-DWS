@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import CustomModal from '../../CustomComponents/CustomModal';
 import CustomButton from '../../CustomComponents/CustomButton';
-import { 
-  IconX, 
-  IconMail, 
-  IconUser, 
-  IconClock, 
+import {
+  IconX,
+  IconMail,
+  IconUser,
+  IconClock,
   IconPaperclip,
   IconAt,
   IconCalendar,
@@ -21,29 +21,41 @@ import {
   IconMaximize,
   IconMinimize,
   IconCheck,
-  IconPrinter
+  IconPrinter,
 } from '@tabler/icons-react';
 
-const SafeHTMLRenderer = ({ html, className = "" }) => {
+const SafeHTMLRenderer = ({ html, className = '' }) => {
   const cleanHTML = (htmlString) => {
     if (!htmlString) return '';
-    
+
     let cleaned = htmlString;
-    
+
     // Remove signature div if it contains "Regards" pattern
-    cleaned = cleaned.replace(/<div[^>]*class=["'][^"']*signature["'][^>]*>[\s\S]*?Regards[\s\S]*?<\/div>/gi, '');
-    cleaned = cleaned.replace(/<div[^>]*id=["'][^"']*signature["'][^>]*>[\s\S]*?Regards[\s\S]*?<\/div>/gi, '');
-    
+    cleaned = cleaned.replace(
+      /<div[^>]*class=["'][^"']*signature["'][^>]*>[\s\S]*?Regards[\s\S]*?<\/div>/gi,
+      '',
+    );
+    cleaned = cleaned.replace(
+      /<div[^>]*id=["'][^"']*signature["'][^>]*>[\s\S]*?Regards[\s\S]*?<\/div>/gi,
+      '',
+    );
+
     // Remove mailer signatures
-    cleaned = cleaned.replace(/<div[^>]*gmail_signature["'][^>]*>[\s\S]*?<\/div>/gi, '');
-    cleaned = cleaned.replace(/<div[^>]*gmail_extra["'][^>]*>[\s\S]*?<\/div>/gi, '');
-    
+    cleaned = cleaned.replace(
+      /<div[^>]*gmail_signature["'][^>]*>[\s\S]*?<\/div>/gi,
+      '',
+    );
+    cleaned = cleaned.replace(
+      /<div[^>]*gmail_extra["'][^>]*>[\s\S]*?<\/div>/gi,
+      '',
+    );
+
     // Basic HTML sanitization
     cleaned = cleaned
       .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
       .replace(/on\w+="[^"]*"/gi, '')
       .replace(/javascript:/gi, '');
-    
+
     return cleaned;
   };
 
@@ -53,13 +65,13 @@ const SafeHTMLRenderer = ({ html, className = "" }) => {
   };
 
   return (
-    <div 
+    <div
       className={`prose prose-sm max-w-none break-words overflow-auto ${className}`}
       dangerouslySetInnerHTML={createMarkup()}
-      style={{ 
+      style={{
         maxHeight: '400px',
         wordBreak: 'break-word',
-        overflowWrap: 'break-word'
+        overflowWrap: 'break-word',
       }}
     />
   );
@@ -81,7 +93,7 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
       });
       setExpandedEmails(initialExpanded);
     }
-    
+
     // Auto-scroll to top when modal opens
     if (contentRef.current) {
       contentRef.current.scrollTop = 0;
@@ -89,9 +101,9 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
   }, [thread]);
 
   const toggleEmailExpansion = (index) => {
-    setExpandedEmails(prev => ({
+    setExpandedEmails((prev) => ({
       ...prev,
-      [index]: !prev[index]
+      [index]: !prev[index],
     }));
   };
 
@@ -106,7 +118,7 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
 
   const formatDate = (date) => {
     if (!date) return 'Date unknown';
-    
+
     try {
       const now = new Date();
       const emailDate = new Date(date);
@@ -120,12 +132,12 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
       } else if (diffDays <= 7) {
         return `${diffDays} days ago`;
       }
-      return emailDate.toLocaleDateString([], { 
-        year: 'numeric', 
-        month: 'short', 
+      return emailDate.toLocaleDateString([], {
+        year: 'numeric',
+        month: 'short',
         day: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
       });
     } catch (error) {
       return date;
@@ -135,37 +147,37 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
   // Parse email address from various formats
   const parseEmailAddress = (addr) => {
     if (!addr) return { name: 'Unknown', email: '' };
-    
+
     // Format 1: "('Bhavik Bhatt', 'bhavik.bhatt@ssbi.in')"
     const tupleMatch = addr.match(/\('(.*?)',\s*'(.*?)'\)/);
     if (tupleMatch) {
       return {
         name: tupleMatch[1],
-        email: tupleMatch[2]
+        email: tupleMatch[2],
       };
     }
-    
+
     // Format 2: "Name <email@domain.com>"
     const angleMatch = addr.match(/(.*?)\s*<(.*?)>/);
     if (angleMatch) {
       return {
         name: angleMatch[1].trim(),
-        email: angleMatch[2].trim()
+        email: angleMatch[2].trim(),
       };
     }
-    
+
     // Format 3: Just email
     if (addr.includes('@')) {
       return {
         name: addr.split('@')[0],
-        email: addr
+        email: addr,
       };
     }
-    
+
     // Default
     return {
       name: addr,
-      email: ''
+      email: '',
     };
   };
 
@@ -175,7 +187,9 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
       <div className="truncate">
         <strong className="text-gray-800">{parsed.name}</strong>
         {parsed.email && (
-          <div className="text-xs text-gray-500 truncate">&lt;{parsed.email}&gt;</div>
+          <div className="text-xs text-gray-500 truncate">
+            &lt;{parsed.email}&gt;
+          </div>
         )}
       </div>
     );
@@ -184,11 +198,11 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
   // Normalize recipients - handle array or string
   const normalizeRecipients = (recipients) => {
     if (!recipients) return [];
-    
+
     if (Array.isArray(recipients)) {
       return recipients;
     }
-    
+
     // Try to parse string representation of array
     if (typeof recipients === 'string') {
       try {
@@ -198,32 +212,37 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
           return Array.isArray(parsed) ? parsed : [parsed];
         }
         // Handle format like "recipient1@domain.com, recipient2@domain.com"
-        return recipients.split(',').map(r => r.trim()).filter(r => r);
+        return recipients
+          .split(',')
+          .map((r) => r.trim())
+          .filter((r) => r);
       } catch (error) {
         // If parsing fails, return as single item array
         return [recipients];
       }
     }
-    
+
     return [];
   };
 
-  const filteredEmails = thread?.emails?.filter(email => {
-    if (!searchQuery.trim()) return true;
-    const searchLower = searchQuery.toLowerCase();
-    
-    const emailText = email.body_plain || email.bodyText || email.body_text || '';
-    const toRecipients = normalizeRecipients(email.to);
-    const ccRecipients = normalizeRecipients(email.cc);
-    
-    return (
-      (email.subject?.toLowerCase() || '').includes(searchLower) ||
-      (email.from?.toLowerCase() || '').includes(searchLower) ||
-      emailText.toLowerCase().includes(searchLower) ||
-      toRecipients.some(to => to.toLowerCase().includes(searchLower)) ||
-      ccRecipients.some(cc => cc.toLowerCase().includes(searchLower))
-    );
-  }) || [];
+  const filteredEmails =
+    thread?.emails?.filter((email) => {
+      if (!searchQuery.trim()) return true;
+      const searchLower = searchQuery.toLowerCase();
+
+      const emailText =
+        email.body_plain || email.bodyText || email.body_text || '';
+      const toRecipients = normalizeRecipients(email.to);
+      const ccRecipients = normalizeRecipients(email.cc);
+
+      return (
+        (email.subject?.toLowerCase() || '').includes(searchLower) ||
+        (email.from?.toLowerCase() || '').includes(searchLower) ||
+        emailText.toLowerCase().includes(searchLower) ||
+        toRecipients.some((to) => to.toLowerCase().includes(searchLower)) ||
+        ccRecipients.some((cc) => cc.toLowerCase().includes(searchLower))
+      );
+    }) || [];
 
   const totalAttachments = thread?.attachmentsMapping?.length || 0;
 
@@ -251,26 +270,33 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                 <p className="text-sm text-gray-600 flex items-center gap-2">
                   <span className="flex items-center gap-1">
                     <IconUsers size={14} />
-                    {filteredEmails.length} email{filteredEmails.length !== 1 ? 's' : ''}
+                    {filteredEmails.length} email
+                    {filteredEmails.length !== 1 ? 's' : ''}
                   </span>
                   <span>•</span>
                   <span className="flex items-center gap-1">
                     <IconPaperclip size={14} />
-                    {totalAttachments} attachment{totalAttachments !== 1 ? 's' : ''}
+                    {totalAttachments} attachment
+                    {totalAttachments !== 1 ? 's' : ''}
                   </span>
                 </p>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-2">
               <button
                 onClick={toggleAllEmails}
                 className="px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50"
               >
-                {Object.values(expandedEmails).every(Boolean) ? 'Collapse All' : 'Expand All'}
+                {Object.values(expandedEmails).every(Boolean)
+                  ? 'Collapse All'
+                  : 'Expand All'}
               </button>
               <div className="relative">
-                <IconSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+                <IconSearch
+                  className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                  size={18}
+                />
                 <input
                   type="text"
                   placeholder="Search in emails..."
@@ -288,13 +314,19 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
               <IconTag size={16} className="text-blue-600" />
               <span className="font-medium">Thread:</span>
               <span className="text-blue-700 truncate max-w-xs">
-                {thread.threadText || thread.emails?.[0]?.subject || "Untitled Thread"}
+                {thread.emails?.[0]?.subject ||
+                  thread.threadText ||
+                  'Untitled Thread'}
               </span>
             </div>
             <div className="flex items-center gap-2">
               <IconUser size={16} className="text-blue-600" />
               <span className="font-medium">Extracted at:</span>
-              <span>{thread.extractedAt ? formatDate(thread.extractedAt) : 'Unknown'}</span>
+              <span>
+                {thread.extractedAt
+                  ? formatDate(thread.extractedAt)
+                  : 'Unknown'}
+              </span>
             </div>
           </div>
         </div>
@@ -306,35 +338,50 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
             <div className="relative pl-8 space-y-8">
               {/* Timeline line */}
               <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200"></div>
-              
+
               {filteredEmails.map((email, index) => {
                 const isExpanded = expandedEmails[index];
-                const isSearchMatch = searchQuery && (
-                  (email.subject?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-                  (email.body_plain?.toLowerCase() || email.bodyText?.toLowerCase() || '').includes(searchQuery.toLowerCase())
-                );
+                const isSearchMatch =
+                  searchQuery &&
+                  ((email.subject?.toLowerCase() || '').includes(
+                    searchQuery.toLowerCase(),
+                  ) ||
+                    (
+                      email.body_plain?.toLowerCase() ||
+                      email.bodyText?.toLowerCase() ||
+                      ''
+                    ).includes(searchQuery.toLowerCase()));
 
                 // Get email-specific attachments from attachmentsMapping
-                const emailAttachments = thread.attachmentsMapping?.filter(att => 
-                  att.emailSubject === email.subject && att.emailFrom === email.from
-                ) || email.attachments_filenames?.map(filename => ({
-                  filename,
-                  originalFilename: filename
-                })) || [];
+                const emailAttachments =
+                  thread.attachmentsMapping?.filter(
+                    (att) =>
+                      att.emailSubject === email.subject &&
+                      att.emailFrom === email.from,
+                  ) ||
+                  email.attachments_filenames?.map((filename) => ({
+                    filename,
+                    originalFilename: filename,
+                  })) ||
+                  [];
 
                 return (
                   <div key={index} className="relative">
                     {/* Timeline dot */}
                     <div className="absolute -left-8 top-0">
-                      <div className={`w-6 h-6 rounded-full border-4 border-white ${isSearchMatch ? 'bg-orange-500' : 'bg-blue-500'}`}></div>
+                      <div
+                        className={`w-6 h-6 rounded-full border-4 border-white ${isSearchMatch ? 'bg-orange-500' : 'bg-blue-500'}`}
+                      ></div>
                     </div>
 
                     {/* Email Card */}
-                    <div className={`border rounded-xl shadow-sm overflow-hidden transition-all duration-200 ${
-                      isSearchMatch ? 'ring-2 ring-orange-200' : ''
-                    } bg-white`}>
+                    <div
+                      className={`border rounded-xl shadow-sm overflow-hidden transition-all duration-200 ${
+                        isSearchMatch ? 'ring-2 ring-orange-200' : ''
+                      } bg-white`}
+                    >
                       {/* Header */}
-                      <div 
+                      <div
                         className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
                         onClick={() => toggleEmailExpansion(index)}
                       >
@@ -343,7 +390,7 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                             <div className="flex items-center gap-2 mb-2">
                               <IconMail size={16} className="text-gray-500" />
                               <h3 className="font-semibold text-gray-800 truncate">
-                                {email.subject || "No Subject"}
+                                {email.subject || 'No Subject'}
                               </h3>
                               {emailAttachments.length > 0 && (
                                 <span className="flex items-center gap-1 text-sm text-gray-500 bg-white px-2 py-0.5 rounded-full">
@@ -352,7 +399,7 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                                 </span>
                               )}
                             </div>
-                            
+
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
                               <div className="space-y-1">
                                 <div className="flex items-center gap-2 text-gray-600">
@@ -363,7 +410,7 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                                   {formatEmailAddress(email.from)}
                                 </div>
                               </div>
-                              
+
                               {email.to && (
                                 <div className="space-y-1">
                                   <div className="flex items-center gap-2 text-gray-600">
@@ -371,14 +418,19 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                                     <span className="font-medium">To:</span>
                                   </div>
                                   <div className="text-gray-800 pl-6 truncate">
-                                    {normalizeRecipients(email.to).slice(0, 2).map((addr, idx) => (
-                                      <div key={idx}>{formatEmailAddress(addr)}</div>
-                                    ))}
-                                    {normalizeRecipients(email.to).length > 2 && ` +${normalizeRecipients(email.to).length - 2} more`}
+                                    {normalizeRecipients(email.to)
+                                      .slice(0, 2)
+                                      .map((addr, idx) => (
+                                        <div key={idx}>
+                                          {formatEmailAddress(addr)}
+                                        </div>
+                                      ))}
+                                    {normalizeRecipients(email.to).length > 2 &&
+                                      ` +${normalizeRecipients(email.to).length - 2} more`}
                                   </div>
                                 </div>
                               )}
-                              
+
                               <div className="space-y-1">
                                 <div className="flex items-center gap-2 text-gray-600">
                                   <IconCalendar size={14} />
@@ -388,7 +440,7 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                                   {formatDate(email.date)}
                                 </div>
                               </div>
-                              
+
                               <div className="space-y-1">
                                 <div className="flex items-center gap-2 text-gray-600">
                                   <IconClock size={14} />
@@ -400,9 +452,13 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                               </div>
                             </div>
                           </div>
-                          
+
                           <button className="ml-4 p-1 hover:bg-gray-100 rounded-lg transition-colors">
-                            {isExpanded ? <IconChevronUp size={20} /> : <IconChevronDown size={20} />}
+                            {isExpanded ? (
+                              <IconChevronUp size={20} />
+                            ) : (
+                              <IconChevronDown size={20} />
+                            )}
                           </button>
                         </div>
                       </div>
@@ -411,7 +467,7 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                       {isExpanded && (
                         <div className="border-t p-4 bg-gray-50">
                           {/* Attachments */}
-                          {emailAttachments.length > 0 && (
+                          {/* {emailAttachments.length > 0 && (
                             <div className="mb-4">
                               <div className="flex items-center gap-2 mb-3">
                                 <IconPaperclip size={18} className="text-gray-600" />
@@ -459,16 +515,25 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                                 ))}
                               </div>
                             </div>
-                          )}
+                          )} */}
 
                           {/* Email Body */}
-                          {(email.body_plain || email.body_html || email.bodyText || email.body_text) && (
+                          {(email.body_plain ||
+                            email.body_html ||
+                            email.bodyText ||
+                            email.body_text) && (
                             <div>
                               <div className="flex items-center justify-between mb-3">
-                                <h4 className="font-medium text-gray-700">Email Content</h4>
+                                <h4 className="font-medium text-gray-700">
+                                  Email Content
+                                </h4>
                                 <button
                                   onClick={() => {
-                                    const text = email.body_plain || email.bodyText || email.body_text || '';
+                                    const text =
+                                      email.body_plain ||
+                                      email.bodyText ||
+                                      email.body_text ||
+                                      '';
                                     navigator.clipboard.writeText(text);
                                     setCopiedText('Email content');
                                     setTimeout(() => setCopiedText(null), 2000);
@@ -490,8 +555,13 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                               </div>
                               <div className="bg-white border border-gray-200 rounded-lg p-4 overflow-hidden">
                                 <div className="max-h-[400px] overflow-y-auto">
-                                  <SafeHTMLRenderer 
-                                    html={email.body_html || email.body_plain || email.bodyText || email.body_text} 
+                                  <SafeHTMLRenderer
+                                    html={
+                                      email.body_html ||
+                                      email.body_plain ||
+                                      email.bodyText ||
+                                      email.body_text
+                                    }
                                   />
                                 </div>
                               </div>
@@ -510,22 +580,36 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
           {viewMode === 'compact' && (
             <div className="space-y-4">
               {filteredEmails.map((email, index) => {
-                const emailAttachments = thread.attachmentsMapping?.filter(att => 
-                  att.emailSubject === email.subject && att.emailFrom === email.from
-                ) || [];
-                
+                const emailAttachments =
+                  thread.attachmentsMapping?.filter(
+                    (att) =>
+                      att.emailSubject === email.subject &&
+                      att.emailFrom === email.from,
+                  ) || [];
+
                 return (
-                  <div key={index} className="border rounded-lg p-4 hover:bg-gray-50">
+                  <div
+                    key={index}
+                    className="border rounded-lg p-4 hover:bg-gray-50"
+                  >
                     <div className="flex justify-between items-start">
                       <div className="space-y-2">
-                        <h4 className="font-medium">{email.subject || "No Subject"}</h4>
+                        <h4 className="font-medium">
+                          {email.subject || 'No Subject'}
+                        </h4>
                         <div className="text-sm text-gray-600">
-                          <p><strong>From:</strong> {email.from}</p>
-                          <p><strong>Date:</strong> {formatDate(email.date)}</p>
+                          <p>
+                            <strong>From:</strong> {email.from}
+                          </p>
+                          <p>
+                            <strong>Date:</strong> {formatDate(email.date)}
+                          </p>
                           {emailAttachments.length > 0 && (
                             <p className="flex items-center gap-1">
                               <IconPaperclip size={12} />
-                              <strong>{emailAttachments.length} attachment(s)</strong>
+                              <strong>
+                                {emailAttachments.length} attachment(s)
+                              </strong>
                             </p>
                           )}
                         </div>
@@ -537,13 +621,28 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                         {expandedEmails[index] ? 'Collapse' : 'Expand'}
                       </button>
                     </div>
-                    
-                    {expandedEmails[index] && (email.body_plain || email.bodyText || email.body_text) && (
-                      <div className="mt-3 p-3 bg-gray-50 rounded text-sm max-h-40 overflow-y-auto">
-                        {((email.body_plain || email.bodyText || email.body_text) || '').substring(0, 300)}
-                        {((email.body_plain || email.bodyText || email.body_text) || '').length > 300 ? '...' : ''}
-                      </div>
-                    )}
+
+                    {expandedEmails[index] &&
+                      (email.body_plain ||
+                        email.bodyText ||
+                        email.body_text) && (
+                        <div className="mt-3 p-3 bg-gray-50 rounded text-sm max-h-40 overflow-y-auto">
+                          {(
+                            email.body_plain ||
+                            email.bodyText ||
+                            email.body_text ||
+                            ''
+                          ).substring(0, 300)}
+                          {(
+                            email.body_plain ||
+                            email.bodyText ||
+                            email.body_text ||
+                            ''
+                          ).length > 300
+                            ? '...'
+                            : ''}
+                        </div>
+                      )}
                   </div>
                 );
               })}
@@ -560,10 +659,16 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setViewMode(viewMode === 'timeline' ? 'compact' : 'timeline')}
+                onClick={() =>
+                  setViewMode(viewMode === 'timeline' ? 'compact' : 'timeline')
+                }
                 className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50"
               >
-                {viewMode === 'timeline' ? <IconMinimize size={18} /> : <IconMaximize size={18} />}
+                {viewMode === 'timeline' ? (
+                  <IconMinimize size={18} />
+                ) : (
+                  <IconMaximize size={18} />
+                )}
                 {viewMode === 'timeline' ? 'Compact View' : 'Timeline View'}
               </button>
               <CustomButton
