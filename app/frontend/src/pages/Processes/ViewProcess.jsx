@@ -930,8 +930,12 @@ const ViewProcess = () => {
                           </div>
                           <div className="flex items-center gap-1">
                             <IconClock size={14} />
-                            <span>{formatDate(thread.extractedAt)}</span>
-                          </div>
+                          {thread.extractedAt && (
+                            <div className="flex items-center gap-1">
+                              <IconClock size={14} />
+                              <span>{formatDate(thread.extractedAt)}</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Participants preview */}
