@@ -349,14 +349,14 @@ export const initiate_process = async (req, res, next) => {
 
     for (const documentId of documentIds) {
       const document = await prisma.document.findUnique({
-        where: { id: documentId },
-        select: { path: true, type: true },
+        where: { id: parseInt(documentId) },
+        select: { path: true, type: true, name: true },
       });
 
       if (document) {
         const sourcePath = `./${document.path}`;
         const destinationPath = `../${workflowName}/${processName}`;
-        const name = sourcePath.split("/").pop();
+        const name = document.name;
 
         try {
           const copyResult = await new Promise((resolve, reject) => {
