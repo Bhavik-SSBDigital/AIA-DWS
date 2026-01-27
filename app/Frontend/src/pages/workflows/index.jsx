@@ -189,8 +189,9 @@ export default function WorkflowVisualizer() {
                     </>
                   )}
                 </div>
+                <div className="mt-5"></div>
 
-                <label className="text-sm w-fit font-medium text-gray-700">
+                {/* <label className="text-sm w-fit font-medium text-gray-700">
                   Select Version
                 </label>
                 <select
@@ -208,7 +209,7 @@ export default function WorkflowVisualizer() {
                       Version {version.version}
                     </option>
                   ))}
-                </select>
+                </select> */}
               </div>
               <CustomCard
                 className="flex border justify-between items-center cursor-pointer transition"
