@@ -860,7 +860,7 @@ const ViewProcess = () => {
               const threadEmails = thread.emails || [];
               const totalEmails = threadEmails.length;
               const totalAttachments =
-                (thread.attachmentsMapping?.length || 0) +
+                // (thread.attachmentsMapping?.length || 0) +
                 threadEmails.reduce(
                   (sum, email) => sum + (email.attachments?.length || 0),
                   0,
