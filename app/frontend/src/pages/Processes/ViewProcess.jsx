@@ -57,7 +57,7 @@ import ReOpenProcessModal from './Actions/ReOpenProcessModal';
 import DocumentsVersionWise from './DocumentsVersionWise';
 import ProcessDocumentUpload from '../../CustomComponents/ProcessDocumentUpload';
 import DeleteConfirmationModal from '../../CustomComponents/DeleteConfirmation';
-import EmailThreadModal from './EmailThreadModal';
+import EmailThreadModal, { normalizeRecipients } from './EmailThreadModal';
 
 const ViewProcess = () => {
   const [selectedDocs, setSelectedDocs] = useState([]);
@@ -871,7 +871,7 @@ const ViewProcess = () => {
                 if (email.from)
                   participants.add(email.from.split('<')[0]?.trim());
                 if (email.to)
-                  email.to.forEach((to) =>
+                  normalizeRecipients(email.to).forEach((to) =>
                     participants.add(to.split('<')[0]?.trim()),
                   );
               });
@@ -1082,7 +1082,7 @@ const ViewProcess = () => {
                       </div>
 
                       {/* Extracted documents preview */}
-                      {thread.attachmentsMapping &&
+                      {/* {thread.attachmentsMapping &&
                         thread.attachmentsMapping.length > 0 && (
                           <div className="mt-4 pt-4 border-t">
                             <div className="flex items-center gap-2 mb-2">
@@ -1114,7 +1114,7 @@ const ViewProcess = () => {
                               )}
                             </div>
                           </div>
-                        )}
+                        )} */}
                     </div>
                   </div>
                 </div>
