@@ -23,6 +23,7 @@ import {
   IconCheck,
   IconPrinter,
 } from '@tabler/icons-react';
+import CustomPopover from '../../CustomComponents/CustomPopover';
 
 const SafeHTMLRenderer = ({ html, className = '' }) => {
   const cleanHTML = (htmlString) => {
@@ -79,6 +80,11 @@ const SafeHTMLRenderer = ({ html, className = '' }) => {
 
 const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
   const [expandedEmails, setExpandedEmails] = useState({});
+  const [expandedAddresses, setExpandedAddresses] = useState({
+    to: {},
+    cc: {},
+    bcc: {},
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('timeline');
   const [copiedText, setCopiedText] = useState(null);
@@ -368,10 +374,12 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                 return (
                   <div key={index} className="relative">
                     {/* Timeline dot */}
-                    <div className="absolute -left-8 top-0">
+                    <div className="absolute -left-12 top-0">
                       <div
-                        className={`w-6 h-6 rounded-full border-4 border-white ${isSearchMatch ? 'bg-orange-500' : 'bg-blue-500'}`}
-                      ></div>
+                        className={`w-12 h-12 rounded-full border-4 text-center p-2 text-black font-bold border-white ${isSearchMatch ? 'bg-orange-100' : 'bg-blue-100'}`}
+                      >
+                        {index + 1}
+                      </div>
                     </div>
 
                     {/* Email Card */}
@@ -400,8 +408,8 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                               )}
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
-                              <div className="space-y-1">
+                            <div className="grid grid-cols-[1fr_auto] gap-3 text-sm">
+                              <div className="space-y-1 flex">
                                 <div className="flex items-center gap-2 text-gray-600">
                                   <IconUser size={14} />
                                   <span className="font-medium">From:</span>
@@ -410,46 +418,207 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                                   {formatEmailAddress(email.from)}
                                 </div>
                               </div>
-
-                              {email.to && (
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-2 text-gray-600">
-                                    <IconAt size={14} />
-                                    <span className="font-medium">To:</span>
-                                  </div>
-                                  <div className="text-gray-800 pl-6 truncate">
-                                    {normalizeRecipients(email.to)
-                                      .slice(0, 2)
-                                      .map((addr, idx) => (
-                                        <div key={idx}>
-                                          {formatEmailAddress(addr)}
-                                        </div>
-                                      ))}
-                                    {normalizeRecipients(email.to).length > 2 &&
-                                      ` +${normalizeRecipients(email.to).length - 2} more`}
-                                  </div>
-                                </div>
-                              )}
-
-                              <div className="space-y-1">
+                              <div className="space-y-1 flex gap-2 items-center justify-end">
                                 <div className="flex items-center gap-2 text-gray-600">
                                   <IconCalendar size={14} />
-                                  <span className="font-medium">Date:</span>
-                                </div>
-                                <div className="text-gray-800 pl-6">
-                                  {formatDate(email.date)}
+                                  <span className="font-medium">Date :</span>
+                                  <span className="font-medium">
+                                    {formatDate(email.date)}
+                                  </span>
                                 </div>
                               </div>
 
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-2 text-gray-600">
-                                  <IconClock size={14} />
-                                  <span className="font-medium">Index:</span>
-                                </div>
-                                <div className="text-gray-800 pl-6">
-                                  {index + 1} of {filteredEmails.length}
-                                </div>
-                              </div>
+                              {/* {email.to &&
+                                (() => {
+                                  const recipients = normalizeRecipients(
+                                    email.to,
+                                  );
+                                  const isExpanded =
+                                    expandedAddresses.to[index] || expandedAddresses.cc[index] || expandedAddresses.bcc[index];
+                                  const visibleRecipients = isExpanded
+                                    ? recipients
+                                    : recipients.slice(0, 2);
+
+                                  return (
+                                    <div>
+                                      <div className="space-y-1 flex items-start">
+                                        <div className="flex items-center gap-2 mt-2 text-gray-600">
+                                          <IconAt size={14} />
+                                          <span className="font-medium">
+                                            To:
+                                          </span>
+                                        </div>
+
+                                        <div className="text-gray-800 pl-6 truncate flex flex-wrap gap-1">
+                                          {visibleRecipients.map((addr, i) => (
+                                            <div key={`${addr}-${i}`}>
+                                              {formatEmailAddress(addr)}
+                                            </div>
+                                          ))}
+
+                                          {recipients.length > 2 && (
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setExpandedAddresses(
+                                                  (prev) => ({
+                                                    ...prev,
+                                                    to: {
+                                                      ...prev.to,
+                                                      [index]: !prev.to[index],
+                                                    },
+                                                    cc: {...prev.cc, [index]: !prev.cc[index]},
+                                                    bcc: {...prev.bcc, [index]: !prev.bcc[index]},
+                                                  }),
+                                                );
+                                              }}
+                                              className="ml-2 p-1 hover:bg-gray-100 rounded-lg transition-colors text-sm text-gray-500"
+                                            >
+                                              {isExpanded
+                                                ? 'Show less'
+                                                : `Show more`}
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {isExpanded && (
+                                        <div className="space-y-1 flex items-start">
+                                          <div className="flex items-center gap-2 mt-2 text-gray-600">
+                                            <IconAt size={14} />
+                                            <span className="font-medium">
+                                              Cc:
+                                            </span>
+                                          </div>
+
+                                          <div className="text-gray-800 pl-6 truncate flex flex-wrap gap-1">
+                                            {email.cc.map((addr, i) => (
+                                              <div key={`${addr}-${i}`}>
+                                                {formatEmailAddress(addr)}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                      {isExpanded && (
+                                        <div className="space-y-1 flex items-start">
+                                          <div className="flex items-center gap-2 mt-2 text-gray-600">
+                                            <IconAt size={14} />
+                                            <span className="font-medium">
+                                              Bcc:
+                                            </span>
+                                          </div>
+
+                                          <div className="text-gray-800 pl-6 truncate flex flex-wrap gap-1">
+                                            {email.bcc.map((addr, i) => (
+                                              <div key={`${addr}-${i}`}>
+                                                {formatEmailAddress(addr)}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()} */}
+                              {email.to &&
+                                (() => {
+                                  const recipients = normalizeRecipients(
+                                    email.to,
+                                  );
+                                  const isExpanded =
+                                    expandedAddresses.to[index];
+                                  const visibleRecipients = isExpanded
+                                    ? recipients
+                                    : recipients.slice(0, 2);
+                                  const totalRecipients =
+                                    recipients.length +
+                                    (email.cc?.length || 0) +
+                                    (email.bcc?.length || 0);
+
+                                  return (
+                                    <div>
+                                      {/* TO */}
+                                      <div className="space-y-1 flex items-start">
+                                        <div className="flex items-center gap-2 mt-2 text-gray-600">
+                                          <IconAt size={14} />
+                                          <span className="font-medium">
+                                            To:
+                                          </span>
+                                        </div>
+
+                                        <div className="text-gray-800 pl-6 truncate flex flex-wrap gap-1">
+                                          {visibleRecipients.map((addr, i) => (
+                                            <div key={`${addr}-${i}`}>
+                                              {formatEmailAddress(addr)}
+                                            </div>
+                                          ))}
+
+                                          {totalRecipients > 2 && (
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setExpandedAddresses(
+                                                  (prev) => ({
+                                                    ...prev,
+                                                    to: {
+                                                      ...prev.to,
+                                                      [index]: !prev.to[index],
+                                                    },
+                                                  }),
+                                                );
+                                              }}
+                                              className="ml-2 px-4 py-0 font-bold text-primary hover:bg-gray-100 rounded-lg transition-colors text-sm text-gray-500"
+                                            >
+                                              {isExpanded
+                                                ? 'Show less'
+                                                : `+${totalRecipients - 2} more`}
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      {/* CC */}
+                                      {isExpanded && email.cc?.length > 0 && (
+                                        <div className="space-y-1 flex items-start">
+                                          <div className="flex items-center gap-2 mt-2 text-gray-600">
+                                            <IconAt size={14} />
+                                            <span className="font-medium">
+                                              Cc:
+                                            </span>
+                                          </div>
+
+                                          <div className="text-gray-800 pl-6 flex flex-wrap gap-1">
+                                            {email.cc.map((addr, i) => (
+                                              <div key={`${addr}-${i}`}>
+                                                {formatEmailAddress(addr)}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* BCC */}
+                                      {isExpanded && email.bcc?.length > 0 && (
+                                        <div className="space-y-1 flex items-start">
+                                          <div className="flex items-center gap-2 mt-2 text-gray-600">
+                                            <IconAt size={14} />
+                                            <span className="font-medium">
+                                              Bcc:
+                                            </span>
+                                          </div>
+
+                                          <div className="text-gray-800 pl-6 flex flex-wrap gap-1">
+                                            {email.bcc.map((addr, i) => (
+                                              <div key={`${addr}-${i}`}>
+                                                {formatEmailAddress(addr)}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                             </div>
                           </div>
 
