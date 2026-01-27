@@ -928,8 +928,6 @@ const ViewProcess = () => {
                               {participants.size} participants
                             </span>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <IconClock size={14} />
                           {thread.extractedAt && (
                             <div className="flex items-center gap-1">
                               <IconClock size={14} />
