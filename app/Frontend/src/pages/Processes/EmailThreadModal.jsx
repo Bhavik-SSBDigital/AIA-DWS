@@ -79,11 +79,11 @@ const SafeHTMLRenderer = ({ html, className = '' }) => {
 };
 
 const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
+  console.log(thread);
+
   const [expandedEmails, setExpandedEmails] = useState({});
   const [expandedAddresses, setExpandedAddresses] = useState({
     to: {},
-    cc: {},
-    bcc: {},
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState('timeline');
@@ -428,102 +428,16 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                                 </div>
                               </div>
 
-                              {/* {email.to &&
-                                (() => {
-                                  const recipients = normalizeRecipients(
-                                    email.to,
-                                  );
-                                  const isExpanded =
-                                    expandedAddresses.to[index] || expandedAddresses.cc[index] || expandedAddresses.bcc[index];
-                                  const visibleRecipients = isExpanded
-                                    ? recipients
-                                    : recipients.slice(0, 2);
-
-                                  return (
-                                    <div>
-                                      <div className="space-y-1 flex items-start">
-                                        <div className="flex items-center gap-2 mt-2 text-gray-600">
-                                          <IconAt size={14} />
-                                          <span className="font-medium">
-                                            To:
-                                          </span>
-                                        </div>
-
-                                        <div className="text-gray-800 pl-6 truncate flex flex-wrap gap-1">
-                                          {visibleRecipients.map((addr, i) => (
-                                            <div key={`${addr}-${i}`}>
-                                              {formatEmailAddress(addr)}
-                                            </div>
-                                          ))}
-
-                                          {recipients.length > 2 && (
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                setExpandedAddresses(
-                                                  (prev) => ({
-                                                    ...prev,
-                                                    to: {
-                                                      ...prev.to,
-                                                      [index]: !prev.to[index],
-                                                    },
-                                                    cc: {...prev.cc, [index]: !prev.cc[index]},
-                                                    bcc: {...prev.bcc, [index]: !prev.bcc[index]},
-                                                  }),
-                                                );
-                                              }}
-                                              className="ml-2 p-1 hover:bg-gray-100 rounded-lg transition-colors text-sm text-gray-500"
-                                            >
-                                              {isExpanded
-                                                ? 'Show less'
-                                                : `Show more`}
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-                                      {isExpanded && (
-                                        <div className="space-y-1 flex items-start">
-                                          <div className="flex items-center gap-2 mt-2 text-gray-600">
-                                            <IconAt size={14} />
-                                            <span className="font-medium">
-                                              Cc:
-                                            </span>
-                                          </div>
-
-                                          <div className="text-gray-800 pl-6 truncate flex flex-wrap gap-1">
-                                            {email.cc.map((addr, i) => (
-                                              <div key={`${addr}-${i}`}>
-                                                {formatEmailAddress(addr)}
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-                                      {isExpanded && (
-                                        <div className="space-y-1 flex items-start">
-                                          <div className="flex items-center gap-2 mt-2 text-gray-600">
-                                            <IconAt size={14} />
-                                            <span className="font-medium">
-                                              Bcc:
-                                            </span>
-                                          </div>
-
-                                          <div className="text-gray-800 pl-6 truncate flex flex-wrap gap-1">
-                                            {email.bcc.map((addr, i) => (
-                                              <div key={`${addr}-${i}`}>
-                                                {formatEmailAddress(addr)}
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })()} */}
                               {email.to &&
                                 (() => {
                                   const recipients = normalizeRecipients(
                                     email.to,
+                                  );
+                                  const ccRecipients = normalizeRecipients(
+                                    email.cc,
+                                  );
+                                  const bccRecipients = normalizeRecipients(
+                                    email.bcc,
                                   );
                                   const isExpanded =
                                     expandedAddresses.to[index];
@@ -532,8 +446,8 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                                     : recipients.slice(0, 2);
                                   const totalRecipients =
                                     recipients.length +
-                                    (email.cc?.length || 0) +
-                                    (email.bcc?.length || 0);
+                                    ccRecipients.length +
+                                    bccRecipients.length;
 
                                   return (
                                     <div>
@@ -578,44 +492,46 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                                       </div>
 
                                       {/* CC */}
-                                      {isExpanded && email.cc?.length > 0 && (
-                                        <div className="space-y-1 flex items-start">
-                                          <div className="flex items-center gap-2 mt-2 text-gray-600">
-                                            <IconAt size={14} />
-                                            <span className="font-medium">
-                                              Cc:
-                                            </span>
-                                          </div>
+                                      {isExpanded &&
+                                        ccRecipients?.length > 0 && (
+                                          <div className="space-y-1 flex items-start">
+                                            <div className="flex items-center gap-2 mt-2 text-gray-600">
+                                              <IconAt size={14} />
+                                              <span className="font-medium">
+                                                Cc:
+                                              </span>
+                                            </div>
 
-                                          <div className="text-gray-800 pl-6 flex flex-wrap gap-1">
-                                            {email.cc.map((addr, i) => (
-                                              <div key={`${addr}-${i}`}>
-                                                {formatEmailAddress(addr)}
-                                              </div>
-                                            ))}
+                                            <div className="text-gray-800 pl-6 flex flex-wrap gap-1">
+                                              {ccRecipients.map((addr, i) => (
+                                                <div key={`${addr}-${i}`}>
+                                                  {formatEmailAddress(addr)}
+                                                </div>
+                                              ))}
+                                            </div>
                                           </div>
-                                        </div>
-                                      )}
+                                        )}
 
                                       {/* BCC */}
-                                      {isExpanded && email.bcc?.length > 0 && (
-                                        <div className="space-y-1 flex items-start">
-                                          <div className="flex items-center gap-2 mt-2 text-gray-600">
-                                            <IconAt size={14} />
-                                            <span className="font-medium">
-                                              Bcc:
-                                            </span>
-                                          </div>
+                                      {isExpanded &&
+                                        bccRecipients?.length > 0 && (
+                                          <div className="space-y-1 flex items-start">
+                                            <div className="flex items-center gap-2 mt-2 text-gray-600">
+                                              <IconAt size={14} />
+                                              <span className="font-medium">
+                                                Bcc:
+                                              </span>
+                                            </div>
 
-                                          <div className="text-gray-800 pl-6 flex flex-wrap gap-1">
-                                            {email.bcc.map((addr, i) => (
-                                              <div key={`${addr}-${i}`}>
-                                                {formatEmailAddress(addr)}
-                                              </div>
-                                            ))}
+                                            <div className="text-gray-800 pl-6 flex flex-wrap gap-1">
+                                              {bccRecipients.map((addr, i) => (
+                                                <div key={`${addr}-${i}`}>
+                                                  {formatEmailAddress(addr)}
+                                                </div>
+                                              ))}
+                                            </div>
                                           </div>
-                                        </div>
-                                      )}
+                                        )}
                                     </div>
                                   );
                                 })()}
