@@ -345,11 +345,6 @@ export const initiate_process = async (req, res, next) => {
 
     let documentIds = req.body.documents?.map((item) => item.documentId) || [];
 
-    if (documentIds.length === 0) {
-      return res.status(400).json({
-        message: "Documents are required to initiate a process",
-      });
-    }
     const copiedDocumentIds = [];
 
     for (const documentId of documentIds) {
@@ -408,6 +403,12 @@ export const initiate_process = async (req, res, next) => {
     }
 
     documentIds = copiedDocumentIds;
+
+    if (documentIds.length === 0) {
+      return res.status(400).json({
+        message: "Documents are required to initiate a process",
+      });
+    }
 
     const initiatorId = userData.id;
 
