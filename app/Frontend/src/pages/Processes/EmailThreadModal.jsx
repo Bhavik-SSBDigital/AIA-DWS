@@ -78,6 +78,35 @@ const SafeHTMLRenderer = ({ html, className = '' }) => {
   );
 };
 
+export const normalizeRecipients = (recipients) => {
+  if (!recipients) return [];
+
+  if (Array.isArray(recipients)) {
+    return recipients;
+  }
+
+  // Try to parse string representation of array
+  if (typeof recipients === 'string') {
+    try {
+      // Handle format like "['recipient1@domain.com', 'recipient2@domain.com']"
+      if (recipients.startsWith('[') && recipients.endsWith(']')) {
+        const parsed = JSON.parse(recipients.replace(/'/g, '"'));
+        return Array.isArray(parsed) ? parsed : [parsed];
+      }
+      // Handle format like "recipient1@domain.com, recipient2@domain.com"
+      return recipients
+        .split(',')
+        .map((r) => r.trim())
+        .filter((r) => r);
+    } catch (error) {
+      // If parsing fails, return as single item array
+      return [recipients];
+    }
+  }
+
+  return [];
+};
+
 const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
   console.log(thread);
 
@@ -202,34 +231,6 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
   };
 
   // Normalize recipients - handle array or string
-  const normalizeRecipients = (recipients) => {
-    if (!recipients) return [];
-
-    if (Array.isArray(recipients)) {
-      return recipients;
-    }
-
-    // Try to parse string representation of array
-    if (typeof recipients === 'string') {
-      try {
-        // Handle format like "['recipient1@domain.com', 'recipient2@domain.com']"
-        if (recipients.startsWith('[') && recipients.endsWith(']')) {
-          const parsed = JSON.parse(recipients.replace(/'/g, '"'));
-          return Array.isArray(parsed) ? parsed : [parsed];
-        }
-        // Handle format like "recipient1@domain.com, recipient2@domain.com"
-        return recipients
-          .split(',')
-          .map((r) => r.trim())
-          .filter((r) => r);
-      } catch (error) {
-        // If parsing fails, return as single item array
-        return [recipients];
-      }
-    }
-
-    return [];
-  };
 
   const filteredEmails =
     thread?.emails?.filter((email) => {
