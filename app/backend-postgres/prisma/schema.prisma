@@ -327,10 +327,10 @@ model ProcessInstance {
 
 model EmailThread {
   id             Int              @id @default(autoincrement())
-
   processId      String
   process        ProcessInstance  @relation(fields: [processId], references: [id], onDelete: Cascade)
-  metadata      Json? 
+
+  metadata       Json?
   originalEmails EmailItem[]
   threadText     String?
   extractedAt    DateTime         @default(now())
@@ -338,8 +338,9 @@ model EmailThread {
   createdById    Int
   createdBy      User             @relation(fields: [createdById], references: [id])
 
-  @@unique([processId])
+  @@index([processId]) // ✅ index is fine, UNIQUE is not
 }
+
 
 
 
@@ -353,12 +354,13 @@ model EmailItem {
   cc              String[]
   bcc             String[]
   date            DateTime
+  originalData  Json?
   bodyText        String?
   bodyHtml        String?
   attachments     Json      // Store attachment metadata
   headers         Json      // Store email headers
   messageId       String?
-  inReplyTo       String?
+  inReplyTo       String[]
   references      String[]
   
   @@index([emailThreadId])

@@ -167,6 +167,7 @@ export async function generateUniqueDocumentName({
   extension,
 }) {
   try {
+    console.log("workflow id", workflowId);
     // Fetch workflow details
     const workflow = await prisma.workflow.findUnique({
       where: { id: workflowId },
@@ -429,37 +430,66 @@ export const initiate_process = async (req, res, next) => {
       // Create email thread if provided - FIXED STRUCTURE
       if (emailThreads && emailThreads.length > 0) {
         for (const thread of emailThreads) {
+          console.log("mails", thread);
           // Create email thread with the thread text
+          // In initiate_process, when creating email thread:
+          // In initiate_process, when creating email thread:
           await tx.emailThread.create({
             data: {
               processId: process_.id,
               threadText: thread.threadText || "Email thread",
               createdById: userData.id,
-              // Only create originalEmails if emails array is provided
+              // Store the full extraction data in metadata
+              metadata: {
+                // Store the complete data from extractEMLDetails
+                extractionData: {
+                  // threadText: thread.threadText,
+                  attachments: thread.attachmentsMapping || [],
+                  // emails: thread.emails || [],
+                  threadTree: thread.threadTree || {},
+                  summary: thread.summary || {},
+                  // originalEmail: thread.originalEmail || null,
+                  // extractedDocumentIds: thread.extractedDocumentIds || [],
+                  // attachmentsMapping: thread.attachmentsMapping || [],
+                },
+                extractedAt: thread.extractedAt || new Date(),
+              },
+              // Also store individual emails for easier querying
               originalEmails: thread.emails
                 ? {
                     create: thread.emails.map((email) => ({
                       subject: email.subject || "No subject",
                       from: email.from || "",
-                      to: email.to || "",
-                      cc: email.cc || "",
-                      bcc: email.bcc || "",
+                      to: email.to
+                        ? Array.isArray(email.to)
+                          ? email.to
+                          : [email.to]
+                        : [],
+                      cc: email.cc
+                        ? Array.isArray(email.cc)
+                          ? email.cc
+                          : [email.cc]
+                        : [],
+                      bcc: email.bcc
+                        ? Array.isArray(email.bcc)
+                          ? email.bcc
+                          : [email.bcc]
+                        : [],
                       date: email.date ? new Date(email.date) : new Date(),
-                      bodyText: email.bodyText || "",
-                      bodyHtml: email.bodyHtml || "",
+                      bodyText: email.body_plain || email.bodyText || "",
+                      bodyHtml: email.bodyHtml || email.body_html || "",
                       attachments: email.attachments || [],
                       headers: email.headers || {},
-                      messageId: email.messageId || "",
-                      inReplyTo: email.inReplyTo || "",
-                      references: email.references || [],
+                      messageId: email.message_id || "",
+                      inReplyTo: Array.isArray(email.in_reply_to)
+                        ? email.in_reply_to
+                        : [],
+                      references: Array.isArray(email.references)
+                        ? email.references
+                        : [],
+                      // Store the complete email object for reconstruction
+                      originalData: email,
                     })),
-                  }
-                : undefined,
-              // Store attachments mapping as metadata
-              metadata: thread.attachmentsMapping
-                ? {
-                    attachmentsMapping: thread.attachmentsMapping,
-                    extractedAt: thread.extractedAt,
                   }
                 : undefined,
             },
@@ -2125,6 +2155,71 @@ export const view_process_ = async (req, res) => {
   }
 };
 
+function buildThreadTextFromEmails(emails) {
+  let threadLines = [];
+
+  emails.forEach((email, index) => {
+    threadLines.push("=".repeat(80));
+    threadLines.push(`MESSAGE ${index + 1} (DATABASE)`);
+    threadLines.push("=".repeat(80));
+    threadLines.push(`Subject: ${email.subject}`);
+    threadLines.push(`From: ${email.from}`);
+    threadLines.push(
+      `To: ${Array.isArray(email.to) ? email.to.join(", ") : email.to}`,
+    );
+    if (email.cc && email.cc.length > 0) {
+      threadLines.push(
+        `Cc: ${Array.isArray(email.cc) ? email.cc.join(", ") : email.cc}`,
+      );
+    }
+    if (email.bcc && email.bcc.length > 0) {
+      threadLines.push(
+        `Bcc: ${Array.isArray(email.bcc) ? email.bcc.join(", ") : email.bcc}`,
+      );
+    }
+    threadLines.push(`Date: ${email.date}`);
+    threadLines.push(`Message-ID: ${email.message_id}`);
+
+    if (email.attachments_filenames && email.attachments_filenames.length > 0) {
+      threadLines.push(
+        `Attachments: ${email.attachments_filenames.join(", ")}`,
+      );
+    }
+
+    threadLines.push("-".repeat(80));
+    threadLines.push(email.body_text || email.body_plain);
+    threadLines.push("\n");
+  });
+
+  return threadLines.join("\n");
+}
+
+// Helper function to build simple thread tree
+function buildSimpleThreadTree(emails) {
+  // Create a simple linear thread tree since we don't have full thread structure
+  const roots = emails.length > 0 ? [`email-${emails[0].id}`] : [];
+  const parent = {};
+  const children = {};
+  const branchPaths = [];
+
+  emails.forEach((email, index) => {
+    const uid = `email-${email.id}`;
+    parent[uid] = index > 0 ? `email-${emails[index - 1].id}` : null;
+    children[uid] =
+      index < emails.length - 1 ? [`email-${emails[index + 1].id}`] : [];
+    if (index === 0) {
+      branchPaths.push([uid]);
+    }
+  });
+
+  return {
+    roots: roots,
+    parent: parent,
+    children: children,
+    branch_paths: branchPaths,
+  };
+}
+
 export const view_process = async (req, res) => {
   try {
     const { processId } = req.params;
@@ -2188,14 +2283,30 @@ export const view_process = async (req, res) => {
 
     // Fetch email threads for the process
     // Fetch email threads for the process
+    // Fetch email threads for the process
+    // Fetch email threads for the process
     const emailThreads = await retry(() =>
       prisma.emailThread.findMany({
         where: { processId: process.id },
         include: {
           originalEmails: {
             orderBy: { date: "asc" },
-            // Remove the include for attachments since it's a scalar field
-            // Just fetch the emails normally, all scalar fields will be included
+            select: {
+              id: true,
+              subject: true,
+              from: true,
+              to: true,
+              cc: true,
+              bcc: true,
+              date: true,
+              bodyText: true,
+              bodyHtml: true,
+              attachments: true,
+              headers: true,
+              messageId: true,
+              inReplyTo: true,
+              references: true,
+            },
           },
           createdBy: {
             select: {
@@ -2210,34 +2321,114 @@ export const view_process = async (req, res) => {
       }),
     );
 
+    emailThreads.forEach((thread, index) => {
+      console.log(
+        `Thread ${index + 1}: ${thread.originalEmails.length} emails`,
+      );
+      thread.originalEmails.forEach((email, emailIndex) => {
+        console.log(`  Email ${emailIndex + 1}:`);
+        console.log(`    bodyText length: ${email.bodyText?.length || 0}`);
+        console.log(`    bodyHtml length: ${email.bodyHtml?.length || 0}`);
+      });
+    });
+
+    console.log("email threads", emailThreads);
     // Format email threads for response
-    const formattedEmailThreads = emailThreads.map((thread) => ({
-      id: thread.id,
-      threadText: thread.threadText,
-      extractedAt: thread.extractedAt,
-      createdBy: {
-        id: thread.createdBy.id,
-        username: thread.createdBy.username,
-        name: thread.createdBy.name,
-        email: thread.createdBy.email,
-      },
-      metadata: thread.metadata,
-      emails: thread.originalEmails.map((email) => ({
+    // Format email threads for response
+    // Format email threads for response
+    const formattedEmailThreads = emailThreads.map((thread) => {
+      // Extract metadata
+      const metadata = thread.metadata || {};
+      const attachmentsMapping = metadata.attachmentsMapping || [];
+      const extractedDocumentIds = metadata.extractedDocumentIds || [];
+
+      // Format emails to match Python extractor structure
+      const emails = thread.originalEmails.map((email) => ({
         id: email.id,
-        subject: email.subject,
-        from: email.from,
-        to: email.to,
-        cc: email.cc,
-        bcc: email.bcc,
-        date: email.date,
-        bodyText: email.bodyText,
-        bodyHtml: email.bodyHtml,
-        attachments: email.attachments, // This will work because it's a scalar field
-        messageId: email.messageId,
-        inReplyTo: email.inReplyTo,
-        references: email.references,
-      })),
-    }));
+        uid: `email-${email.id}`, // Generate a UID similar to Python script
+        source: "database", // Indicate source
+        subject: email.subject || "No subject",
+        from: email.from || "",
+        to: email.to.join("") || [],
+        cc: email.cc.join("") || [],
+        bcc: email.bcc.join("") || [],
+        date: email.date
+          ? new Date(email.date).toISOString()
+          : new Date().toISOString(),
+        body_plain: email.bodyText || "",
+        body_html: email.bodyHtml || "",
+        body_text: email.bodyText || "", // Same as body_plain for consistency
+        message_id: email.messageId || "",
+        in_reply_to: Array.isArray(email.inReplyTo) ? email.inReplyTo : [],
+        references: Array.isArray(email.references) ? email.references : [],
+        headers: email.headers || {},
+        attachments_filenames:
+          email.attachments?.map((att) => att.filename) || [],
+        attachments:
+          email.attachments?.map((att) => ({
+            filename: att.filename,
+            size: att.size || 0,
+            content_type: att.contentType || "application/octet-stream",
+            disposition: att.disposition || "attachment",
+            associated_email_subject: email.subject,
+            associated_email_from: email.from,
+            documentId: att.documentId || null,
+          })) || [],
+        containment_parent_uid: null, // Not stored in database
+      }));
+
+      // Build thread text from emails
+      const threadText = thread.threadText || buildThreadTextFromEmails(emails);
+
+      // Build thread tree (simplified since we don't store full tree in DB)
+      const threadTree = metadata.threadTree || buildSimpleThreadTree(emails);
+
+      // Calculate summary
+      const totalMessages = emails.length;
+      const totalAttachments = emails.reduce(
+        (acc, email) => acc + (email.attachments?.length || 0),
+        0,
+      );
+
+      const summary = metadata.summary || {
+        total_messages: totalMessages,
+        total_attachments: totalAttachments,
+        thread_roots: 1, // Simplified
+        thread_branches: 1, // Simplified
+      };
+
+      // Original email info (first email in thread)
+      const originalEmail =
+        emails.length > 0
+          ? {
+              subject: emails[0].subject,
+              from: emails[0].from,
+              date: emails[0].date,
+              totalMessages: totalMessages,
+              totalAttachments: totalAttachments,
+            }
+          : null;
+
+      // Return structure matching extractEMLDetails
+      return {
+        id: thread.id,
+        threadText: threadText,
+        attachments: attachmentsMapping, // This should match attachmentsWithDocumentIds from extractor
+        emails: emails,
+        threadTree: threadTree,
+        summary: summary,
+        originalEmail: originalEmail,
+        extractedDocumentIds: extractedDocumentIds,
+        attachmentsMapping: attachmentsMapping,
+        extractedAt: thread.extractedAt,
+        createdBy: {
+          id: thread.createdBy.id,
+          username: thread.createdBy.username,
+          name: thread.createdBy.name,
+          email: thread.createdBy.email,
+        },
+      };
+    });
 
     // Fetch documents separately
     const documents = await retry(() =>
@@ -3179,6 +3370,46 @@ export const view_process = async (req, res) => {
           ?.id,
     );
 
+    const normalizedEmailThreads = formattedEmailThreads.map((thread) => {
+      const attachmentsMapping = [];
+      const extractedDocumentIds = new Set();
+
+      thread.emails.forEach((email) => {
+        (email.attachments || []).forEach((att) => {
+          if (att.documentId) {
+            extractedDocumentIds.add(att.documentId);
+
+            attachmentsMapping.push({
+              originalFilename: att.filename,
+              documentId: att.documentId,
+              contentType: att.content_type || "application/pdf",
+            });
+          }
+        });
+
+        // ✅ Ensure filenames are populated
+        email.attachments_filenames = (email.attachments || []).map(
+          (a) => a.filename,
+        );
+      });
+
+      return {
+        threadText: thread.threadText || "",
+        attachmentsMapping,
+        extractedDocumentIds: Array.from(extractedDocumentIds),
+        emails: thread.emails,
+        threadTree: thread.threadTree || null,
+        summary: thread.summary || null,
+        originalEmail: thread.originalEmail || null,
+
+        _metadata: {
+          id: thread.id,
+          extractedAt: thread.extractedAt,
+          createdBy: thread.createdBy,
+        },
+      };
+    });
+
     const responseData = {
       process: {
         processStoragePath: process.storagePath,
@@ -3219,7 +3450,8 @@ export const view_process = async (req, res) => {
           process.status === "COMPLETED" || process.initiator.id === userData.id
             ? "APPROVAL"
             : currentStepInstance?.workflowStep?.stepType,
-        emailThreads: formattedEmailThreads, // Add email threads to response
+        // Email threads in consistent structure
+        emailThreads: normalizedEmailThreads,
       },
     };
 

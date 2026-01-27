@@ -5,6 +5,7 @@ import { dirname } from "path";
 import fs from "fs/promises";
 import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
+import { generateUniqueDocumentName } from "./process-controller.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,7 +30,7 @@ export const extractEMLDetails = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
-    const { documentId } = req.body;
+    const { documentId, workflowId } = req.body;
 
     if (!documentId) {
       return res.status(400).json({ message: "documentId is required" });
@@ -116,17 +117,23 @@ export const extractEMLDetails = async (req, res) => {
         const attachmentsWithDocumentIds = [];
 
         for (const attachment of extractionResult.attachments) {
+          console.log("attachment", attachment);
           try {
             // Decode base64 content
             const buffer = Buffer.from(attachment.base64_content, "base64");
 
             // Generate unique filename
-            const timestamp = Date.now();
-            const safeFilename = attachment.filename.replace(
-              /[^a-zA-Z0-9._-]/g,
-              "_",
-            );
-            const newFilename = `${timestamp}_${safeFilename}`;
+            const filename = attachment.filename;
+            const extension = filename.split(".").pop();
+
+            const safeFilename = await generateUniqueDocumentName({
+              workflowId,
+              replacedDocId: null,
+              extension,
+            });
+
+            console.log("safe file name", safeFilename);
+            const newFilename = `${safeFilename}`;
 
             // Determine parent directory (same as EML file's directory)
             const emlDir = path.dirname(emlDocument.path);
@@ -167,25 +174,23 @@ export const extractEMLDetails = async (req, res) => {
               tags.push(`email-subject:${cleanSubject}`);
             }
 
-            // Create document record - FIXED: use createdById, not createdBy
+            // Create document record
             const newDocument = await prisma.document.create({
               data: {
-                name: attachment.filename,
+                name: newFilename,
                 type: fileType,
                 path: newFilePath,
-                createdById: userData.id, // CORRECT FIELD NAME
+                createdById: userData.id,
                 isInvolvedInProcess: false,
                 tags: tags,
                 isRecord: true,
                 parentId: parseInt(documentId),
-                // Note: metadata field doesn't exist in your schema
-                // You can store metadata in tags or create a separate table
               },
             });
 
             uploadedDocumentIds.push(newDocument.id);
             attachmentsWithDocumentIds.push({
-              originalFilename: attachment.filename,
+              originalFilename: newFilename, // Only new filename, no original
               documentId: newDocument.id,
               emailSubject: attachment.associated_email_subject,
               emailFrom: attachment.associated_email_from,
@@ -195,7 +200,7 @@ export const extractEMLDetails = async (req, res) => {
             });
 
             console.log(
-              `Created document ${newDocument.id} for attachment: ${attachment.filename}`,
+              `Created document ${newDocument.id} for attachment: ${newFilename}`,
             );
           } catch (attachmentError) {
             console.error(
@@ -204,6 +209,55 @@ export const extractEMLDetails = async (req, res) => {
             );
             // Continue with other attachments
           }
+        }
+
+        // Update the emails array to reflect new filenames
+        if (extractionResult.emails) {
+          extractionResult.emails = extractionResult.emails.map((email) => {
+            const emailCopy = { ...email };
+
+            if (emailCopy.attachments && emailCopy.attachments.length > 0) {
+              emailCopy.attachments = emailCopy.attachments.map(
+                (attachment) => {
+                  // Find matching attachment in our uploaded list
+                  const uploadedAtt = attachmentsWithDocumentIds.find(
+                    (att) =>
+                      att.emailSubject === email.subject &&
+                      att.emailFrom === email.from &&
+                      att.size === attachment.size &&
+                      att.contentType === attachment.content_type,
+                  );
+
+                  if (uploadedAtt) {
+                    return {
+                      ...attachment,
+                      filename: uploadedAtt.filename, // Replace with new filename
+                      documentId: uploadedAtt.documentId,
+                    };
+                  }
+                  return attachment;
+                },
+              );
+            }
+            return emailCopy;
+          });
+        }
+
+        // Update the main attachments array in extractionResult
+        if (extractionResult.attachments) {
+          extractionResult.attachments = extractionResult.attachments.map(
+            (attachment, index) => {
+              if (index < attachmentsWithDocumentIds.length) {
+                const uploadedAtt = attachmentsWithDocumentIds[index];
+                return {
+                  ...attachment,
+                  filename: uploadedAtt.filename, // Replace with new filename
+                  documentId: uploadedAtt.documentId,
+                };
+              }
+              return attachment;
+            },
+          );
         }
 
         // Build enhanced thread text with document IDs
@@ -230,13 +284,13 @@ export const extractEMLDetails = async (req, res) => {
         summaryHeader += `Thread Roots: ${extractionResult.summary?.thread_roots || 1}\n`;
         summaryHeader += `Thread Branches: ${extractionResult.summary?.thread_branches || 1}\n`;
 
-        // Add attachment mapping
+        // Add attachment mapping using new filenames
         if (attachmentsWithDocumentIds.length > 0) {
           summaryHeader += "\n" + "=".repeat(80) + "\n";
           summaryHeader += "EXTRACTED ATTACHMENTS\n";
           summaryHeader += "=".repeat(80) + "\n";
           attachmentsWithDocumentIds.forEach((att, index) => {
-            summaryHeader += `${index + 1}. "${att.originalFilename}"\n`;
+            summaryHeader += `${index + 1}. "${att.filename}"\n`;
             summaryHeader += `   Type: ${att.contentType}\n`;
             summaryHeader += `   Size: ${formatBytes(att.size)}\n`;
             summaryHeader += `   From Email: "${att.emailSubject}"\n`;
@@ -249,7 +303,6 @@ export const extractEMLDetails = async (req, res) => {
         enhancedThreadText = summaryHeader + "\n\n" + enhancedThreadText;
 
         // Update the original document with tags to indicate it's been extracted
-        // (Optional - you can skip this if you prefer)
         try {
           await prisma.document.update({
             where: { id: parseInt(documentId) },
