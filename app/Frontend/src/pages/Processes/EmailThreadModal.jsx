@@ -326,7 +326,7 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                   'Untitled Thread'}
               </span>
             </div>
-            <div className="flex items-center gap-2">
+            {/* <div className="flex items-center gap-2">
               <IconUser size={16} className="text-blue-600" />
               <span className="font-medium">Extracted at:</span>
               <span>
@@ -334,7 +334,7 @@ const EmailThreadModal = ({ thread, onClose, onViewDocument }) => {
                   ? formatDate(thread.extractedAt)
                   : 'Unknown'}
               </span>
-            </div>
+            </div> */}
           </div>
         </div>
 

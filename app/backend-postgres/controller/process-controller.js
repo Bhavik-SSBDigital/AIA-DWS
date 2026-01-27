@@ -3732,13 +3732,14 @@ async function checkProcessProgress(tx, processId) {
           },
         },
       },
-      queries: {
+      qaChannels: {
+        // Changed from 'queries' to 'qaChannels'
         where: { status: "RECIRCULATION_PENDING" },
       },
     },
   });
 
-  if (process.queries.length > 0) {
+  if (process.qaChannels.length > 0) {
     return;
   }
 
@@ -4142,10 +4143,13 @@ export const complete_process_step = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
-    await handleProcessClaim(userData.id, stepInstanceId);
+    const updatedStepInstance = await handleProcessClaim(
+      userData.id,
+      stepInstanceId,
+    );
 
     const result = await prisma.$transaction(async (tx) => {
-      const stepInstance = await tx.processStepInstance.findUnique({
+      let stepInstance = await tx.processStepInstance.findUnique({
         where: {
           id: stepInstanceId,
           assignedTo: userData.id,
@@ -4177,7 +4181,7 @@ export const complete_process_step = async (req, res) => {
       });
 
       if (!stepInstance) {
-        throw new Error("Invalid step instance or user not assigned");
+        stepInstance = updatedStepInstance;
       }
 
       if (!stepInstance.process) {
