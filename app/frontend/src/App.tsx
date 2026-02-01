@@ -40,6 +40,7 @@ import Templates from './pages/Templates';
 import CompletedProcesses from './pages/Processes/CompletedProcesses';
 import Bookmark from './pages/Bookmark';
 import AdminReportsPage from './pages/Reports';
+import AutoLoginHandler from './components/AutoLoginHandler';
 
 function App() {
   const dispatch = useDispatch();
@@ -59,10 +60,13 @@ function App() {
 
   const navigate = useNavigate();
   useEffect(() => {
-    const token = sessionStorage.getItem('accessToken');
-    if (!token) {
-      navigate('/auth/signin');
-    }
+     const isAutoLogin = pathname === '/auth/auto-login';
+  if (isAutoLogin) return;
+
+  const token = sessionStorage.getItem('accessToken');
+  if (!token) {
+    navigate('/auth/signin');
+  }
 
     // Block right-click context menu
     const preventContextMenu = (e) => {
@@ -106,6 +110,7 @@ function App() {
   ) : (
     <>
       <Routes>
+          <Route path="/auth/auto-login" element={<AutoLoginHandler />} />
         <Route
           index
           element={
@@ -134,6 +139,7 @@ function App() {
             </DefaultLayout>
           }
         />
+      
         <Route
           path="/bin"
           element={

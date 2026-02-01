@@ -15,6 +15,8 @@ import {
   change_password,
   logout,
   download_login_logs,
+  autoLogin,
+  validateAutoLogin,
 } from "../controller/auth-controller.js";
 
 import {
@@ -190,6 +192,8 @@ const router = express.Router();
 
 router.post("/signup", sign_up);
 router.post("/login", login);
+router.get("/auto-login", autoLogin);
+router.post("/validate-auto-login", validateAutoLogin);
 router.post("/tags", add_tags);
 router.get("/tags", get_tags);
 

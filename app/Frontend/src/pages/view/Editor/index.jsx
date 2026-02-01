@@ -76,6 +76,8 @@ const Editor = ({
           },
         );
 
+        console.log("discovery response", discoveryResponse)
+
         // Parse the XML string
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(

@@ -5,9 +5,11 @@ import { dirname, join, normalize, extname, basename } from "path";
 import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
 import fsCB from "fs";
 import sharp from "sharp";
+import crypto from "crypto";
 import logger from "./logger.js";
 import path from "path";
 import axios from "axios";
+import { FileProtectionService } from "../services/file-protection-service.js";
 import { Transform } from "stream";
 import { createHash } from "crypto";
 import jwt from "jsonwebtoken";
@@ -37,9 +39,15 @@ const COLLABORA_URL = process.env.WOPI_SERVER_URL;
 import { exec } from "child_process";
 const execPromise = promisify(exec);
 
-function getContentTypeFromExtension(extension) {
+const getContentTypeFromExtension = (extension) => {
   const mimeTypes = {
-    txt: "text/plain",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    bmp: "image/bmp",
+    webp: "image/webp",
+    svg: "image/svg+xml",
     pdf: "application/pdf",
     doc: "application/msword",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -47,25 +55,27 @@ function getContentTypeFromExtension(extension) {
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ppt: "application/vnd.ms-powerpoint",
     pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    png: "image/png",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    gif: "image/gif",
-    bmp: "image/bmp",
-    svg: "image/svg+xml",
-    mp3: "audio/mpeg",
-    wav: "audio/wav",
-    mp4: "video/mp4",
-    avi: "video/x-msvideo",
-    mkv: "video/x-matroska",
+    txt: "text/plain",
+    csv: "text/csv",
+    html: "text/html",
+    htm: "text/html",
+    xml: "application/xml",
+    json: "application/json",
     zip: "application/zip",
     rar: "application/x-rar-compressed",
+    "7z": "application/x-7z-compressed",
     tar: "application/x-tar",
-    // Add more mappings for other file types as needed
+    gz: "application/gzip",
+    mp3: "audio/mpeg",
+    mp4: "video/mp4",
+    avi: "video/x-msvideo",
+    mov: "video/quicktime",
+    wav: "audio/wav",
+    default: "application/octet-stream",
   };
-
-  return mimeTypes[extension] || "application/octet-stream"; // Default to generic binary if extension not found
-}
+  const ext = extension.toLowerCase();
+  return mimeTypes[ext] || mimeTypes.default;
+};
 
 const STORAGE_PATH = process.env.STORAGE_PATH;
 
@@ -1247,21 +1257,122 @@ export const file_delete = async (req, res) => {
   }
 };
 
+// utils/fileProtection.js
+
+// List of editable file extensions
+
+// utils/fileProtection.js
+const EDITABLE_EXTENSIONS = new Set([
+  "doc",
+  "docx",
+  "dot",
+  "dotx",
+  "docm",
+  "dotm",
+  "xls",
+  "xlsx",
+  "xlsm",
+  "xlt",
+  "xltx",
+  "xltm",
+  "ppt",
+  "pptx",
+  "pptm",
+  "pot",
+  "potx",
+  "potm",
+  "odt",
+  "ods",
+  "odp",
+  "ott",
+  "ots",
+  "otp",
+  "gdoc",
+  "gsheet",
+  "gslides",
+  "rtf",
+  "txt",
+  "csv",
+  "xml",
+  "html",
+  "htm",
+  "pages",
+  "numbers",
+  "key",
+  "wpd",
+  "wps",
+  "js",
+  "ts",
+  "py",
+  "java",
+  "cpp",
+  "c",
+  "h",
+  "php",
+  "rb",
+  "go",
+  "rs",
+  "swift",
+  "kt",
+  "json",
+  "yml",
+  "yaml",
+  "toml",
+  "ini",
+  "sql",
+  "md",
+  "tex",
+  "latex",
+]);
+
+export const isEditableFile = (fileName) => {
+  if (!fileName) return false;
+  const extension = fileName.split(".").pop().toLowerCase();
+  return EDITABLE_EXTENSIONS.has(extension);
+};
+
+const setProtectionHeaders = (res, fileName) => {
+  if (isEditableFile(fileName)) {
+    const safeFileName = encodeURIComponent(fileName);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${safeFileName}"; filename*=UTF-8''${safeFileName}`,
+    );
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, private, max-age=0",
+    );
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox;");
+    res.setHeader("X-Download-Options", "noopen");
+    res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader(
+      "Permissions-Policy",
+      "geolocation=(), microphone=(), camera=(), display-capture=()",
+    );
+    return true;
+  }
+  return false;
+};
 export const file_though_url = async (req, res) => {
   try {
-    let filePath = "/" + req.params.filePath;
-
-    logger.info({
-      action: "FILE_VIEW_ATTEMPT",
-      details: { filePath: filePath },
-    });
-
-    if (!filePath) {
+    const filePathParam = req.params.filePath;
+    if (!filePathParam) {
       return res.status(400).json({ message: "File path is missing" });
     }
 
-    console.log("file path", filePath);
+    const filePath = "/" + filePathParam;
 
+    logger.info({
+      action: "FILE_VIEW_ATTEMPT",
+      details: { filePath },
+    });
+
+    // Find document in DB
     const document = await prisma.document.findUnique({
       where: { path: filePath },
     });
@@ -1272,29 +1383,95 @@ export const file_though_url = async (req, res) => {
 
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    const absoluteFilePath = path.join(__dirname, STORAGE_PATH, document.path);
+    const STORAGE_PATH = process.env.STORAGE_PATH || "../storage";
+    const fileName = basename(document.path);
+    const originalFilePath = join(
+      __dirname,
+      STORAGE_PATH,
+      document.path.substring(1),
+    );
+
+    console.log("original file path", originalFilePath);
 
     try {
-      await fs.access(absoluteFilePath);
+      await fs.access(originalFilePath);
     } catch {
       logger.error({
         action: "FILE_NOT_FOUND_FOR_VIEW",
-        details: { filePath: absoluteFilePath },
+        details: { filePath: originalFilePath },
       });
       return res.status(404).json({ message: "File not found in storage" });
     }
+
+    const isEditable = isEditableFile(fileName);
+    const fileExtension = fileName.split(".").pop().toLowerCase();
 
     logger.info({
       action: "FILE_VIEW_SUCCESS",
       details: {
         documentId: document.id,
-        filePath: absoluteFilePath,
+        filePath: originalFilePath,
+        fileName,
+        isEditable,
       },
     });
 
-    return res.sendFile(absoluteFilePath);
+    // Prepare file to stream
+    let fileToStream = originalFilePath;
+
+    // Protect editable files
+    // In your file_though_url and get_file_data endpoints, add:
+
+    // Replace the editable file protection section with:
+    // In your file_though_url controller, update the protection section:
+
+    // Replace the entire isEditable block with:
+    // In your file_though_url controller, replace the editable file handling:
+    // In your file_though_url or get_file_data endpoint:
+    // ... inside your controller ...
+    if (isEditable) {
+      let tempProtectedPath = null;
+
+      try {
+        // 1. Generate protected version
+        tempProtectedPath =
+          await FileProtectionService.applyStandardProtection(originalFilePath);
+
+        // 2. Map Content-Type based on extension
+        const mimeType =
+          fileExtension === "xlsx"
+            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${encodeURIComponent(fileName)}"`,
+        );
+
+        // 3. Optional: Headers to discourage local saving/caching
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+        // 4. Send the file
+        res.sendFile(tempProtectedPath, async (err) => {
+          // 5. Cleanup temp file AFTER the response is finished
+          if (tempProtectedPath !== originalFilePath) {
+            await FileProtectionService.cleanupTempFile(tempProtectedPath);
+          }
+        });
+
+        return;
+      } catch (error) {
+        console.error("Protection engine failed:", error);
+        return res.status(500).json({ message: "Failed to secure document." });
+      }
+    }
+
+    // Safe files: images, PDFs, etc.
+    res.setHeader("Content-Type", getContentTypeFromExtension(fileExtension));
+    res.sendFile(originalFilePath);
   } catch (error) {
-    console.log("error", error);
+    console.error("error getting file", error);
     logger.error({
       action: "FILE_VIEW_SERVER_ERROR",
       details: { error: error.message, filePath: req.params.filePath },
@@ -1340,6 +1517,8 @@ export const file_download = async (req, res) => {
     const fileExt = extname(fileName).slice(1).toLowerCase();
     const fileURL = process.env.FILE_URL;
 
+    const isEditable = isEditableFile(fileName);
+
     logger.info({
       action: "REQ_FOR_VIEW_OR_EXPORT_SUCCESS",
       userId: userData.id,
@@ -1348,12 +1527,15 @@ export const file_download = async (req, res) => {
         fileName,
         fileType: fileExt,
         username: userData.username,
+        isEditable,
       },
     });
 
     return res.status(200).json({
       data: `${fileURL}${filePath}`,
       fileType: fileExt,
+      protected: isEditable,
+      forceDownload: isEditable,
     });
   } catch (error) {
     logger.error({
@@ -1368,6 +1550,301 @@ export const file_download = async (req, res) => {
     res.status(500).json({
       message: "error downloading file",
     });
+  }
+};
+
+export const get_file_data = async (req, res) => {
+  try {
+    const accessToken = req.headers["x-authorization"]?.substring(7);
+    const extra = decodeURIComponent(req.headers["x-file-path"]);
+    const fileName = decodeURIComponent(req.headers["x-file-name"]);
+
+    logger.info({
+      action: "FILE_EXPORT_ATTEMPT",
+      details: { filePath: extra, fileName },
+    });
+
+    const userData = await verifyUser(accessToken);
+
+    if (userData === "Unauthorized") {
+      logger.warn({
+        action: "FILE_EXPORT_UNAUTHORIZED",
+        details: { filePath: extra, fileName },
+      });
+      return res.status(401).json({
+        message: "Unauthorized request",
+      });
+    }
+
+    const relativePath = process.env.STORAGE_PATH + "/" + extra.substring(1);
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const originalFilePath = join(__dirname, relativePath, fileName);
+
+    const document = await prisma.document.findUnique({
+      where: { path: extra },
+      include: { department: true },
+    });
+
+    if (!document) {
+      logger.warn({
+        action: "FILE_EXPORT_NOT_FOUND_IN_DB",
+        details: { filePath: extra, fileName },
+      });
+      return res
+        .status(404)
+        .json({ message: "File not found in the database." });
+    }
+
+    const userRole = await prisma.userRole.findFirst({
+      where: {
+        userId: userData.id,
+        role: {
+          departmentId: document.departmentId,
+        },
+      },
+    });
+
+    try {
+      await fs.access(originalFilePath);
+    } catch {
+      logger.error({
+        action: "FILE_EXPORT_NOT_FOUND_IN_STORAGE",
+        details: { filePath: originalFilePath },
+      });
+      return res.status(404).json({ message: "File not found in storage" });
+    }
+
+    const stat = await fs.stat(originalFilePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+    const fileExtension = fileName.split(".").pop().toLowerCase();
+    const isEditable = isEditableFile(fileName);
+
+    logger.info({
+      action: "FILE_EXPORT_SUCCESS",
+      details: {
+        documentId: document.id,
+        filePath: originalFilePath,
+        fileSize,
+        isEditable,
+      },
+    });
+
+    let fileToStream = originalFilePath;
+    let tempFilePath = null;
+
+    // Set headers
+    const safeFileName = encodeURIComponent(fileName);
+
+    // In your file_though_url and get_file_data endpoints, add:
+
+    // Replace the editable file protection section with:
+    // In your file_though_url controller, update the protection section:
+
+    // Replace the entire isEditable block with:
+    // In your file_though_url controller, replace the editable file handling:
+    // In your file_though_url or get_file_data endpoint:
+    // ... inside your controller ...
+    if (isEditable) {
+      let tempProtectedPath = null;
+
+      try {
+        // 1. Generate protected version
+        tempProtectedPath =
+          await FileProtectionService.applyStandardProtection(originalFilePath);
+
+        // 2. Map Content-Type based on extension
+        const mimeType =
+          fileExtension === "xlsx"
+            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${encodeURIComponent(fileName)}"`,
+        );
+
+        // 3. Optional: Headers to discourage local saving/caching
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+        // 4. Send the file
+        res.sendFile(tempProtectedPath, async (err) => {
+          // 5. Cleanup temp file AFTER the response is finished
+          if (tempProtectedPath !== originalFilePath) {
+            await FileProtectionService.cleanupTempFile(tempProtectedPath);
+          }
+        });
+
+        return;
+      } catch (error) {
+        console.error("Protection engine failed:", error);
+        return res.status(500).json({ message: "Failed to secure document." });
+      }
+    } else {
+      // For non-editable files
+      const mimeTypes = {
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        png: "image/png",
+        gif: "image/gif",
+        bmp: "image/bmp",
+        webp: "image/webp",
+        svg: "image/svg+xml",
+        pdf: "application/pdf",
+        txt: "text/plain",
+        csv: "text/csv",
+        zip: "application/zip",
+        rar: "application/x-rar-compressed",
+        mp3: "audio/mpeg",
+        mp4: "video/mp4",
+        avi: "video/x-msvideo",
+        wav: "audio/wav",
+      };
+      const contentType =
+        mimeTypes[fileExtension] || "application/octet-stream";
+      res.setHeader("Content-Type", contentType);
+    }
+
+    if (range === "bytes=0-0") {
+      res.setHeader("access-control-expose-headers", "Content-Range");
+      return res.status(206).json({
+        fileSize,
+        message: "Partial file details fetched successfully.",
+      });
+    }
+
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+      const fileStream = fsCB.createReadStream(fileToStream, { start, end });
+      res.setHeader("access-control-expose-headers", "Content-Range");
+      fileStream.pipe(res);
+
+      // Cleanup temp file after streaming
+      fileStream.on("end", () => {
+        if (tempFilePath && tempFilePath !== originalFilePath) {
+          FileProtectionService.cleanupTempFile(tempFilePath);
+        }
+      });
+    } else {
+      const fileStream = fsCB.createReadStream(fileToStream);
+      fileStream.pipe(res);
+
+      // Cleanup temp file after streaming
+      fileStream.on("end", () => {
+        if (tempFilePath && tempFilePath !== originalFilePath) {
+          FileProtectionService.cleanupTempFile(tempFilePath);
+        }
+      });
+    }
+  } catch (error) {
+    logger.error({
+      action: "FILE_EXPORT_SERVER_ERROR",
+      details: {
+        error: error.message,
+        filePath: req.headers["x-file-path"],
+        fileName: req.headers["x-file-name"],
+      },
+    });
+    return res.status(500).json({
+      message: "Error downloading file",
+    });
+  }
+};
+
+// Add this new controller function
+export const protected_file_download = async (req, res) => {
+  try {
+    const token = req.params.token;
+    const fileName = decodeURIComponent(req.params.fileName);
+    const filePath = decodeURIComponent(req.params.filePath);
+
+    logger.info({
+      action: "PROTECTED_FILE_DOWNLOAD",
+      details: { token, fileName, filePath },
+    });
+
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const STORAGE_PATH = process.env.STORAGE_PATH || "../storage";
+    const absoluteFilePath = join(__dirname, STORAGE_PATH, filePath);
+
+    try {
+      await fs.access(absoluteFilePath);
+    } catch {
+      logger.error({
+        action: "PROTECTED_FILE_NOT_FOUND",
+        details: { filePath: absoluteFilePath },
+      });
+      return res.status(404).json({ message: "File not found" });
+    }
+
+    const isEditable = isEditableFile(fileName);
+
+    // In your file_though_url and get_file_data endpoints, add:
+
+    // Replace the editable file protection section with:
+    // In your file_though_url controller, update the protection section:
+
+    // Replace the entire isEditable block with:
+    // In your file_though_url controller, replace the editable file handling:
+    // In your file_though_url or get_file_data endpoint:
+    if (isEditable) {
+      let tempProtectedPath = null;
+
+      try {
+        // 1. Apply the CORRECT standard protection
+        tempProtectedPath =
+          await FileProtectionService.applyStandardProtection(originalFilePath);
+
+        // 2. Set headers to FORCE the "Read-Only Recommended" prompt in Office apps
+        res.setHeader(
+          "Content-Type",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ); // or wordprocessingml.document for Word
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${encodeURIComponent(fileName)}"`,
+        );
+
+        // 3. These headers encourage Office apps to open as read-only
+        res.setHeader("X-Document-Policy", "read-only");
+        res.setHeader("Cache-Control", "no-store");
+
+        // 4. Stream the file
+        const fileStream = fs.createReadStream(tempProtectedPath);
+        fileStream.pipe(res);
+
+        fileStream.on("end", () => {
+          if (tempProtectedPath !== originalFilePath) {
+            FileProtectionService.cleanupTempFile(tempProtectedPath);
+          }
+        });
+
+        return;
+      } catch (error) {
+        console.error("Standard protection failed:", error);
+        // Fallback: send original with at least a .readonly extension hint
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${encodeURIComponent(fileName.replace(/.([^.]+)$/, ".readonly.$1"))}"`,
+        );
+        res.sendFile(originalFilePath);
+        return;
+      }
+    } else {
+      return res.sendFile(absoluteFilePath);
+    }
+  } catch (error) {
+    logger.error({
+      action: "PROTECTED_FILE_DOWNLOAD_ERROR",
+      details: { error: error.message },
+    });
+    return res.status(500).json({ message: "Error downloading file" });
   }
 };
 
@@ -1419,124 +1896,6 @@ export const file_download = async (req, res) => {
 //     });
 //   }
 // };
-
-export const get_file_data = async (req, res) => {
-  try {
-    const accessToken = req.headers["x-authorization"]?.substring(7);
-    const extra = decodeURIComponent(req.headers["x-file-path"]);
-    const fileName = decodeURIComponent(req.headers["x-file-name"]);
-
-    logger.info({
-      action: "FILE_EXPORT_ATTEMPT",
-      details: { filePath: extra, fileName },
-    });
-
-    const userData = await verifyUser(accessToken);
-
-    if (userData === "Unauthorized") {
-      logger.warn({
-        action: "FILE_EXPORT_UNAUTHORIZED",
-        details: { filePath: extra, fileName },
-      });
-      return res.status(401).json({
-        message: "Unauthorized request",
-      });
-    }
-
-    const relativePath = process.env.STORAGE_PATH + "/" + extra.substring(1);
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    const filePath = join(__dirname, relativePath, fileName);
-
-    // Fetch document metadata from PostgreSQL using Prisma
-    const document = await prisma.document.findUnique({
-      where: { path: extra },
-      include: { department: true },
-    });
-
-    if (!document) {
-      logger.warn({
-        action: "FILE_EXPORT_NOT_FOUND_IN_DB",
-        details: { filePath: extra, fileName },
-      });
-      return res
-        .status(404)
-        .json({ message: "File not found in the database." });
-    }
-
-    // Check user permissions for the requested document
-    const userRole = await prisma.userRole.findFirst({
-      where: {
-        userId: userData.id,
-        role: {
-          departmentId: document.departmentId,
-        },
-      },
-    });
-
-    // Verify file existence
-    try {
-      await fs.access(filePath);
-    } catch {
-      logger.error({
-        action: "FILE_EXPORT_NOT_FOUND_IN_STORAGE",
-        details: { filePath },
-      });
-      return res.status(404).json({ message: "File not found in storage" });
-    }
-
-    // Get file stats
-    const stat = await fs.stat(filePath);
-    const fileSize = stat.size;
-    const range = req.headers.range;
-    const fileExtension = fileName.split(".").pop();
-
-    logger.info({
-      action: "FILE_EXPORT_SUCCESS",
-      details: {
-        documentId: document.id,
-        filePath,
-        fileSize,
-      },
-    });
-
-    if (range === "bytes=0-0") {
-      res.setHeader("content-type", getContentTypeFromExtension(fileExtension));
-      res.setHeader("access-control-expose-headers", "Content-Range");
-      return res.status(206).json({
-        fileSize,
-        message: "Partial file details fetched successfully.",
-      });
-    }
-
-    if (range) {
-      const parts = range.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-      const fileStream = fsCB.createReadStream(filePath, { start, end });
-      res.setHeader("content-type", getContentTypeFromExtension(fileExtension));
-      res.setHeader("access-control-expose-headers", "Content-Range");
-
-      fileStream.pipe(res);
-    } else {
-      res.setHeader("content-type", getContentTypeFromExtension(fileExtension));
-      fsCB.createReadStream(filePath).pipe(res);
-    }
-  } catch (error) {
-    logger.error({
-      action: "FILE_EXPORT_SERVER_ERROR",
-      details: {
-        error: error.message,
-        filePath: req.headers["x-file-path"],
-        fileName: req.headers["x-file-name"],
-      },
-    });
-    return res.status(500).json({
-      message: "Error downloading file",
-    });
-  }
-};
 
 export const archive_file = async (req, res) => {
   let userData;

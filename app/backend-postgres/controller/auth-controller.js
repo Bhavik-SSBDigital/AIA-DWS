@@ -197,7 +197,7 @@ export const login = async (req, res) => {
       process.env.SECRET_ACCESS_KEY,
       {
         expiresIn: "365d",
-      }
+      },
     );
 
     await prisma.loginLog.create({
@@ -327,6 +327,201 @@ export const create_admin = async (req, res) => {
   }
 };
 
+// Auto-login from email link
+export const autoLogin = async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({ message: "Token is required" });
+    }
+
+    // Verify the auto-login token
+    const decoded = jwt.verify(token, process.env.SECRET_ACCESS_KEY);
+
+    console.log("decoded", decoded);
+
+    if (decoded.type !== "auto-login") {
+      return res.status(400).json({ message: "Invalid token type" });
+    }
+
+    // Check if token is too old (optional security measure)
+    const tokenAge = Date.now() - decoded.timestamp;
+    if (tokenAge > 24 * 60 * 60 * 1000) {
+      // 24 hours
+      return res.status(400).json({ message: "Token has expired" });
+    }
+
+    // Get user from database
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      include: {
+        roles: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // // Check if user is active
+    // if (user.status !== "active") {
+    //   return res.status(403).json({ message: "Account is not active" });
+    // }
+
+    // Get user roles
+    const roles = await prisma.role.findMany({
+      where: { id: { in: user.roles.map((role) => role.roleId) } },
+    });
+
+    const isAdmin = roles.some((role) => role.isAdmin) || user.isAdmin;
+    const isDepartmentHead = roles.some((role) => role.isDepartmentHead);
+
+    // Generate a new regular access token (for API calls)
+    const accessToken = jwt.sign(
+      {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        roles: user.roles.map((role) => role.roleId),
+        isAdmin: isAdmin,
+        isDepartmentHead: isDepartmentHead,
+        source: "auto-login", // Mark as from auto-login
+      },
+      process.env.SECRET_ACCESS_KEY,
+    );
+
+    // Generate refresh token
+    const refreshToken = jwt.sign(
+      { id: user.id },
+      process.env.REFRESH_SECRET_KEY,
+    );
+
+    // Store refresh token in database
+    await prisma.token.upsert({
+      where: { userId: user.id },
+      update: { token: refreshToken },
+      create: {
+        token: refreshToken,
+        userId: user.id,
+      },
+    });
+
+    // Create login log
+    await prisma.loginLog.create({
+      data: {
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+        action: "AUTO_LOGIN",
+        ipAddress: req.ip || req.connection.remoteAddress,
+        userAgent: req.get("User-Agent"),
+        success: true,
+      },
+    });
+
+    // Check if redirect is provided
+    const redirectUrl =
+      decoded.resourceType === "process"
+        ? `${process.env.FRONTEND_URL}/process/view/${decoded.resourceId}` ||
+          "/dashboard"
+        : `${process.env.FRONTEND_URL}/process/view/${decoded.processId}?autoOpenDoc=${decoded.resourceId}` ||
+          "/dashboard";
+
+    // Return success with tokens and redirect URL
+    res.status(200).json({
+      success: true,
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        userName: user.username,
+        roles: roles.map((role) => role.role),
+        isAdmin: isAdmin,
+        isDepartmentHead: isDepartmentHead,
+        isRootUser: user.isRootLevel,
+      },
+      redirectUrl,
+    });
+  } catch (error) {
+    console.error("Auto-login error:", error);
+
+    await prisma.loginLog.create({
+      data: {
+        action: "AUTO_LOGIN",
+        ipAddress: req.ip || req.connection.remoteAddress,
+        userAgent: req.get("User-Agent"),
+        success: false,
+        error: error.message,
+      },
+    });
+
+    if (error.name === "JsonWebTokenError") {
+      return res.status(400).json({ message: "Invalid token" });
+    }
+    if (error.name === "TokenExpiredError") {
+      return res.status(400).json({ message: "Token has expired" });
+    }
+
+    return res.status(500).json({ message: "Error during auto-login" });
+  }
+};
+
+// Validate auto-login token (for frontend)
+export const validateAutoLogin = async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res
+        .status(400)
+        .json({ valid: false, message: "Token is required" });
+    }
+
+    const decoded = jwt.verify(token, process.env.SECRET_ACCESS_KEY);
+
+    if (decoded.type !== "auto-login") {
+      return res
+        .status(400)
+        .json({ valid: false, message: "Invalid token type" });
+    }
+
+    // Check if user still exists and is active
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId, status: "active" },
+    });
+
+    if (!user) {
+      return res
+        .status(400)
+        .json({ valid: false, message: "User not found or inactive" });
+    }
+
+    res.status(200).json({
+      valid: true,
+      userId: decoded.userId,
+      resourceType: decoded.resourceType,
+      resourceId: decoded.resourceId,
+    });
+  } catch (error) {
+    console.error("Token validation error:", error);
+
+    if (error.name === "JsonWebTokenError") {
+      return res.status(400).json({ valid: false, message: "Invalid token" });
+    }
+    if (error.name === "TokenExpiredError") {
+      return res
+        .status(400)
+        .json({ valid: false, message: "Token has expired" });
+    }
+
+    return res
+      .status(500)
+      .json({ valid: false, message: "Error validating token" });
+  }
+};
+
 export const change_password = async (req, res) => {
   try {
     const { username, currentPassword, newPassword } = req.body;
@@ -348,7 +543,7 @@ export const change_password = async (req, res) => {
     // Verify current password
     const isPasswordValid = await bcrypt.compare(
       currentPassword,
-      user.password
+      user.password,
     );
     if (!isPasswordValid) {
       return res.status(401).json({ message: "Current password is incorrect" });
@@ -457,13 +652,13 @@ export const download_login_logs = async (req, res) => {
     // Set response headers
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader(
       "Content-Disposition",
       `attachment; filename=login-logs-${
         new Date().toISOString().split("T")[0]
-      }.xlsx`
+      }.xlsx`,
     );
 
     // Write to response

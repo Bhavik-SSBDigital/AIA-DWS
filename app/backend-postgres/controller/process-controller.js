@@ -4418,7 +4418,7 @@ export const complete_process_step = async (req, res) => {
 
         const nextAssignee = await getNextAssignee(stepInstance);
 
-        await sendProcessNotification("stepCompleted", {
+        await sendProcessNotification("stepAssigned", {
           params: [stepInstance.process, stepInstance, userData, nextAssignee],
         });
 

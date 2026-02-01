@@ -2,29 +2,90 @@
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
+import dotenv from "dotenv";
+dotenv.config();
+
+const { env } = process;
 
 const prisma = new PrismaClient();
 
 // Configure email transporter
 const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || "smtp.gmail.com",
-  port: process.env.EMAIL_PORT || 587,
-  secure: process.env.EMAIL_SECURE === "true",
+  host: env.EMAIL_HOST || "smtp.gmail.com",
+  port: env.EMAIL_PORT || 587,
+  // secure: env.EMAIL_SECURE === "true",
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    user: env.EMAIL_USER,
+    pass: env.EMAIL_PASS,
   },
 });
 
+// Generate auto-login token with short expiration
+const generateAutoLoginToken = (
+  userId,
+  resourceType,
+  resourceId,
+  processId,
+) => {
+  return jwt.sign(
+    {
+      userId,
+      resourceType,
+      resourceId,
+      processId,
+      type: "auto-login",
+      timestamp: Date.now(), // To prevent replay attacks
+    },
+    env.SECRET_ACCESS_KEY,
+    { expiresIn: "24h" },
+  );
+};
+
+const generateAutoLoginProcessUrl = (processId, userId) => {
+  const token = generateAutoLoginToken(userId, "process", processId);
+  return `${env.FRONTEND_URL}/auth/auto-login?token=${token}&redirect=/process/${processId}`;
+};
+
+// In emailService.js, update the generateAutoLoginDocumentUrl function:
+// In emailService.js, update the generateAutoLoginDocumentUrl function
+// In emailService.js, update the generateAutoLoginDocumentUrl function
+const generateAutoLoginDocumentUrl = (documentId, userId, processId) => {
+  const token = generateAutoLoginToken(
+    userId,
+    "document",
+    documentId,
+    processId,
+  );
+  // Add the autoOpenDoc parameter to the process URL
+  return `${env.FRONTEND_URL}/auth/auto-login?token=${token}&redirect=/processes/view/${processId}?autoOpenDoc=${documentId}`;
+};
+
+const generateOneTimeToken = (userId, resourceType, resourceId) => {
+  const oneTimeToken = jwt.sign(
+    {
+      userId,
+      resourceType,
+      resourceId,
+      type: "one-time",
+      timestamp: Date.now(),
+      nonce: Math.random().toString(36).substring(2), // Random nonce
+    },
+    env.SECRET_ACCESS_KEY,
+  );
+
+  // Store token in database to prevent reuse
+  return oneTimeToken;
+};
+
 // Generate secure tokens for public access
 const generateAccessToken = (payload, expiresIn = "24h") => {
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+  return jwt.sign(payload, env.SECRET_ACCESS_KEY, { expiresIn });
 };
 
 // Decode token for verification
 const verifyAccessToken = (token) => {
   try {
-    return jwt.verify(token, process.env.JWT_SECRET);
+    return jwt.verify(token, env.SECRET_ACCESS_KEY);
   } catch (error) {
     return null;
   }
@@ -33,13 +94,14 @@ const verifyAccessToken = (token) => {
 // Generate public URL for process viewing
 const generatePublicProcessUrl = (processId, userId) => {
   const token = generateAccessToken({ processId, userId, type: "process" });
-  return `${process.env.FRONTEND_URL}/public/process/${processId}?token=${token}`;
+  return `${env.FRONTEND_URL}/public/process/${processId}?token=${token}`;
 };
 
 // Generate public URL for document viewing
-const generatePublicDocumentUrl = (documentId, userId) => {
+const generatePublicDocumentUrl = (documentId, userId, processId) => {
   const token = generateAccessToken({ documentId, userId, type: "document" });
-  return `${process.env.FRONTEND_URL}/public/document/${documentId}?token=${token}`;
+  return `${env.FRONTEND_URL}/process/view/${processId}?autoOpenDoc=${documentId}&token=${token}
+`;
 };
 
 // Generate HTML email template with buttons
@@ -49,84 +111,102 @@ const generateEmailTemplate = (data) => {
     greeting,
     message,
     processDetails,
-    documentDetails,
-    actions = [],
-    footerNote,
+    timelineDetails,
+    quickAccessLinks,
+    closingMessage,
+    text,
   } = data;
-
-  // Action buttons HTML
-  const actionButtons = actions
-    .map(
-      (action) => `
-    <a href="${action.url}" 
-       style="background-color: ${action.color || "#4CAF50"}; 
-              border: none; 
-              color: white; 
-              padding: 12px 24px; 
-              text-align: center; 
-              text-decoration: none; 
-              display: inline-block; 
-              font-size: 14px; 
-              margin: 4px 8px; 
-              cursor: pointer; 
-              border-radius: 4px;">
-      ${action.text}
-    </a>
-  `
-    )
-    .join("");
-
-  // Documents list HTML
-  const documentsList =
-    documentDetails
-      ?.map(
-        (doc) => `
-    <li style="margin-bottom: 8px;">
-      <strong>${doc.name}</strong>
-      <a href="${doc.url}" 
-         style="color: #0066cc; text-decoration: none; margin-left: 10px;">
-        [View Document]
-      </a>
-    </li>
-  `
-      )
-      .join("") || "";
 
   return `
     <!DOCTYPE html>
     <html>
     <head>
       <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #f8f9fa; padding: 20px; border-radius: 5px; }
-        .content { padding: 20px 0; }
-        .actions { margin: 20px 0; text-align: center; }
-        .process-details, .documents-list { 
-          background-color: #f8f9fa; 
-          padding: 15px; 
-          border-radius: 5px; 
-          margin: 15px 0; 
+        body { 
+          font-family: Arial, sans-serif; 
+          line-height: 1.6; 
+          color: #333; 
+          margin: 0;
+          padding: 0;
+        }
+        .container { 
+          max-width: 700px; 
+          margin: 0 auto; 
+          padding: 30px; 
+          background-color: #ffffff;
+        }
+        .header { 
+          text-align: center;
+          border-bottom: 2px solid #007bff;
+          padding-bottom: 20px;
+          margin-bottom: 30px;
+        }
+        .content { 
+          padding: 20px 0; 
+        }
+        .section { 
+          margin: 25px 0; 
+          padding: 20px;
+          background-color: #f9f9f9;
+          border-radius: 8px;
+          border-left: 4px solid #007bff;
+        }
+        .links-section {
+          background-color: #e8f4ff;
+          border-left: 4px solid #0056b3;
+        }
+        h1 { 
+          color: #0056b3; 
+          font-size: 24px;
+          margin: 0;
+        }
+        h2 {
+          color: #333;
+          font-size: 18px;
+          margin-top: 0;
+          margin-bottom: 15px;
+        }
+        p {
+          margin: 10px 0;
+          color: #444;
+        }
+        ul {
+          margin: 10px 0;
+          padding-left: 20px;
+        }
+        li {
+          margin: 8px 0;
+          color: #555;
+        }
+        a {
+          color: #007bff;
+          text-decoration: none;
+          font-weight: 500;
+        }
+        a:hover {
+          text-decoration: underline;
+          color: #0056b3;
         }
         .footer { 
-          margin-top: 30px; 
+          margin-top: 40px; 
           padding-top: 20px; 
           border-top: 1px solid #ddd; 
           font-size: 12px; 
-          color: #666; 
+          color: #666;
+          text-align: center;
         }
-        .button { 
-          display: inline-block; 
-          padding: 10px 20px; 
-          background-color: #007bff; 
-          color: white; 
-          text-decoration: none; 
-          border-radius: 4px; 
-          margin: 5px; 
+        .signature {
+          margin-top: 30px;
+          font-style: italic;
+          color: #555;
         }
-        .danger-button { background-color: #dc3545; }
-        .success-button { background-color: #28a745; }
-        .info-button { background-color: #17a2b8; }
+        .highlight {
+          background-color: #fff3cd;
+          padding: 10px;
+          border-radius: 4px;
+          border: 1px solid #ffeaa7;
+          margin: 20px 0;
+        }
       </style>
     </head>
     <body>
@@ -136,56 +216,27 @@ const generateEmailTemplate = (data) => {
         </div>
         
         <div class="content">
-          <p>${greeting}</p>
+          <p><strong>${greeting}</strong></p>
           
-          <div class="message">
-            ${message}
+          ${message}
+          
+          ${processDetails ? `<div class="section">${processDetails}</div>` : ""}
+          
+          ${timelineDetails ? `<div class="section">${timelineDetails}</div>` : ""}
+          
+          ${quickAccessLinks ? `<div class="section links-section">${quickAccessLinks}</div>` : ""}
+          
+          <div class="highlight">
+            <p><strong>Note:</strong> Clicking on the links above will automatically log you into the system and take you directly to the process or document.</p>
           </div>
           
-          ${
-            processDetails
-              ? `
-          <div class="process-details">
-            <h3>Process Details:</h3>
-            ${processDetails}
-          </div>
-          `
-              : ""
-          }
-          
-          ${
-            documentsList
-              ? `
-          <div class="documents-list">
-            <h3>Documents:</h3>
-            <ul>${documentsList}</ul>
-          </div>
-          `
-              : ""
-          }
-          
-          ${
-            actions.length > 0
-              ? `
-          <div class="actions">
-            <h3>Quick Actions:</h3>
-            ${actionButtons}
-          </div>
-          `
-              : ""
-          }
+          ${closingMessage}
         </div>
         
-        ${
-          footerNote
-            ? `
         <div class="footer">
-          <p>${footerNote}</p>
-          <p>This is an automated notification. Please do not reply to this email.</p>
+          <p>This is an automated notification from the Process Management System.</p>
+          <p>Please do not reply to this email.</p>
         </div>
-        `
-            : ""
-        }
       </div>
     </body>
     </html>
@@ -193,16 +244,17 @@ const generateEmailTemplate = (data) => {
 };
 
 // Send email function
+// Send email function
 export const sendEmail = async (to, subject, templateData) => {
   try {
     const html = generateEmailTemplate(templateData);
 
     const mailOptions = {
-      from: `"Process Management System" <${process.env.EMAIL_FROM}>`,
+      from: `"Process Management System" <${env.EMAIL_FROM}>`,
       to,
       subject,
       html,
-      text: templateData.text || subject, // Fallback text version
+      text: templateData.text || subject, // Use the provided text version
     };
 
     const info = await transporter.sendMail(mailOptions);
@@ -217,51 +269,158 @@ export const sendEmail = async (to, subject, templateData) => {
 // Email templates for different events
 export const emailTemplates = {
   // Step Assignment Email
+  // In emailService.js, update stepAssigned template generation
   stepAssigned: async (process, stepInstance, documents, assignedUser) => {
-    const processUrl = generatePublicProcessUrl(process.id, assignedUser.id);
-    const documentUrls = await Promise.all(
-      documents.map(async (doc) => ({
-        name: doc.document?.name || "Document",
-        url: generatePublicDocumentUrl(doc.documentId, assignedUser.id),
-      }))
+    const processUrl = generateAutoLoginProcessUrl(process.id, assignedUser.id);
+
+    // Generate document links for each document - FIXED
+    const documentLinks = documents.map((doc) => {
+      const docId = doc.documentId || doc.id;
+      const docName = doc.document?.name || doc.name || "Document";
+
+      // Use the new function with processId parameter
+      return {
+        name: docName,
+        url: generateAutoLoginDocumentUrl(docId, assignedUser.id, process.id),
+      };
+    });
+
+    // Get last approved user
+    const lastStep = process.steps?.find(
+      (step) => step.status === "COMPLETED" && step.actionType === "APPROVAL",
     );
 
+    const lastApprovedBy =
+      lastStep?.assignedToUser?.name ||
+      lastStep?.completedByUser?.name ||
+      "None";
+
     return {
-      title: "New Process Step Assigned",
-      greeting: `Hello ${assignedUser.name || assignedUser.username},`,
+      title: `Request for Workflow Approval – Process ${process.name}`,
+      greeting: `Dear ${assignedUser.name || assignedUser.username} Sir,`,
       message: `
-        <p>You have been assigned a new task in the process workflow.</p>
-        <p><strong>Process:</strong> ${process.name}</p>
-        <p><strong>Step:</strong> ${
-          stepInstance.workflowStep?.stepName || "Unknown Step"
-        }</p>
-        <p><strong>Initiator:</strong> ${
-          process.initiator?.username || "System"
-        }</p>
-        <p>Please review the documents and take necessary action.</p>
-      `,
+      <p>I hope this email finds you well.</p>
+      <p>I would like to request your recommendation and review for the following process, which is currently in progress. The complete details are provided below for your reference.</p>
+    `,
       processDetails: `
-        <p><strong>Process ID:</strong> ${process.id}</p>
-        <p><strong>Description:</strong> ${process.description || "N/A"}</p>
-        <p><strong>Created:</strong> ${new Date(
-          process.createdAt
-        ).toLocaleDateString()}</p>
-      `,
-      documentDetails: documentUrls,
-      actions: [
-        {
-          text: "View Process",
-          url: processUrl,
-          color: "#007bff",
-        },
-        {
-          text: "Claim Step",
-          url: `${process.env.FRONTEND_URL}/processes/claim/${stepInstance.id}`,
-          color: "#28a745",
-        },
-      ],
-      footerNote:
-        "This step requires your attention. Please complete it before the deadline.",
+      <p><strong>Process Details:</strong></p>
+      <ul style="list-style-type: none; padding-left: 0; margin: 10px 0;">
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Process ID:</strong> ${process.id}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Process Name:</strong> ${process.name}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Process Version:</strong> ${process.issueNo || "N/A"}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Description:</strong> ${process.description || "N/A"}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Initiator Name:</strong> ${process.initiatorName || "Unknown"}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Current Status:</strong> ${process.status}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Last Approved By:</strong> ${lastApprovedBy}
+        </li>
+      </ul>
+    `,
+      timelineDetails: `
+      <p><strong>Timeline Information:</strong></p>
+      <ul style="list-style-type: none; padding-left: 0; margin: 10px 0;">
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Created At:</strong> ${new Date(process.createdAt).toLocaleDateString("en-GB")}, ${new Date(process.createdAt).toLocaleTimeString()}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Last Updated At:</strong> ${process.updatedAt ? `${new Date(process.updatedAt).toLocaleDateString("en-GB")}, ${new Date(process.updatedAt).toLocaleTimeString()}` : "N/A"}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Completed At:</strong> ${process.completedAt ? `${new Date(process.completedAt).toLocaleDateString("en-GB")}, ${new Date(process.completedAt).toLocaleTimeString()}` : "N/A"}
+        </li>
+      </ul>
+    `,
+      quickAccessLinks: `
+      <div style="margin: 20px 0; padding: 15px; background-color: #f0f8ff; border-left: 4px solid #007bff;">
+        <p style="margin-top: 0;"><strong>Quick Access Links:</strong></p>
+        <div style="margin: 10px 0;">
+          <a href="${processUrl}" 
+             style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; margin: 5px 10px 5px 0; font-weight: 500;">
+            📋 View Process
+          </a>
+        </div>
+        ${
+          documentLinks.length > 0
+            ? `
+          <p style="margin: 15px 0 10px 0;"><strong>Individual Documents:</strong></p>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+            ${documentLinks
+              .map(
+                (doc) => `
+              <a href="${doc.url}" 
+                 style="display: inline-block; background-color: #28a745; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; margin: 3px; font-size: 14px;">
+                📄 ${doc.name.length > 30 ? doc.name.substring(0, 30) + "..." : doc.name}
+              </a>
+            `,
+              )
+              .join("")}
+          </div>
+        `
+            : ""
+        }
+      </div>
+    `,
+      closingMessage: `
+      <p style="margin-top: 20px;">You may use the above links to directly access the process and review the associated documents. Kindly let me know if any additional information or clarification is required from my end.</p>
+      <p>I would appreciate your guidance and recommendation to proceed further.</p>
+      <p>Thank you for your time and support.</p>
+      <p style="margin-top: 30px; font-style: italic;">Warm regards,<br/>
+      <strong>${process.initiatorName || "Initiator"}</strong></p>
+    `,
+      text: `Dear ${assignedUser.name || assignedUser.username} Sir,
+
+I hope this email finds you well.
+
+I would like to request your recommendation and review for the following process, which is currently in progress. The complete details are provided below for your reference.
+
+Process Details:
+• Process ID: ${process.id}
+• Process Name: ${process.name}
+• Process Version: ${process.issueNo || "N/A"}
+• Description: ${process.description || "N/A"}
+• Initiator Name: ${process.initiatorName || "Unknown"}
+• Current Status: ${process.status}
+• Last Approved By: ${lastApprovedBy}
+
+Timeline Information:
+• Created At: ${new Date(process.createdAt).toLocaleDateString("en-GB")}, ${new Date(process.createdAt).toLocaleTimeString()}
+• Last Updated At: ${process.updatedAt ? `${new Date(process.updatedAt).toLocaleDateString("en-GB")}, ${new Date(process.updatedAt).toLocaleTimeString()}` : "N/A"}
+• Completed At: ${process.completedAt ? `${new Date(process.completedAt).toLocaleDateString("en-GB")}, ${new Date(process.completedAt).toLocaleTimeString()}` : "N/A"}
+
+Quick Access Links:
+• View Process: ${processUrl}
+${documentLinks.map((doc) => `• View Document (${doc.name}): ${doc.url}`).join("\n")}
+
+You may use the above links to directly access the process and review the associated documents. Kindly let me know if any additional information or clarification is required from my end.
+
+I would appreciate your guidance and recommendation to proceed further.
+
+Thank you for your time and support.
+
+Warm regards,
+${process.initiatorName || "Initiator"}`,
     };
   },
 
@@ -270,7 +429,7 @@ export const emailTemplates = {
     process,
     stepInstance,
     completedByUser,
-    nextAssignee
+    nextAssignee,
   ) => {
     return {
       title: "Process Step Completed",
@@ -322,7 +481,7 @@ export const emailTemplates = {
         <p><strong>Query:</strong> ${query.queryText}</p>
         <p><strong>Raised by:</strong> ${raisedByUser.username}</p>
         <p><strong>Raised at:</strong> ${new Date(
-          query.createdAt
+          query.createdAt,
         ).toLocaleString()}</p>
       `,
       processDetails: `
@@ -337,7 +496,7 @@ export const emailTemplates = {
         },
         {
           text: "Respond to Query",
-          url: `${process.env.FRONTEND_URL}/queries/respond/${query.id}`,
+          url: `${env.FRONTEND_URL}/queries/respond/${query.id}`,
           color: "#17a2b8",
         },
       ],
@@ -350,7 +509,7 @@ export const emailTemplates = {
     process,
     recommendation,
     requesterUser,
-    recommenderUser
+    recommenderUser,
   ) => {
     return {
       title: "Recommendation Requested",
@@ -368,12 +527,12 @@ export const emailTemplates = {
       actions: [
         {
           text: "View Recommendation",
-          url: `${process.env.FRONTEND_URL}/recommendations/${recommendation.id}`,
+          url: `${env.FRONTEND_URL}/recommendations/${recommendation.id}`,
           color: "#007bff",
         },
         {
           text: "Provide Recommendation",
-          url: `${process.env.FRONTEND_URL}/recommendations/respond/${recommendation.id}`,
+          url: `${env.FRONTEND_URL}/recommendations/respond/${recommendation.id}`,
           color: "#28a745",
         },
       ],
@@ -383,7 +542,11 @@ export const emailTemplates = {
 
   // Document Signed Email
   documentSigned: async (process, document, signedByUser, documentSigners) => {
-    const documentUrl = generatePublicDocumentUrl(document.id, signedByUser.id);
+    const documentUrl = generatePublicDocumentUrl(
+      document.id,
+      signedByUser.id,
+      process.id,
+    );
 
     return {
       title: "Document Signed",
@@ -433,7 +596,7 @@ export const emailTemplates = {
         },
         {
           text: "Download Documents",
-          url: `${process.env.FRONTEND_URL}/processes/${process.id}/export`,
+          url: `${env.FRONTEND_URL}/processes/${process.id}/export`,
           color: "#28a745",
         },
       ],
@@ -471,26 +634,47 @@ export const sendProcessNotification = async (eventType, data) => {
       throw new Error(`No template found for event type: ${eventType}`);
     }
 
-    // Get template data
     const templateData = await template(...data.params);
-
-    // Get all recipients
     const recipients = await getRecipientsForEvent(eventType, data);
 
-    console.log("recipients", recipients);
-
-    // Send emails to all recipients
     const emailPromises = recipients.map(async (recipient) => {
       if (recipient.email) {
+        // Generate a personalized one-time token for each recipient
+        let personalizedTemplate = { ...templateData };
+
+        // Replace URLs with personalized ones
+        personalizedTemplate.actions = personalizedTemplate.actions?.map(
+          (action) => {
+            if (action.url.includes("/auth/auto-login")) {
+              // Extract original parameters and generate new token
+              const urlObj = new URL(action.url);
+              const token = urlObj.searchParams.get("token");
+              if (token) {
+                try {
+                  const decoded = jwt.verify(token, env.SECRET_ACCESS_KEY);
+                  const newToken = generateAutoLoginToken(
+                    recipient.id,
+                    decoded.resourceType,
+                    decoded.resourceId,
+                  );
+                  action.url = `${env.FRONTEND_URL}/auth/auto-login?token=${newToken}&redirect=${urlObj.searchParams.get("redirect")}`;
+                } catch (error) {
+                  console.error("Error regenerating token:", error);
+                }
+              }
+            }
+            return action;
+          },
+        );
+
         return sendEmail(recipient.email, templateData.title, {
-          ...templateData,
+          ...personalizedTemplate,
           greeting: `Hello ${recipient.name || recipient.username},`,
         });
       }
     });
 
     await Promise.all(emailPromises);
-    console.log("successfully sent notification");
     return { success: true, recipients: recipients.length };
   } catch (error) {
     console.error(`Error sending ${eventType} notification:`, error);
@@ -502,55 +686,80 @@ export const sendProcessNotification = async (eventType, data) => {
 const getRecipientsForEvent = async (eventType, data) => {
   console.log("event type", eventType);
   console.log("data", data);
+
   const recipients = new Set();
 
+  // Extract params safely
+  const params = data?.params || [];
+
   switch (eventType) {
-    case "stepAssigned":
-      if (data.assignedUser) {
-        recipients.add(data.assignedUser);
+    case "stepAssigned": {
+      // params: [process, stepInstance, documents, assignedUser]
+      const [, , , assignedUser] = params;
+
+      if (assignedUser) {
+        recipients.add(assignedUser);
       }
       break;
+    }
 
-    case "stepCompleted":
-      // Send to next assignee and process initiator
-      if (data.nextAssignee) {
-        recipients.add(data.nextAssignee);
+    case "stepCompleted": {
+      // params: [process, stepInstance, completedByUser, nextAssignee]
+      const [process, , , nextAssignee] = params;
+
+      if (nextAssignee) {
+        recipients.add(nextAssignee);
       }
-      if (data.process?.initiator) {
+
+      if (process?.initiatorId) {
         const initiator = await prisma.user.findUnique({
-          where: { id: data.process.initiatorId },
+          where: { id: process.initiatorId },
           select: { id: true, email: true, username: true, name: true },
         });
         if (initiator) recipients.add(initiator);
       }
       break;
+    }
 
-    case "queryRaised":
-      if (data.assignedToUser) {
-        recipients.add(data.assignedToUser);
+    case "queryRaised": {
+      // params: [process, query, raisedByUser, assignedToUser]
+      const [process, , , assignedToUser] = params;
+
+      if (assignedToUser) {
+        recipients.add(assignedToUser);
       }
-      if (data.process?.initiator) {
+
+      if (process?.initiatorId) {
         const initiator = await prisma.user.findUnique({
-          where: { id: data.process.initiatorId },
+          where: { id: process.initiatorId },
           select: { id: true, email: true, username: true, name: true },
         });
         if (initiator) recipients.add(initiator);
       }
       break;
+    }
 
-    case "recommendationRequested":
-      if (data.recommenderUser) {
-        recipients.add(data.recommenderUser);
+    case "recommendationRequested": {
+      // params: [process, recommendation, requesterUser, recommenderUser]
+      const [, , , recommenderUser] = params;
+
+      if (recommenderUser) {
+        recipients.add(recommenderUser);
       }
       break;
+    }
 
-    case "processCompleted":
-      if (data.initiator) {
-        recipients.add(data.initiator);
+    case "processCompleted": {
+      // params: [process, initiator]
+      const [process, initiator] = params;
+
+      if (initiator) {
+        recipients.add(initiator);
       }
-      // Also notify all participants
+
+      // Notify all unique participants
       const participants = await prisma.processStepInstance.findMany({
-        where: { processId: data.process.id },
+        where: { processId: process.id },
         distinct: ["assignedTo"],
         include: {
           assignedToUser: {
@@ -560,17 +769,24 @@ const getRecipientsForEvent = async (eventType, data) => {
       });
 
       participants.forEach((p) => {
-        if (p.assignedToUser && p.assignedToUser.id !== data.initiator.id) {
+        if (
+          p.assignedToUser &&
+          (!initiator || p.assignedToUser.id !== initiator.id)
+        ) {
           recipients.add(p.assignedToUser);
         }
       });
       break;
+    }
 
     default:
       break;
   }
 
-  return Array.from(recipients);
+  const result = Array.from(recipients);
+  console.log("resolved recipients", result);
+
+  return result;
 };
 
 export default {

@@ -1,57 +1,128 @@
 import axios from 'axios';
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-export function getContentTypeFromExtension(extension) {
-  const mimeTypes = {
-    txt: 'text/plain',
-    pdf: 'application/pdf',
-    doc: 'application/msword',
-    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    xls: 'application/vnd.ms-excel',
-    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    ppt: 'application/vnd.ms-powerpoint',
-    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    gif: 'image/gif',
-    bmp: 'image/bmp',
-    svg: 'image/svg+xml',
-    mp3: 'audio/mpeg',
-    wav: 'audio/wav',
-    mp4: 'video/mp4',
-    avi: 'video/x-msvideo',
-    mkv: 'video/x-matroska',
-    zip: 'application/zip',
-    rar: 'application/x-rar-compressed',
-    tar: 'application/x-tar',
-    // Add more mappings for other file types as needed
-  };
 
-  return mimeTypes[extension] || 'application/octet-stream'; // Default to generic binary if extension not found
-}
+const EDITABLE_EXTENSIONS = new Set([
+  "doc",
+  "docx",
+  "dot",
+  "dotx",
+  "docm",
+  "dotm",
+  "xls",
+  "xlsx",
+  "xlsm",
+  "xlt",
+  "xltx",
+  "xltm",
+  "ppt",
+  "pptx",
+  "pptm",
+  "pot",
+  "potx",
+  "potm",
+  "odt",
+  "ods",
+  "odp",
+  "ott",
+  "ots",
+  "otp",
+  "gdoc",
+  "gsheet",
+  "gslides",
+  "rtf",
+  "txt",
+  "csv",
+  "xml",
+  "html",
+  "htm",
+  "pages",
+  "numbers",
+  "key",
+  "wpd",
+  "wps",
+  "js",
+  "ts",
+  "py",
+  "java",
+  "cpp",
+  "c",
+  "h",
+  "php",
+  "rb",
+  "go",
+  "rs",
+  "swift",
+  "kt",
+  "json",
+  "yml",
+  "yaml",
+  "toml",
+  "ini",
+  "sql",
+  "md",
+  "tex",
+  "latex",
+]);
+
+
+const isEditableFile = (fileName) => {
+  if (!fileName) return false;
+  const extension = fileName.split(".").pop().toLowerCase();
+  return EDITABLE_EXTENSIONS.has(extension);
+};
+
+export const getContentTypeFromExtension = (extension) => {
+  const mimeTypes = {
+    txt: "text/plain",
+    pdf: "application/pdf",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    bmp: "image/bmp",
+    svg: "image/svg+xml",
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    mp4: "video/mp4",
+    avi: "video/x-msvideo",
+    mkv: "video/x-matroska",
+    zip: "application/zip",
+    rar: "application/x-rar-compressed",
+    tar: "application/x-tar",
+  };
+  return mimeTypes[extension] || "application/octet-stream";
+};
 
 export const getFileSize = async (fileName, path, token) => {
-  // console.log('getfilesize is called with', fileName);
-  let response;
-  try {
-    const url = backendUrl + '/getFileData';
-    // console.log('url is', url);
+  // Don't use this for editable files
+  if (isEditableFile(fileName)) {
+    return null;
+  }
 
-    response = await axios({
-      method: 'get',
+  try {
+    const url = backendUrl + "/getFileData";
+    const response = await axios({
+      method: "get",
       url: url,
       headers: {
         Range: `bytes=0-0`,
-        'X-File-name': encodeURIComponent(fileName),
-        'X-File-path': encodeURIComponent(path),
-        'x-authorization': `Bearer ${token}`,
-        'Content-Type': getContentTypeFromExtension(fileName.split('.').pop()),
+        "X-File-name": encodeURIComponent(fileName),
+        "X-File-path": encodeURIComponent(path),
+        "x-authorization": `Bearer ${token}`,
       },
     });
-    // console.log(response);
     return response.data.fileSize;
-  } catch (error) {}
+  } catch (error) {
+    console.error("Error getting file size:", error);
+    return null;
+  }
 };
 // filename must be with its extension
 // export const download = async (fileName,path,view) => {
@@ -150,161 +221,91 @@ export const getFileSize = async (fileName, path, token) => {
 // };
 
 export const get_file_data = async (fileName, path, view) => {
-  let chunks = [];
-  const token = sessionStorage.getItem('accessToken');
-  let start = 0;
-  let chunkSize = 100 * 1024 * 1024;
-  let end = chunkSize - 1;
-  const fileExtension = fileName.split('.').pop();
-  let fileSize = await getFileSize(fileName, path, token);
+  const token = sessionStorage.getItem("accessToken");
 
-  if (fileSize === undefined) {
-    console.log('File does not exist');
-    // alert("File does not exist, please check file name");
-    return null; // Return null if the file doesn't exist
+  // For editable files, use direct download
+  if (isEditableFile(fileName)) {
+    return await download(fileName, path, view);
   }
 
-  end = Math.min(end, fileSize - 1);
-
+  // Only for non-editable files, use chunked download
   try {
-    while (start < fileSize) {
-      const url = backendUrl + '/getFileData';
-      const config = {
-        headers: {
-          Range: `bytes=${start}-${end}`,
-          'x-file-name': encodeURIComponent(fileName),
-          'x-file-path': encodeURIComponent(path),
-          'content-type': getContentTypeFromExtension(fileExtension),
-          'x-authorization': `Bearer ${token}`,
-          'access-control-expose-headers': 'Content-Range',
-        },
-        responseType: 'arraybuffer',
-      };
-
-      const response = await axios({
-        method: 'get',
-        url: url,
-        headers: {
-          Range: `bytes=${start}-${end}`,
-          'x-file-name': encodeURIComponent(fileName),
-          'x-file-path': encodeURIComponent(path),
-          'content-type': getContentTypeFromExtension(fileExtension),
-          'x-authorization': `Bearer ${token}`,
-          'access-control-expose-headers': 'Content-Range',
-        },
-        responseType: 'arraybuffer',
-      });
-
-      // Push the chunk to the array
-      let check = new Blob([response.data]);
-      chunks.push(new Blob([response.data]));
-
-      // Update the byte range for the next chunk
-      start = end + 1;
-      end = Math.min(start + chunkSize - 1, fileSize - 1);
-    }
-
-    // Create a single Blob from the chunks
-    const combinedBlob = new Blob(chunks, {
-      type: getContentTypeFromExtension(fileExtension),
-    });
-
-    // Create a URL for the Blob
-    const blobUrl = URL.createObjectURL(combinedBlob, {
-      type: getContentTypeFromExtension(fileExtension),
-    });
-
-    if (view) {
-      // Return the document data and file type
-      return {
-        data: blobUrl,
-        fileType: fileExtension,
-      };
-    }
-
-    // Create a new anchor element
-    const anchor = document.createElement('a');
-    anchor.href = blobUrl;
-    anchor.download = `${fileName}`;
-
-    // Attach the anchor element to the DOM temporarily
-    document.body.appendChild(anchor);
-
-    // Programmatically trigger a click event on the anchor element
-    anchor.click();
-
-    // Clean up: revoke the URL and remove the dynamically created anchor element
-    URL.revokeObjectURL(blobUrl);
-    document.body.removeChild(anchor);
-
-    chunks = [];
-    start = 0;
-  } catch (error) {
-    alert(`Download failed for ${fileName}`);
-    console.error('Error downloading file:', error);
-  }
-};
-
-export const download = async (fileName, path, view) => {
-  const token = sessionStorage.getItem('accessToken');
-
-  try {
-    const url = backendUrl + '/download';
+    const url = backendUrl + "/download";
     const config = {
       headers: {
-        'x-file-name': encodeURIComponent(fileName),
-        'x-file-path': encodeURIComponent(path),
-        'x-authorization': `Bearer ${token}`,
+        "x-file-name": encodeURIComponent(fileName),
+        "x-file-path": encodeURIComponent(path),
+        "x-authorization": `Bearer ${token}`,
       },
     };
 
     const response = await axios.post(url, null, config);
 
     if (view) {
-      // Return the document data and file type as originally implemented
       return {
-        data: response.data.data,
+        data: response.data.url,
         fileType: response.data.fileType,
       };
     } else {
-      await get_file_data(fileName, path, false);
-      // const file_url = response.data.data;
-
-      // const response2 = await axios.get(backendUrl + '/getFileData');
-
-      // console.log("response2", response2)
-
-      // // If view is false, trigger the download
-      // const downloadUrl = response2.data; // Assuming `data` contains the download URL
-
-      // if (!downloadUrl) {
-      //   throw new Error('No download URL provided in the response.');
-      // }
-      // const fileExtension = fileName.split('.').pop();
-
-      // const blob = new Blob([downloadUrl], {
-      //   type: getContentTypeFromExtension(fileExtension),
-      // }); // or the correct MIME type
-      // const blobUrl = URL.createObjectURL(blob);
-
-      // const anchor = document.createElement('a');
-      // anchor.href = blobUrl;
-      // anchor.download = fileName || 'downloaded_file.pdf'; // Suggested filename
-      // document.body.appendChild(anchor);
-      // anchor.click();
-      // document.body.removeChild(anchor);
-      // URL.revokeObjectURL(blobUrl); // Clean up the object URL after download
-
-      // const anchor = document.createElement('a');
-      // anchor.href = downloadUrl; // The file URL
-      // anchor.download = true; // Suggested filename for download
-      // document.body.appendChild(anchor);
-      // anchor.click();
-      // document.body.removeChild(anchor);
+      const a = document.createElement("a");
+      a.href = response.data.url;
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return null;
     }
   } catch (error) {
-    alert(`Download failed for ${fileName}`);
-    console.error('Error:', error);
+    console.error("Error downloading file:", error);
+    throw error;
+  }
+};
+
+// services/fileService.js - Keep everything exactly as it was, just add:
+export const download = async (fileName, path, view) => {
+  const token = sessionStorage.getItem("accessToken");
+
+  try {
+    const url = backendUrl + "/download";
+    const config = {
+      headers: {
+        "x-file-name": encodeURIComponent(fileName),
+        "x-file-path": encodeURIComponent(path),
+        "x-authorization": `Bearer ${token}`,
+      },
+    };
+
+    const response = await axios.post(url, null, config);
+    
+    // If it's an editable file, just return the URL and let the browser handle it
+    if (isEditableFile(fileName)) {
+      if (view) {
+        window.open(response.data.data, '_blank');
+        return null;
+      } else {
+        window.location.href = response.data.data;
+        return null;
+      }
+    } else {
+      // For non-editable files, use your existing logic
+      if (view) {
+        return {
+          data: response.data.data,
+          fileType: response.data.fileType,
+        };
+      } else {
+        const a = document.createElement("a");
+        a.href = response.data.data;
+        a.target = "_blank";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return null;
+      }
+    }
+  } catch (error) {
+    console.error("Error downloading file:", error);
+    throw error;
   }
 };
 
