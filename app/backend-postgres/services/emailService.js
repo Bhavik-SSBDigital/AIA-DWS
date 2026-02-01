@@ -11,14 +11,11 @@ const prisma = new PrismaClient();
 
 // Configure email transporter
 const transporter = nodemailer.createTransport({
-  host: env.SMTP_HOST,
-  port: parseInt(env.SMTP_PORT || "25"),
-  secure: env.SMTP_SECURE === "true", // true only for 465
-  // ❌ NO auth block (important)
-  connectionTimeout: 10000,
-  socketTimeout: 15000,
-  tls: {
-    rejectUnauthorized: false, // needed for many internal SMTP servers
+  host: env.EMAIL_HOST || "smtp.gmail.com",
+  port: env.EMAIL_PORT || 587,
+  auth: {
+    user: env.EMAIL_USER,
+    pass: env.EMAIL_PASS,
   },
 });
 
@@ -252,7 +249,7 @@ export const sendEmail = async (to, subject, templateData) => {
     const html = generateEmailTemplate(templateData);
 
     const mailOptions = {
-      from: `"${env.EMAIL_FROM_NAME || "Process Management System"}" <${env.SMTP_FROM_EMAIL}>`,
+      from: `"Process Management System" <${env.EMAIL_FROM}>`,
       to,
       subject,
       html,
