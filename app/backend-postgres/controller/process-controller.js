@@ -4409,11 +4409,19 @@ export const complete_process_step = async (req, res) => {
               status: "IN_PROGRESS",
             },
             select: {
-              assignedTo: true,
+              assignedTo: true, // This is the user ID
             },
           });
 
-          return nextInstance?.assignedToUser || null;
+          if (!nextInstance || !nextInstance.assignedTo) return null;
+
+          // Fetch user details using the assignedTo ID
+          const user = await prisma.user.findUnique({
+            where: { id: nextInstance.assignedTo },
+            select: { id: true, username: true, name: true, email: true },
+          });
+
+          return user;
         };
 
         const nextAssignee = await getNextAssignee(stepInstance);

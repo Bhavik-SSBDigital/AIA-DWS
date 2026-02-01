@@ -28,7 +28,7 @@ const envVariables = process.env;
 async function executePythonScript(
   pythonEnvPath,
   pythonScriptPath,
-  absDocumentPath
+  absDocumentPath,
 ) {
   const command = `${pythonEnvPath} ${pythonScriptPath} "${absDocumentPath}"`;
   try {
@@ -57,7 +57,7 @@ function formatDate(timestamp) {
 // Placeholder for missing helpers (to be implemented as needed)
 async function get_sign_coordinates_for_specific_step_in_process(
   documentId,
-  stepId
+  stepId,
 ) {
   const coordinates = await prisma.signCoordinate.findMany({
     where: { processDocument: { documentId }, stepId },
@@ -101,7 +101,7 @@ export const sign_document = async (req, res, next) => {
     const imagePath = path.join(
       __dirname,
       envVariables.SIGNATURE_FOLDER_PATH,
-      eSignFileName
+      eSignFileName,
     );
     try {
       await fs.access(imagePath);
@@ -117,7 +117,7 @@ export const sign_document = async (req, res, next) => {
       const outputFilePath = path.join(
         __dirname,
         envVariables.SIGNATURE_FOLDER_PATH,
-        `${userData.username.toLowerCase()}.jpeg`
+        `${userData.username.toLowerCase()}.jpeg`,
       );
       await sharp(inputPath).jpeg().toFile(outputFilePath);
       return outputFilePath;
@@ -160,7 +160,7 @@ export const sign_document = async (req, res, next) => {
 
     const documentPath = document.path;
     const existingPdfBytes = await fs.readFile(
-      path.join(__dirname, "../../../../", "storage", documentPath)
+      path.join(__dirname, "../../../../", "storage", documentPath),
     );
     const pdfDoc = await PDFDocument.load(existingPdfBytes, {
       ignoreEncryption: true,
@@ -172,13 +172,13 @@ export const sign_document = async (req, res, next) => {
 
     const coordinates = await get_sign_coordinates_for_specific_step_in_process(
       documentId,
-      currentStep?.id
+      currentStep?.id,
     );
     const remarks = req.body.remarks || "N/A";
 
     const pythonScriptPath = path.join(
       __dirname,
-      "../../support/getFileSpace.py"
+      "../../support/getFileSpace.py",
     );
     const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
 
@@ -201,7 +201,7 @@ export const sign_document = async (req, res, next) => {
           documentId,
           userData,
           path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName),
-          p12password
+          p12password,
         );
       } else {
         console.log("dir name", __dirname);
@@ -215,7 +215,7 @@ export const sign_document = async (req, res, next) => {
           helveticaFont,
           path.join(__dirname, "../../../../", "storage", documentPath),
           documentId,
-          userData
+          userData,
           // path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName),
           // p12password
         );
@@ -266,7 +266,7 @@ export const sign_document = async (req, res, next) => {
           remarks,
           helveticaFont,
           pythonEnvPath,
-          pythonScriptPath
+          pythonScriptPath,
         );
 
       await prisma.signCoordinate.create({
@@ -333,7 +333,7 @@ export const sign_documents = async (req, res, next) => {
     const imagePath = path.join(
       __dirname,
       envVariables.SIGNATURE_FOLDER_PATH,
-      eSignFileName
+      eSignFileName,
     );
     try {
       await fs.access(imagePath);
@@ -350,7 +350,7 @@ export const sign_documents = async (req, res, next) => {
       const outputFilePath = path.join(
         __dirname,
         envVariables.SIGNATURE_FOLDER_PATH,
-        `${userData.username.toLowerCase()}.jpeg`
+        `${userData.username.toLowerCase()}.jpeg`,
       );
       await sharp(inputPath).jpeg().toFile(outputFilePath);
       return outputFilePath;
@@ -371,16 +371,30 @@ export const sign_documents = async (req, res, next) => {
     // Extract array of documents from request body
     const { documents, processId, passphrase, p12password } = req.body;
 
-    if (!Array.isArray(documents) || documents.length === 0) {
-      return res.status(400).json({ message: "No documents provided" });
-    }
-
     const process = await prisma.processInstance.findUnique({
       where: { id: processId },
     });
 
     if (!process) {
       return res.status(404).json({ message: "Process not found" });
+    }
+
+    const results = [];
+    const errors = [];
+
+    if (!Array.isArray(documents) || documents.length === 0) {
+      const processResult = await is_process_forwardable(process, userData.id);
+
+      // Prepare response
+      const response = {
+        message: "Batch signing completed",
+        signedCount: results.length,
+        failedCount: errors.length,
+        results: results,
+        isForwardable: processResult.isForwardable,
+        isRevertable: processResult.isRevertable,
+      };
+      return res.status(200).json(response);
     }
 
     const currentStep = await prisma.workflowStep.findUnique({
@@ -390,12 +404,9 @@ export const sign_documents = async (req, res, next) => {
     // Prepare Python paths (used in default signing)
     const pythonScriptPath = path.join(
       __dirname,
-      "../../support/getFileSpace.py"
+      "../../support/getFileSpace.py",
     );
     const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
-
-    const results = [];
-    const errors = [];
 
     // Process each document
     for (const doc of documents) {
@@ -433,7 +444,7 @@ export const sign_documents = async (req, res, next) => {
         // Read the PDF document
         const documentPath = document.path;
         const existingPdfBytes = await fs.readFile(
-          path.join(__dirname, "../../../../", "storage", documentPath)
+          path.join(__dirname, "../../../../", "storage", documentPath),
         );
         const pdfDoc = await PDFDocument.load(existingPdfBytes, {
           ignoreEncryption: true,
@@ -447,7 +458,7 @@ export const sign_documents = async (req, res, next) => {
         const coordinates =
           await get_sign_coordinates_for_specific_step_in_process(
             documentId,
-            currentStep?.id
+            currentStep?.id,
           );
 
         if (coordinates.length > 0) {
@@ -464,7 +475,7 @@ export const sign_documents = async (req, res, next) => {
             documentId,
             userData,
             dscPath,
-            p12password
+            p12password,
           );
         } else {
           // Sign at default position (end of document)
@@ -481,7 +492,7 @@ export const sign_documents = async (req, res, next) => {
               pythonEnvPath,
               pythonScriptPath,
               dscPath,
-              p12password
+              p12password,
             );
 
           // Save the coordinates for future reference
@@ -612,7 +623,7 @@ export const revoke_sign = async (req, res, next) => {
       __dirname,
       "../../../../",
       "storage",
-      document.path
+      document.path,
     );
     const existingPdfBytes = await fs.readFile(documentPath);
     const pdfDoc = await PDFDocument.load(existingPdfBytes, {
@@ -621,12 +632,12 @@ export const revoke_sign = async (req, res, next) => {
 
     const coordinates = await get_sign_coordinates_for_specific_step_in_process(
       documentId,
-      process.currentStepId
+      process.currentStepId,
     );
     await clear_signature_at_coordinates(
       pdfDoc,
       coordinates,
-      processDocument.id
+      processDocument.id,
     );
 
     const updatedPdfBytes = await pdfDoc.save();
@@ -685,13 +696,13 @@ export const reject_document = async (req, res, next) => {
       __dirname,
       "../../../../",
       "storage",
-      documentPath
+      documentPath,
     );
     const existingPdfBytes = await fs.readFile(absDocumentPath);
 
     const pythonScriptPath = path.join(
       __dirname,
-      "../../support/getFileSpace.py"
+      "../../support/getFileSpace.py",
     );
     const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
 
@@ -700,7 +711,7 @@ export const reject_document = async (req, res, next) => {
       scriptOutput = await executePythonScript(
         pythonEnvPath,
         pythonScriptPath,
-        absDocumentPath
+        absDocumentPath,
       );
     } catch (error) {
       console.error("Error calculating available space:", error);
@@ -741,7 +752,7 @@ export const reject_document = async (req, res, next) => {
       for (let i = 1; i < words.length; i++) {
         const width = helveticaFont.widthOfTextAtSize(
           currentLine + " " + words[i],
-          fontSize
+          fontSize,
         );
         if (width < maxLineWidth) {
           currentLine += " " + words[i];
@@ -846,7 +857,7 @@ export const revoke_rejection = async (req, res, next) => {
 
     const documentPath = document.path;
     const existingPdfBytes = await fs.readFile(
-      path.join(__dirname, "../../../../", "storage", documentPath)
+      path.join(__dirname, "../../../../", "storage", documentPath),
     );
     const pdfDoc = await PDFDocument.load(existingPdfBytes, {
       ignoreEncryption: true,
@@ -871,7 +882,7 @@ export const revoke_rejection = async (req, res, next) => {
     const updatedPdfBytes = await pdfDoc.save();
     await fs.writeFile(
       path.join(__dirname, "../../../../", "storage", documentPath),
-      updatedPdfBytes
+      updatedPdfBytes,
     );
 
     await prisma.document.update({
@@ -901,7 +912,7 @@ export const revoke_rejection = async (req, res, next) => {
 async function clear_signature_at_coordinates(
   pdfDoc,
   coordinates,
-  processDocumentId
+  processDocumentId,
 ) {
   for (const coord of coordinates) {
     const page = pdfDoc.getPage(coord.page - 1);
@@ -933,7 +944,7 @@ async function print_signature_after_content_on_the_last_page(
   pythonEnvPath,
   pythonScriptPath,
   p12Path,
-  p12password
+  p12password,
 ) {
   const user = await prisma.user.findUnique({
     where: { username: username },
@@ -944,12 +955,12 @@ async function print_signature_after_content_on_the_last_page(
     __dirname,
     "../../../../",
     "storage",
-    documentPath
+    documentPath,
   );
   const lastContentCoordinates = await executePythonScript(
     pythonEnvPath,
     pythonScriptPath,
-    absDocumentPath
+    absDocumentPath,
   );
 
   const startingY = lastContentCoordinates.last_y;
@@ -1098,7 +1109,7 @@ async function print_signature_at_coordinates(
   documentId,
   userData,
   p12Path,
-  p12password
+  p12password,
 ) {
   const user = await prisma.user.findUnique({
     where: { username: username },

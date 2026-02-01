@@ -11,14 +11,12 @@ const prisma = new PrismaClient();
 
 // Configure email transporter
 const transporter = nodemailer.createTransport({
-  host: env.SMTP_HOST,
-  port: parseInt(env.SMTP_PORT || "25"),
-  secure: env.SMTP_SECURE === "true", // true only for 465
-  // ❌ NO auth block (important)
-  connectionTimeout: 10000,
-  socketTimeout: 15000,
-  tls: {
-    rejectUnauthorized: false, // needed for many internal SMTP servers
+  host: env.EMAIL_HOST || "smtp.gmail.com",
+  port: env.EMAIL_PORT || 587,
+  // secure: env.EMAIL_SECURE === "true",
+  auth: {
+    user: env.EMAIL_USER,
+    pass: env.EMAIL_PASS,
   },
 });
 
@@ -229,7 +227,7 @@ const generateEmailTemplate = (data) => {
           ${quickAccessLinks ? `<div class="section links-section">${quickAccessLinks}</div>` : ""}
           
           <div class="highlight">
-            <p><strong>Note:</strong> Clicking on the links above will automatically log you into the system and take you directly to the process.</p>
+            <p><strong>Note:</strong> Clicking on the links above will automatically log you into the system and take you directly to the process or document.</p>
           </div>
           
           ${closingMessage}
@@ -252,7 +250,7 @@ export const sendEmail = async (to, subject, templateData) => {
     const html = generateEmailTemplate(templateData);
 
     const mailOptions = {
-      from: `"${env.EMAIL_FROM_NAME || "Process Management System"}" <${env.SMTP_FROM_EMAIL}>`,
+      from: `"Process Management System" <${env.EMAIL_FROM}>`,
       to,
       subject,
       html,
@@ -268,143 +266,89 @@ export const sendEmail = async (to, subject, templateData) => {
   }
 };
 
-// In your stepAssigned function, add this query to get lastApprovedBy
-const getLastApprovedBy = async (
-  processId,
-  currentStepInstanceId,
-  initiatorId,
-) => {
-  try {
-    // 1️⃣ First: check if CURRENT step itself is approved
-    const currentApprovedStep = currentStepInstanceId
-      ? await prisma.processStepInstance.findFirst({
-          where: {
-            id: currentStepInstanceId,
-            processId,
-            status: "APPROVED",
-            assignedTo: { not: initiatorId },
-          },
-          include: {
-            workflowStep: {
-              select: { stepType: true },
-            },
-            pickedBy: {
-              select: { name: true, username: true },
-            },
-          },
-        })
-      : null;
-
-    if (
-      currentApprovedStep &&
-      currentApprovedStep.workflowStep?.stepType === "APPROVAL"
-    ) {
-      return (
-        currentApprovedStep.pickedBy?.name ||
-        currentApprovedStep.pickedBy?.username ||
-        "None"
-      );
-    }
-
-    // 2️⃣ Fallback: find PREVIOUS approved step
-    const lastApprovedStep = await prisma.processStepInstance.findFirst({
-      where: {
-        processId,
-        status: "APPROVED",
-        id: { not: currentStepInstanceId },
-        assignedTo: { not: initiatorId },
-      },
-      include: {
-        workflowStep: {
-          select: { stepType: true },
-        },
-        pickedBy: {
-          select: { name: true, username: true },
-        },
-      },
-      orderBy: {
-        decisionAt: "desc",
-      },
-    });
-
-    if (
-      !lastApprovedStep ||
-      lastApprovedStep.workflowStep?.stepType !== "APPROVAL"
-    ) {
-      return "None";
-    }
-
-    if (lastApprovedStep.pickedBy) {
-      return (
-        lastApprovedStep.pickedBy.name ||
-        lastApprovedStep.pickedBy.username ||
-        "None"
-      );
-    }
-
-    // 3️⃣ Absolute fallback: assignedTo user
-    if (lastApprovedStep.assignedTo) {
-      const user = await prisma.user.findUnique({
-        where: { id: lastApprovedStep.assignedTo },
-        select: { name: true, username: true },
-      });
-
-      return user?.name || user?.username || "None";
-    }
-
-    return "None";
-  } catch (error) {
-    console.error("Error fetching last approved by:", error);
-    return "None";
-  }
-};
-
 // Email templates for different events
 export const emailTemplates = {
   // Step Assignment Email
   // In emailService.js, update stepAssigned template generation
   stepAssigned: async (process, stepInstance, documents, assignedUser) => {
-    console.log("assigned user", assignedUser);
-    console.log("process", process);
-
-    const processUrl = generateAutoLoginProcessUrl(
-      process.id,
-      assignedUser?.id || process.initiator.id,
-    );
+    const processUrl = generateAutoLoginProcessUrl(process.id, assignedUser.id);
 
     // Generate document links for each document - FIXED
+    const documentLinks = documents.map((doc) => {
+      const docId = doc.documentId || doc.id;
+      const docName = doc.document?.name || doc.name || "Document";
+
+      // Use the new function with processId parameter
+      return {
+        name: docName,
+        url: generateAutoLoginDocumentUrl(docId, assignedUser.id, process.id),
+      };
+    });
 
     // Get last approved user
     const lastStep = process.steps?.find(
       (step) => step.status === "COMPLETED" && step.actionType === "APPROVAL",
     );
 
-    const lastApprovedBy = await getLastApprovedBy(
-      process.id,
-      stepInstance.id,
-      process.initiatorId,
-    );
+    const lastApprovedBy =
+      lastStep?.assignedToUser?.name ||
+      lastStep?.completedByUser?.name ||
+      "None";
 
     return {
       title: `Request for Workflow Approval – Process ${process.name}`,
-      greeting: `Dear Sir,`,
+      greeting: `Dear ${assignedUser.name || assignedUser.username} Sir,`,
       message: `
-      <p>I would like to request your recommendation and review for the following process, which is currently in progress.</p>
+      <p>I hope this email finds you well.</p>
+      <p>I would like to request your recommendation and review for the following process, which is currently in progress. The complete details are provided below for your reference.</p>
     `,
       processDetails: `
       <p><strong>Process Details:</strong></p>
       <ul style="list-style-type: none; padding-left: 0; margin: 10px 0;">
         <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
           <span style="position: absolute; left: 0;">•</span>
+          <strong>Process ID:</strong> ${process.id}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
           <strong>Process Name:</strong> ${process.name}
         </li>
         <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
           <span style="position: absolute; left: 0;">•</span>
-          <strong>Initiator Name:</strong> ${process.initiator.username || "Unknown"}
+          <strong>Process Version:</strong> ${process.issueNo || "N/A"}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Description:</strong> ${process.description || "N/A"}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Initiator Name:</strong> ${process.initiatorName || "Unknown"}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Current Status:</strong> ${process.status}
         </li>
         <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
           <span style="position: absolute; left: 0;">•</span>
           <strong>Last Approved By:</strong> ${lastApprovedBy}
+        </li>
+      </ul>
+    `,
+      timelineDetails: `
+      <p><strong>Timeline Information:</strong></p>
+      <ul style="list-style-type: none; padding-left: 0; margin: 10px 0;">
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Created At:</strong> ${new Date(process.createdAt).toLocaleDateString("en-GB")}, ${new Date(process.createdAt).toLocaleTimeString()}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Last Updated At:</strong> ${process.updatedAt ? `${new Date(process.updatedAt).toLocaleDateString("en-GB")}, ${new Date(process.updatedAt).toLocaleTimeString()}` : "N/A"}
+        </li>
+        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+          <span style="position: absolute; left: 0;">•</span>
+          <strong>Completed At:</strong> ${process.completedAt ? `${new Date(process.completedAt).toLocaleDateString("en-GB")}, ${new Date(process.completedAt).toLocaleTimeString()}` : "N/A"}
         </li>
       </ul>
     `,
@@ -417,14 +361,35 @@ export const emailTemplates = {
             📋 View Process
           </a>
         </div>
+        ${
+          documentLinks.length > 0
+            ? `
+          <p style="margin: 15px 0 10px 0;"><strong>Individual Documents:</strong></p>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+            ${documentLinks
+              .map(
+                (doc) => `
+              <a href="${doc.url}" 
+                 style="display: inline-block; background-color: #28a745; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; margin: 3px; font-size: 14px;">
+                📄 ${doc.name.length > 30 ? doc.name.substring(0, 30) + "..." : doc.name}
+              </a>
+            `,
+              )
+              .join("")}
+          </div>
+        `
+            : ""
+        }
       </div>
     `,
       closingMessage: `
-      <p style="margin-top: 20px;">You may use the above links to directly access the process and review the associated documents.  </p>
+      <p style="margin-top: 20px;">You may use the above links to directly access the process and review the associated documents. Kindly let me know if any additional information or clarification is required from my end.</p>
+      <p>I would appreciate your guidance and recommendation to proceed further.</p>
+      <p>Thank you for your time and support.</p>
       <p style="margin-top: 30px; font-style: italic;">Warm regards,<br/>
-      <strong>${process.initiator.username || "Initiator"}</strong></p>
+      <strong>${process.initiatorName || "Initiator"}</strong></p>
     `,
-      text: `Dear Sir,
+      text: `Dear ${assignedUser.name || assignedUser.username} Sir,
 
 I hope this email finds you well.
 
@@ -435,7 +400,7 @@ Process Details:
 • Process Name: ${process.name}
 • Process Version: ${process.issueNo || "N/A"}
 • Description: ${process.description || "N/A"}
-• Initiator Name: ${process.initiator.username || "Unknown"}
+• Initiator Name: ${process.initiatorName || "Unknown"}
 • Current Status: ${process.status}
 • Last Approved By: ${lastApprovedBy}
 
@@ -446,6 +411,7 @@ Timeline Information:
 
 Quick Access Links:
 • View Process: ${processUrl}
+${documentLinks.map((doc) => `• View Document (${doc.name}): ${doc.url}`).join("\n")}
 
 You may use the above links to directly access the process and review the associated documents. Kindly let me know if any additional information or clarification is required from my end.
 
@@ -454,7 +420,7 @@ I would appreciate your guidance and recommendation to proceed further.
 Thank you for your time and support.
 
 Warm regards,
-${process.initiator.username || "Initiator"}`,
+${process.initiatorName || "Initiator"}`,
     };
   },
 
@@ -467,7 +433,9 @@ ${process.initiator.username || "Initiator"}`,
   ) => {
     return {
       title: "Process Step Completed",
-      greeting: `Dear Sir`,
+      greeting: `Hello ${
+        nextAssignee?.name || nextAssignee?.username || "Team"
+      },`,
       message: `
         <p>A step in the process has been completed.</p>
         <p><strong>Process:</strong> ${process.name}</p>
@@ -506,7 +474,7 @@ ${process.initiator.username || "Initiator"}`,
 
     return {
       title: "Query Raised on Process",
-      greeting: `Dear Sir`,
+      greeting: `Hello ${assignedToUser.name || assignedToUser.username},`,
       message: `
         <p>A query has been raised regarding the process.</p>
         <p><strong>Process:</strong> ${process.name}</p>
@@ -545,7 +513,7 @@ ${process.initiator.username || "Initiator"}`,
   ) => {
     return {
       title: "Recommendation Requested",
-      greeting: `Dear Sir`,
+      greeting: `Hello ${recommenderUser.name || recommenderUser.username},`,
       message: `
         <p>You have been requested to provide a recommendation.</p>
         <p><strong>Process:</strong> ${process.name}</p>
@@ -582,7 +550,7 @@ ${process.initiator.username || "Initiator"}`,
 
     return {
       title: "Document Signed",
-      greeting: "Dear Sir,",
+      greeting: "Hello Team,",
       message: `
         <p>A document has been signed in the process.</p>
         <p><strong>Process:</strong> ${process.name}</p>
@@ -608,7 +576,7 @@ ${process.initiator.username || "Initiator"}`,
   processCompleted: async (process, initiator) => {
     return {
       title: "Process Completed Successfully",
-      greeting: `Dear Sir`,
+      greeting: `Hello ${initiator.name || initiator.username},`,
       message: `
         <p>Your process has been completed successfully!</p>
         <p><strong>Process:</strong> ${process.name}</p>
@@ -640,7 +608,7 @@ ${process.initiator.username || "Initiator"}`,
   processReopened: async (process, reopenedByUser, reason) => {
     return {
       title: "Process Reopened",
-      greeting: "Dear Sir,",
+      greeting: "Hello Team,",
       message: `
         <p>The process has been reopened.</p>
         <p><strong>Process:</strong> ${process.name}</p>
@@ -701,7 +669,7 @@ export const sendProcessNotification = async (eventType, data) => {
 
         return sendEmail(recipient.email, templateData.title, {
           ...personalizedTemplate,
-          greeting: `Dear Sir,`,
+          greeting: `Hello ${recipient.name || recipient.username},`,
         });
       }
     });
@@ -790,29 +758,22 @@ const getRecipientsForEvent = async (eventType, data) => {
       }
 
       // Notify all unique participants
-      let participants = await prisma.processStepInstance.findMany({
+      const participants = await prisma.processStepInstance.findMany({
         where: { processId: process.id },
         distinct: ["assignedTo"],
-        select: {
-          assignedTo: true,
+        include: {
+          assignedToUser: {
+            select: { id: true, email: true, username: true, name: true },
+          },
         },
       });
 
-      participants = await Promise.all(
-        participants.map(async (p) => {
-          if (p.assignedTo) {
-            const user = await prisma.user.findUnique({
-              where: { id: p.assignedTo },
-              select: { id: true, email: true, username: true, name: true },
-            });
-            return user;
-          }
-          return null;
-        }),
-      );
       participants.forEach((p) => {
-        if (p.assignedTo && (!initiator || p.assignedTo.id !== initiator.id)) {
-          recipients.add(p.assignedTo);
+        if (
+          p.assignedToUser &&
+          (!initiator || p.assignedToUser.id !== initiator.id)
+        ) {
+          recipients.add(p.assignedToUser);
         }
       });
       break;
