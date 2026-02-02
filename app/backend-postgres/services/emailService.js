@@ -13,13 +13,11 @@ const prisma = new PrismaClient();
 const transporter = nodemailer.createTransport({
   host: env.SMTP_HOST,
   port: parseInt(env.SMTP_PORT || "25"),
-  secure: "true", // true only for 465
-  // ❌ NO auth block (important)
+  secure: false,
+  requireTLS: false,
+  ignoreTLS: true,
   connectionTimeout: 10000,
   socketTimeout: 15000,
-  tls: {
-    rejectUnauthorized: false, // needed for many internal SMTP servers
-  },
 });
 
 // Generate auto-login token with short expiration
