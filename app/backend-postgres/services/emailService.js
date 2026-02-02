@@ -11,13 +11,19 @@ const prisma = new PrismaClient();
 
 // Configure email transporter
 const transporter = nodemailer.createTransport({
-  host: env.SMTP_HOST,
-  port: parseInt(env.SMTP_PORT || "587"),
-  secure: false,
-  requireTLS: false,
-  ignoreTLS: true,
-  connectionTimeout: 10000,
-  socketTimeout: 15000,
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || "25"),
+  secure: process.env.SMTP_SECURE === "true", // true for 465, false for other ports
+  // auth: {
+  //   user: process.env.SMTP_USER,
+  //   pass: process.env.SMTP_PASSWORD,
+  // },
+  // Recommended: Increase timeout for corporate SMTP servers
+  connectionTimeout: 10000, // 10 seconds
+  socketTimeout: 15000, // 15 seconds
+  // Optional: For debugging
+  // logger: true,
+  // debug: true
 });
 
 // Generate auto-login token with short expiration
@@ -234,7 +240,7 @@ const generateEmailTemplate = (data) => {
         </div>
         
         <div class="footer">
-          <p>This is an automated notification from the Process Management System.</p>
+          <p>This is an automated notification from the Digital Workflow Solution.</p>
           <p>Please do not reply to this email.</p>
         </div>
       </div>
@@ -250,7 +256,7 @@ export const sendEmail = async (to, subject, templateData) => {
     const html = generateEmailTemplate(templateData);
 
     const mailOptions = {
-      from: `"${env.EMAIL_FROM_NAME || "Process Management System"}" <${env.SMTP_FROM_EMAIL}>`,
+      from: `"Digital Workflow Solution" <${env.EMAIL_FROM}>`,
       to,
       subject,
       html,
@@ -273,43 +279,12 @@ const getLastApprovedBy = async (
   initiatorId,
 ) => {
   try {
-    // 1️⃣ First: check if CURRENT step itself is approved
-    const currentApprovedStep = currentStepInstanceId
-      ? await prisma.processStepInstance.findFirst({
-          where: {
-            id: currentStepInstanceId,
-            processId,
-            status: "APPROVED",
-            assignedTo: { not: initiatorId },
-          },
-          include: {
-            workflowStep: {
-              select: { stepType: true },
-            },
-            pickedBy: {
-              select: { name: true, username: true },
-            },
-          },
-        })
-      : null;
-
-    if (
-      currentApprovedStep &&
-      currentApprovedStep.workflowStep?.stepType === "APPROVAL"
-    ) {
-      return (
-        currentApprovedStep.pickedBy?.name ||
-        currentApprovedStep.pickedBy?.username ||
-        "None"
-      );
-    }
-
     // 2️⃣ Fallback: find PREVIOUS approved step
     const lastApprovedStep = await prisma.processStepInstance.findFirst({
       where: {
         processId,
         status: "APPROVED",
-        id: { not: currentStepInstanceId },
+        id: currentStepInstanceId,
         assignedTo: { not: initiatorId },
       },
       include: {
@@ -329,6 +304,10 @@ const getLastApprovedBy = async (
       !lastApprovedStep ||
       lastApprovedStep.workflowStep?.stepType !== "APPROVAL"
     ) {
+      return "None";
+    }
+
+    if (lastApprovedStep.pickedById === initiatorId) {
       return "None";
     }
 
