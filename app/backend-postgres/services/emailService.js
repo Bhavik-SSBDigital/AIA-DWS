@@ -11,12 +11,25 @@ const prisma = new PrismaClient();
 
 // Configure email transporter
 const transporter = nodemailer.createTransport({
-  host: env.EMAIL_HOST || "smtp.gmail.com",
-  port: env.EMAIL_PORT || 587,
+  host: env.SMTP_HOST || "smtp.gmail.com",
+  port: parseInt("587"),
+  secure: false,
+  requireTLS: true, // Force TLS
+  ignoreTLS: false, // Don't ignore TLS
   auth: {
-    user: env.EMAIL_USER,
+    user: env.EMAIL_FROM,
     pass: env.EMAIL_PASS,
   },
+  connectionTimeout: 30000, // Increase timeout
+  socketTimeout: 45000,
+  tls: {
+    rejectUnauthorized: false, // Only if using self-signed certs
+    ciphers: "SSLv3",
+  },
+  // Pool connections for better performance
+  pool: true,
+  maxConnections: 5,
+  maxMessages: 100,
 });
 
 // Generate auto-login token with short expiration
@@ -272,43 +285,12 @@ const getLastApprovedBy = async (
   initiatorId,
 ) => {
   try {
-    // 1️⃣ First: check if CURRENT step itself is approved
-    const currentApprovedStep = currentStepInstanceId
-      ? await prisma.processStepInstance.findFirst({
-          where: {
-            id: currentStepInstanceId,
-            processId,
-            status: "APPROVED",
-            assignedTo: { not: initiatorId },
-          },
-          include: {
-            workflowStep: {
-              select: { stepType: true },
-            },
-            pickedBy: {
-              select: { name: true, username: true },
-            },
-          },
-        })
-      : null;
-
-    if (
-      currentApprovedStep &&
-      currentApprovedStep.workflowStep?.stepType === "APPROVAL"
-    ) {
-      return (
-        currentApprovedStep.pickedBy?.name ||
-        currentApprovedStep.pickedBy?.username ||
-        "None"
-      );
-    }
-
     // 2️⃣ Fallback: find PREVIOUS approved step
     const lastApprovedStep = await prisma.processStepInstance.findFirst({
       where: {
         processId,
         status: "APPROVED",
-        id: { not: currentStepInstanceId },
+        id: currentStepInstanceId,
         assignedTo: { not: initiatorId },
       },
       include: {
@@ -328,6 +310,10 @@ const getLastApprovedBy = async (
       !lastApprovedStep ||
       lastApprovedStep.workflowStep?.stepType !== "APPROVAL"
     ) {
+      return "None";
+    }
+
+    if (lastApprovedStep.pickedById === initiatorId) {
       return "None";
     }
 
