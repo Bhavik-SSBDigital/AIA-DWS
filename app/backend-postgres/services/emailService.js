@@ -12,7 +12,7 @@ const prisma = new PrismaClient();
 // Configure email transporter
 const transporter = nodemailer.createTransport({
   host: env.SMTP_HOST,
-  port: parseInt(env.SMTP_PORT || "25"),
+  port: parseInt(env.SMTP_PORT || "587"),
   secure: false,
   requireTLS: false,
   ignoreTLS: true,
