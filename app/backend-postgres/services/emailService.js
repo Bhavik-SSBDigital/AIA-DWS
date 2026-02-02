@@ -13,7 +13,7 @@ const prisma = new PrismaClient();
 const transporter = nodemailer.createTransport({
   host: env.SMTP_HOST,
   port: parseInt(env.SMTP_PORT || "25"),
-  secure: env.SMTP_SECURE === "true", // true only for 465
+  secure: "true", // true only for 465
   // ❌ NO auth block (important)
   connectionTimeout: 10000,
   socketTimeout: 15000,
