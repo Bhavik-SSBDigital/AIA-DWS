@@ -1,4 +1,3 @@
-// services/emailService.js
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
@@ -10,10 +9,19 @@ const { env } = process;
 const prisma = new PrismaClient();
 
 // Configure email transporter
+
+//const transporter = nodemailer.createTransport({
+// host: process.env.SMTP_HOST,
+// port: 25,
+// secure: false,
+// ignoreTLS: true,
+//});
+
+console.log("smtp host", process.env.SMTP_HOST);
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: parseInt(process.env.SMTP_PORT || "25"),
-  secure: process.env.SMTP_SECURE === "true", // true for 465, false for other ports
+  secure: false, // true for 465, false for other ports
   // auth: {
   //   user: process.env.SMTP_USER,
   //   pass: process.env.SMTP_PASSWORD,
@@ -256,7 +264,7 @@ export const sendEmail = async (to, subject, templateData) => {
     const html = generateEmailTemplate(templateData);
 
     const mailOptions = {
-      from: `"Digital Workflow Solution" <${env.EMAIL_FROM}>`,
+      from: `"Digital Workflow Solution" <${env.SMTP_FROM_EMAIL}>`,
       to,
       subject,
       html,

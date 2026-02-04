@@ -5051,14 +5051,14 @@ export const createQuery = async (req, res) => {
         });
 
         if (assignedUser) {
-          await sendProcessNotification("queryRaised", {
-            params: [
-              processQA.stepInstance.process,
-              processQA,
-              userData,
-              assignedUser,
-            ],
-          });
+          // await sendProcessNotification("queryRaised", {
+          //   params: [
+          //     processQA.stepInstance.process,
+          //     processQA,
+          //     userData,
+          //     assignedUser,
+          //   ],
+          // });
         }
       }
     } catch (emailError) {
@@ -5209,14 +5209,14 @@ export const createRecommendation = async (req, res) => {
       });
 
       if (recommendation && recommendation.recommender) {
-        await sendProcessNotification("recommendationRequested", {
-          params: [
-            recommendation.process,
-            recommendation,
-            userData,
-            recommendation.recommender,
-          ],
-        });
+        // await sendProcessNotification("recommendationRequested", {
+        //   params: [
+        //     recommendation.process,
+        //     recommendation,
+        //     userData,
+        //     recommendation.recommender,
+        //   ],
+        // });
       }
     } catch (emailError) {
       console.error("Error sending email notification:", emailError);
