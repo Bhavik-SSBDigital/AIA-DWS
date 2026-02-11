@@ -35,12 +35,9 @@ export const get_users = async (req, res) => {
   try {
     const { isRootLevel, fromAdmin } = req.query;
     const whereClause = {};
-    if (isRootLevel) {
-      whereClause.isRootLevel = true;
-    }
-    if (fromAdmin !== "true") {
-      whereClause.status = "Active";
-    }
+    if (isRootLevel) whereClause.isRootLevel = true;
+    if (fromAdmin !== "true") whereClause.status = "Active";
+
     const users = await prisma.user.findMany({
       where: whereClause,
       select: {
@@ -48,6 +45,7 @@ export const get_users = async (req, res) => {
         username: true,
         email: true,
         status: true,
+        signaturePicFileName: true, // <-- fetch signature file name
         roles: {
           select: {
             role: {
@@ -71,34 +69,45 @@ export const get_users = async (req, res) => {
         },
       },
     });
+
     const transformedUsers = users.map((user) => {
       const seenDepartments = new Set();
+
+      const roles = user.roles.map((userRole) => {
+        const uniqueDepartments = [];
+        userRole.role.departmentRoleAssignment.forEach((dra) => {
+          const deptKey = `${dra.department.id}-${dra.department.name}`;
+          if (!seenDepartments.has(deptKey)) {
+            seenDepartments.add(deptKey);
+            uniqueDepartments.push({
+              id: dra.department.id,
+              name: dra.department.name,
+            });
+          }
+        });
+        return {
+          id: userRole.role.id,
+          role: userRole.role.role,
+          isRootLevel: userRole.role.isRootLevel,
+          departments: uniqueDepartments,
+        };
+      });
+
+      // Construct signature URL if available
+      const signatureUrl = user.signaturePicFileName
+        ? `${req.protocol}://${req.get("host")}/api/users/signature/${user.id}`
+        : null;
+
       return {
         id: user.id,
         username: user.username,
         email: user.email,
         status: user.status || "UNKNOWN",
-        roles: user.roles.map((userRole) => {
-          const uniqueDepartments = [];
-          userRole.role.departmentRoleAssignment.forEach((dra) => {
-            const deptKey = `${dra.department.id}-${dra.department.name}`;
-            if (!seenDepartments.has(deptKey)) {
-              seenDepartments.add(deptKey);
-              uniqueDepartments.push({
-                id: dra.department.id,
-                name: dra.department.name,
-              });
-            }
-          });
-          return {
-            id: userRole.role.id,
-            role: userRole.role.role,
-            isRootLevel: userRole.role.isRootLevel,
-            departments: uniqueDepartments,
-          };
-        }),
+        roles,
+        signatureUrl, // <-- added
       };
     });
+
     res.status(200).json({
       success: true,
       data: transformedUsers,
@@ -270,7 +279,7 @@ export const get_user = async (req, res) => {
       roles: user.roles.map(
         (userRole) =>
           // {
-          userRole.role.id
+          userRole.role.id,
         // name: userRole.role.role,
         // departmentId: userRole.role.departmentId,
         // isActive: userRole.role.isActive,
@@ -416,34 +425,33 @@ export const edit_user = async (req, res) => {
   }
 };
 
-export const get_user_signature = async (req, res, next) => {
+export const get_user_signature = async (req, res) => {
   try {
-    const accessToken = req.headers["authorization"].substring(7);
-    const userData = await verifyUser(accessToken);
+    console.log("reached in signature");
+    const { userId } = req.params;
 
-    if (userData === "Unauthorized") {
-      return res.status(401).json({
-        message: "Unauthorized request",
-      });
+    console.log("user id", userId);
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID required" });
     }
 
-    // Prisma query with select
+    // Fetch the user's signature
     const user = await prisma.user.findUnique({
-      where: { id: userData.id },
+      where: { id: Number(userId) },
       select: { signaturePicFileName: true },
     });
 
     if (!user?.signaturePicFileName) {
-      return res.status(400).json({ message: "Please upload signature first" });
+      return res.status(404).json({ message: "Signature not uploaded" });
     }
 
     const imagePath = path.join(
       __dirname,
-      process.env.SIGNATURE_FOLDER_PATH, // Use absolute path in env
-      user.signaturePicFileName
+      process.env.SIGNATURE_FOLDER_PATH, // make sure this is absolute path
+      user.signaturePicFileName,
     );
 
-    // Add file existence check
     if (!fs.existsSync(imagePath)) {
       return res.status(404).json({ message: "Signature file not found" });
     }
@@ -478,7 +486,7 @@ export const get_user_profile_pic = async (req, res, next) => {
     const imagePath = path.join(
       __dirname,
       process.env.PROFILE_PIC_FOLDER_PATH, // Use absolute path in env
-      user.profilePicFileName
+      user.profilePicFileName,
     );
 
     if (!fs.existsSync(imagePath)) {
@@ -515,7 +523,7 @@ export const get_user_dsc = async (req, res, next) => {
     const imagePath = path.join(
       __dirname,
       process.env.DSC_FOLDER_PATH, // Use absolute path in env
-      user.dscFileName
+      user.dscFileName,
     );
 
     if (!fs.existsSync(imagePath)) {

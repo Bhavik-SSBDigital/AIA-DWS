@@ -187,19 +187,18 @@ const UsersList = () => {
 
   const fileInputRef = useRef();
   const [signatureImage, setSignatureImage] = useState('');
-  // const fetchSignature = async () => {
-  //   try {
-  //     const response = await GetSignature();
-  //     if (response.status === 200) {
-  //       const blob = new Blob([response.data], {
-  //         type: response.headers['content-type'],
-  //       });
-  //       setSignatureImage(URL.createObjectURL(blob));
-  //     }
-  //   } catch (error) {
-  //     console.error('Error fetching signature:', error.message);
-  //   }
-  // };
+ const fetchSignature = async (userId) => {
+  if (!userId) return;
+  try {
+    const url = `${backendUrl}/api/users/signature/${userId}`;
+    const response = await axios.get(url, { responseType: "blob" });
+    const blob = new Blob([response.data], { type: response.data.type });
+    setSignatureImage(URL.createObjectURL(blob));
+  } catch (error) {
+    console.error("Error fetching signature:", error);
+    setSignatureImage(null);
+  }
+};
   const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -375,15 +374,16 @@ const UsersList = () => {
             text={<IconTrash className="h-5 w-5 text-white" />}
             className="py-2 bg-red-600 hover:bg-red-700 rounded"
           />
-          <CustomButton
-            variant="info"
-            click={() => {
-              setSignModalOpen(params.id);
-            }}
-            disabled={actionsLoading || params.row.status == 'Inactive'}
-            text={<IconWritingSign className="h-5 w-5 text-white" />}
-            className="py-2 rounded"
-          />
+         <CustomButton
+  variant="info"
+  click={() => {
+    setSignModalOpen(params.id);
+    fetchSignature(params.id); // fetch signature when modal opens
+  }}
+  disabled={actionsLoading || params.row.status === "Inactive"}
+  text={<IconWritingSign className="h-5 w-5 text-white" />}
+  className="py-2 rounded"
+/>
         </div>
       ),
     },
@@ -533,6 +533,18 @@ const UsersList = () => {
                       d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
                     />
                   </svg>
+
+                      <div className="mb-4">
+      {signatureImage ? (
+        <img
+          src={signatureImage}
+          alt="User Signature"
+          className="mx-auto h-24 object-contain border border-gray-300 rounded"
+        />
+      ) : (
+        <p className="text-center text-gray-500">No signature uploaded</p>
+      )}
+    </div>
 
                   <div className="space-y-2">
                     <p className="text-gray-800 font-medium text-lg">

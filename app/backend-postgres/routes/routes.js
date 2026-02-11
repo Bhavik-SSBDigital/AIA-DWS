@@ -225,6 +225,8 @@ router.post("/accessFolder", getDocumentDetailsOnTheBasisOfPath);
 
 router.get("/getDepartment/:id", get_department);
 
+router.get("/api/users/signature/:userId", get_user_signature);
+
 router.get("/getDepartmentsHierarchy", getDepartmentsHierarchy);
 router.post("/createPermissions", create_permissions);
 router.post("/getAllDocuments", getDocumentDetailsForAdmin);
