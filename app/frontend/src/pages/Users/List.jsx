@@ -1,6 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { IconTrash, IconEdit } from '@tabler/icons-react';
+import {
+  IconTrash,
+  IconEdit,
+  IconWritingSign,
+  IconImageInPicture,
+} from '@tabler/icons-react';
 import { toast } from 'react-toastify';
 import moment from 'moment';
 import { DataGrid } from '@mui/x-data-grid';
@@ -9,6 +14,8 @@ import { DeleteUser, getAllUsers } from '../../common/Apis';
 import DeleteConfirmationModal from '../../CustomComponents/DeleteConfirmation';
 import CustomButton from '../../CustomComponents/CustomButton';
 import CustomCard from '../../CustomComponents/CustomCard';
+import axios from 'axios';
+import CustomModal from '../../CustomComponents/CustomModal';
 
 const UsersList = () => {
   const [data, setData] = useState([]);
@@ -16,6 +23,7 @@ const UsersList = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [actionsLoading, setActionsLoading] = useState(false);
   const [isModalOpen, setModalOpen] = useState(false);
+  const [isSignModalOpen, setSignModalOpen] = useState('');
   const [deleteItemId, setDeleteItemId] = useState('');
   const [tooltipContent, setTooltipContent] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({
@@ -177,6 +185,56 @@ const UsersList = () => {
     );
   });
 
+  const fileInputRef = useRef();
+  const [signatureImage, setSignatureImage] = useState('');
+  // const fetchSignature = async () => {
+  //   try {
+  //     const response = await GetSignature();
+  //     if (response.status === 200) {
+  //       const blob = new Blob([response.data], {
+  //         type: response.headers['content-type'],
+  //       });
+  //       setSignatureImage(URL.createObjectURL(blob));
+  //     }
+  //   } catch (error) {
+  //     console.error('Error fetching signature:', error.message);
+  //   }
+  // };
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const allowedFormats = ['image/jpeg', 'image/png', 'image/gif'];
+
+    if (!allowedFormats.includes(file.type)) {
+      toast.warning('Unsupported File Type');
+      return;
+    }
+
+    try {
+      const url = `${backendUrl}/uploadSignature`;
+      const data = new FormData();
+      data.append('purpose', 'signature');
+      data.append('file', file);
+      data.append('id', isSignModalOpen);
+      data.append('userId', isSignModalOpen);
+
+      const res = await axios.post(url, data, {
+        headers: {
+          Authorization: `Bearer ${sessionStorage.getItem('accessToken')}`,
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      // fetchSignature();
+      setSignModalOpen('');
+
+      toast.success(`File uploaded successfully for profile`);
+    } catch (error) {
+      toast.error(`Error uploading image for profile`);
+    }
+  };
+
   const columns = [
     {
       field: 'username',
@@ -305,7 +363,7 @@ const UsersList = () => {
             click={() => navigate(`/users/edit/${params.row.id}`)}
             text={<IconEdit className="h-5 w-5 text-white" />}
             disabled={actionsLoading}
-            className="p-2 bg-blue-600 hover:bg-blue-700 rounded"
+            className="py-2 bg-blue-600 hover:bg-blue-700 rounded"
           />
           <CustomButton
             variant="danger"
@@ -315,7 +373,16 @@ const UsersList = () => {
             }}
             disabled={actionsLoading || params.row.status == 'Inactive'}
             text={<IconTrash className="h-5 w-5 text-white" />}
-            className="p-2 bg-red-600 hover:bg-red-700 rounded"
+            className="py-2 bg-red-600 hover:bg-red-700 rounded"
+          />
+          <CustomButton
+            variant="info"
+            click={() => {
+              setSignModalOpen(params.id);
+            }}
+            disabled={actionsLoading || params.row.status == 'Inactive'}
+            text={<IconWritingSign className="h-5 w-5 text-white" />}
+            className="py-2 rounded"
           />
         </div>
       ),
@@ -420,6 +487,101 @@ const UsersList = () => {
             isLoading={actionsLoading}
             deactive={true}
           />
+          <CustomModal
+            isOpen={isSignModalOpen}
+            className="!p-0 max-w-md w-full" // adjusted padding & width control
+            onClose={() => setSignModalOpen(false)}
+          >
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Upload Signature
+              </h2>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-8">
+              <div
+                className={`
+        border-2 border-dashed border-gray-300 rounded-xl
+        p-10 text-center cursor-pointer
+        hover:border-indigo-400 hover:bg-indigo-50/40
+        active:bg-indigo-50 transition-colors duration-200
+      `}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={fileInputRef}
+                  onChange={handleUpload}
+                  className="hidden"
+                />
+
+                <div className="flex flex-col items-center gap-4">
+                  {/* Replace with your IconImageInPicture if you prefer */}
+                  <svg
+                    className="w-14 h-14 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                    />
+                  </svg>
+
+                  <div className="space-y-2">
+                    <p className="text-gray-800 font-medium text-lg">
+                      Click or drag your signature here
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      Supports PNG, JPG, max 5MB recommended
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setSignModalOpen(false)}
+                className={`
+        px-5 py-2.5 text-sm font-medium rounded-lg
+        bg-white border border-gray-300 text-gray-700
+        hover:bg-gray-50 hover:text-gray-900
+        focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2
+        transition-all
+      `}
+              >
+                Cancel
+              </button>
+
+              {/* Optional: Add confirm button if you want explicit action after selection */}
+              {/* 
+    <button
+      type="button"
+      disabled={!fileSelected} // you'd need to track this in state
+      onClick={handleConfirmUpload}
+      className={`
+        px-5 py-2.5 text-sm font-medium rounded-lg text-white
+        ${fileSelected 
+          ? 'bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-500' 
+          : 'bg-gray-400 cursor-not-allowed'}
+        focus:outline-none focus:ring-2 focus:ring-offset-2
+        transition-all
+      `}
+    >
+      Upload Signature
+    </button>
+    */}
+            </div>
+          </CustomModal>
         </CustomCard>
       )}
     </div>
