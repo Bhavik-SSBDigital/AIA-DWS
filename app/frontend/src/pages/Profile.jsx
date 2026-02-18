@@ -211,22 +211,25 @@ const Profile = () => {
                     />
                   </svg>
                   <p className="font-semibold">
-                    Signature is required. Please upload your signature.
+                    Signature not uploaded.
                   </p>
+                  {/* <p className="font-semibold">
+                    Signature is required. Please upload your signature.
+                  </p> */}
                 </div>
               )}
-              <input
+              {/* <input
                 type="file"
                 accept="image/*"
                 ref={fileInputRef}
                 onChange={(e) => handleUpload('signature', e)}
                 className="border rounded p-2 w-full max-w-sm"
-              />
+              /> */}
             </div>
           </section>
 
           {/* Section 3: DSC Upload */}
-          <section className="border-t pt-6">
+          {/* <section className="border-t pt-6">
             <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4">
               DSC Certificate
             </h2>
@@ -278,7 +281,7 @@ const Profile = () => {
                 className="border rounded p-2 w-full max-w-sm"
               />
             </div>
-          </section>
+          </section> */}
         </div>
       )}
 
