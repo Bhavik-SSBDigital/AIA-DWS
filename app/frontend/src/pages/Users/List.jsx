@@ -357,7 +357,7 @@ const UsersList = () => {
       field: 'actions',
       headerName: 'Actions',
       flex: 1,
-      minWidth: 150,
+      minWidth: 250,
       renderCell: (params) => (
         <div className="flex space-x-2 m-1">
           <CustomButton
