@@ -61,6 +61,7 @@ const SignIn: React.FC = () => {
         sessionStorage.setItem('refreshToken', res.data['refreshToken']);
         sessionStorage.setItem('specialUser', res.data['specialUser']);
         sessionStorage.setItem('isAdmin', res.data['isAdmin']);
+        sessionStorage.setItem('id', res.data['id']);
         sessionStorage.setItem(
           'isDepartmentHead',
           res.data['isDepartmentHead'],

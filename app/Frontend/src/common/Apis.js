@@ -43,7 +43,7 @@ export const extractEMLDetails = async (documentId, workflowId) => {
   try {
     const response = await apiClient.post('/extract-eml', {
       documentId,
-      workflowId
+      workflowId,
     });
     return response;
   } catch (error) {
@@ -392,8 +392,8 @@ export const UnArchiveFile = async (documentId) => {
 };
 
 // profile
-export const GetSignature = async () => {
-  return apiClient.get('/getUserSignature', { responseType: 'blob' });
+export const GetSignature = async (id) => {
+  return apiClient.get(`/getUserSignature/${id}`, { responseType: 'blob' });
 };
 export const GetProfilePic = async () => {
   return apiClient.get('/getUserProfilePic', { responseType: 'blob' });

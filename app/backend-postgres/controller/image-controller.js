@@ -19,8 +19,8 @@ export const upload_signature = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
-    const userData = await verifyUser(accessToken);
-    if (userData === "Unauthorized") {
+    let requestingUser = await verifyUser(accessToken);
+    if (requestingUser === "Unauthorized") {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
@@ -33,6 +33,16 @@ export const upload_signature = async (req, res) => {
     let updateData;
 
     console.log("purpose", req.body.purpose);
+    const approverId = req.body.userId;
+
+    const approver = await prisma.user.findFirst({
+      where: {
+        id: parseInt(approverId),
+      },
+    });
+
+    let userData = approver ? approver : requestingUser;
+    console.log("user data", userData);
     switch (req.body.purpose) {
       case "signature":
         fileName = `${userData.username.toLowerCase()}${fileExtension}`;
@@ -56,6 +66,8 @@ export const upload_signature = async (req, res) => {
       where: { id: userData.id },
       data: updateData,
     });
+
+    console.log("updated user", updatedUser);
 
     res.status(200).json({
       message: "File uploaded successfully",

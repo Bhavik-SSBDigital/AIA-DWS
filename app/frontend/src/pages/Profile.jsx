@@ -22,10 +22,12 @@ const Profile = () => {
   const [signatureViewModalOpen, setSignatureViewModalOpen] = useState(false);
   const fileInputRef = useRef();
   const [signatureImage, setSignatureImage] = useState('');
+  const id = sessionStorage?.getItem('id');
+
 
   const fetchSignature = async () => {
     try {
-      const response = await GetSignature();
+      const response = await GetSignature(id);
       if (response.status === 200) {
         const blob = new Blob([response.data], {
           type: response.headers['content-type'],
@@ -75,6 +77,7 @@ const Profile = () => {
       const url = `${backendUrl}/uploadSignature`;
       const data = new FormData();
       data.append('purpose', purpose);
+      data.append('userId', id);
       data.append('file', file);
 
       const res = await axios.post(url, data, {

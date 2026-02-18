@@ -215,6 +215,7 @@ export const login = async (req, res) => {
       accessToken,
       refreshToken,
       email: user.email,
+      id: user.id,
       userName: user.username,
       userId: user.id,
       roles: roles.map((role) => role.role),

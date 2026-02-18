@@ -58,7 +58,7 @@ const diskStorage = multer.diskStorage({
         destinationDirectory = path.join(
           process.env.STORAGE_PATH,
           workflow.name,
-          "templates"
+          "templates",
         );
         break;
       default:
@@ -84,26 +84,45 @@ const diskStorage = multer.diskStorage({
     if (!accessToken) {
       return cb(new Error("Authorization token missing"));
     }
-    const userData = await verifyUser(accessToken);
-    if (userData === "Unauthorized") {
+    const requestingUser = await verifyUser(accessToken);
+    if (requestingUser === "Unauthorized") {
       return cb(new Error("Unauthorized request"));
+    }
+
+    let approverId = req.body.userId;
+    let userData;
+
+    console.log("req body", req.body);
+
+    let approver;
+
+    if (approverId) {
+      approver = await prisma.user.findFirst({
+        where: {
+          id: parseInt(approverId),
+        },
+      });
+      userData = approver;
+    } else {
+      userData = requestingUser;
+      approverId = requestingUser.id;
     }
 
     let fileName;
     switch (purpose) {
       case "signature":
         fileName = `${userData.username.toLowerCase()}${path.extname(
-          file.originalname
+          file.originalname,
         )}`;
         break;
       case "profile":
         fileName = `${userData.username.toLowerCase()}_profile_pic${path.extname(
-          file.originalname
+          file.originalname,
         )}`;
         break;
       case "dsc":
         fileName = `${userData.username.toLowerCase()}_dsc${path.extname(
-          file.originalname
+          file.originalname,
         )}`;
         break;
       case "template":

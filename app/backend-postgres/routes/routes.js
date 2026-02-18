@@ -142,6 +142,7 @@ import {
   get_user_profile_data,
   get_user_profile_pic,
   get_user_signature,
+  get_user_signature_id,
   get_users,
   get_users_with_details,
 } from "../controller/user-controller.js";
@@ -225,8 +226,7 @@ router.post("/accessFolder", getDocumentDetailsOnTheBasisOfPath);
 
 router.get("/getDepartment/:id", get_department);
 
-router.get("/api/users/signature/:userId", get_user_signature);
-
+router.get("/api/users/signature/:userId", get_user_signature_id);
 router.get("/getDepartmentsHierarchy", getDepartmentsHierarchy);
 router.post("/createPermissions", create_permissions);
 router.post("/getAllDocuments", getDocumentDetailsForAdmin);
@@ -299,12 +299,11 @@ router.post("/revokeSign", revoke_sign);
 router.post("/rejectDocument", reject_document);
 router.post("/revokeRejection", revoke_rejection);
 
-router.get("/getUserSignature", get_user_signature);
+router.get("/getUserSignature/:userId", get_user_signature);
 router.post("/getUserProfilePic", get_user_profile_pic);
 
 router.get("/getUserProfileData", get_user_profile_data);
 
-router.get("/getUserSignature", get_user_signature);
 router.get("/getUserProfilePic", get_user_profile_pic);
 router.get("/getUserDSC", get_user_dsc);
 

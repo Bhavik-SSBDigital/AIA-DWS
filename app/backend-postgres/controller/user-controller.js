@@ -425,10 +425,74 @@ export const edit_user = async (req, res) => {
   }
 };
 
+export const get_user_signature_id = async (req, res) => {
+  try {
+    let userId = parseInt(req.params.userId);
+
+    console.log("user id", userId);
+    const userData = await prisma.user.findFirst({
+      where: {
+        id: parseInt(userId),
+      },
+    });
+
+    if (!userId) {
+      return res.status(400).json({ message: "User ID required" });
+    }
+
+    // Fetch the user's signature
+    const user = await prisma.user.findUnique({
+      where: { id: Number(userId) },
+      select: { signaturePicFileName: true },
+    });
+
+    if (!user?.signaturePicFileName) {
+      return res.status(404).json({ message: "Signature not uploaded" });
+    }
+
+    const imagePath = path.join(
+      __dirname,
+      process.env.SIGNATURE_FOLDER_PATH, // make sure this is absolute path
+      user.signaturePicFileName,
+    );
+
+    if (!fs.existsSync(imagePath)) {
+      return res.status(404).json({ message: "Signature file not found" });
+    }
+
+    res.sendFile(imagePath);
+  } catch (error) {
+    console.error("Error getting signature:", error);
+    res.status(500).json({ message: "Error retrieving signature" });
+  }
+};
+
 export const get_user_signature = async (req, res) => {
   try {
     console.log("reached in signature");
-    const { userId } = req.params;
+
+    const accessToken = req.headers["authorization"]?.substring(7);
+    const requestingUser = await verifyUser(accessToken);
+
+    if (requestingUser === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    console.log("req params", req.params);
+    let { userId } = parseInt(req.params.userId);
+
+    let userData;
+
+    if (userId) {
+      userData = await prisma.user.findFirst({
+        where: {
+          id: parseInt(userId),
+        },
+      });
+    } else {
+      userId = requestingUser.id;
+      userData = requestingUser;
+    }
 
     console.log("user id", userId);
 
