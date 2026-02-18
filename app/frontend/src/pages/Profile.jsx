@@ -24,7 +24,6 @@ const Profile = () => {
   const [signatureImage, setSignatureImage] = useState('');
   const id = sessionStorage?.getItem('id');
 
-
   const fetchSignature = async () => {
     try {
       const response = await GetSignature(id);
@@ -210,9 +209,7 @@ const Profile = () => {
                       clipRule="evenodd"
                     />
                   </svg>
-                  <p className="font-semibold">
-                    Signature not uploaded.
-                  </p>
+                  <p className="font-semibold">Signature not uploaded.</p>
                   {/* <p className="font-semibold">
                     Signature is required. Please upload your signature.
                   </p> */}

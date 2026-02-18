@@ -21,7 +21,8 @@ const DropdownMessage = () => {
             // const createdAt = new Date(n.createdAt);
             const diffInDays =
               (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
-            return diffInDays > 7; // only older than 7 days
+            return diffInDays > 2; // only older than 2 days
+            // return diffInDays > 7; // only older than 7 days
             // return diffInDays > 15; // only older than 15 days
           })
           .sort(

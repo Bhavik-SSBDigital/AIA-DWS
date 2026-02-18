@@ -738,54 +738,57 @@ const ViewProcess = () => {
   }, [id]);
 
   // In ViewProcess component, update the useEffect
-useEffect(() => {
-  if (!process?.documents || autoOpenProcessed) return;
+  useEffect(() => {
+    if (!process?.documents || autoOpenProcessed) return;
 
-  const autoOpenDoc = searchParams.get('autoOpenDoc');
-  
-  if (autoOpenDoc) {
-    console.log("Auto-opening document:", autoOpenDoc);
-    setAutoOpenProcessed(true);
-    
-    // Find the document
-    const documentToOpen = process.documents.find(
-      doc => doc.id.toString() === autoOpenDoc || doc.id === autoOpenDoc
-    );
-    
-    if (documentToOpen) {
-      console.log("Found document to open:", documentToOpen);
-      // Use setTimeout to ensure the component is fully rendered
-      setTimeout(() => {
-        handleViewFile(
-          documentToOpen.name,
-          documentToOpen.path,
-          documentToOpen.id,
-          documentToOpen.type?.toLowerCase() || 'pdf',
-          false
-        );
-      }, 500); // Increased delay to ensure DOM is ready
-      
-      // Clean up URL without reload
-      const url = new URL(window.location);
-      url.searchParams.delete('autoOpenDoc');
-      window.history.replaceState({}, '', url.toString());
-    } else {
-      console.warn("Document not found for autoOpenDoc:", autoOpenDoc);
-      console.log("Available documents:", process.documents.map(d => ({id: d.id, name: d.name})));
-    }
-  }
-}, [process?.documents, searchParams, autoOpenProcessed]);
-
-// Also add this useEffect to reset autoOpenProcessed when process changes
-useEffect(() => {
-  if (process?.documents) {
-    // Reset autoOpenProcessed when process documents are loaded
     const autoOpenDoc = searchParams.get('autoOpenDoc');
-    if (!autoOpenDoc) {
-      setAutoOpenProcessed(false);
+
+    if (autoOpenDoc) {
+      console.log('Auto-opening document:', autoOpenDoc);
+      setAutoOpenProcessed(true);
+
+      // Find the document
+      const documentToOpen = process.documents.find(
+        (doc) => doc.id.toString() === autoOpenDoc || doc.id === autoOpenDoc,
+      );
+
+      if (documentToOpen) {
+        console.log('Found document to open:', documentToOpen);
+        // Use setTimeout to ensure the component is fully rendered
+        setTimeout(() => {
+          handleViewFile(
+            documentToOpen.name,
+            documentToOpen.path,
+            documentToOpen.id,
+            documentToOpen.type?.toLowerCase() || 'pdf',
+            false,
+          );
+        }, 500); // Increased delay to ensure DOM is ready
+
+        // Clean up URL without reload
+        const url = new URL(window.location);
+        url.searchParams.delete('autoOpenDoc');
+        window.history.replaceState({}, '', url.toString());
+      } else {
+        console.warn('Document not found for autoOpenDoc:', autoOpenDoc);
+        console.log(
+          'Available documents:',
+          process.documents.map((d) => ({ id: d.id, name: d.name })),
+        );
+      }
     }
-  }
-}, [process?.documents, searchParams]);
+  }, [process?.documents, searchParams, autoOpenProcessed]);
+
+  // Also add this useEffect to reset autoOpenProcessed when process changes
+  useEffect(() => {
+    if (process?.documents) {
+      // Reset autoOpenProcessed when process documents are loaded
+      const autoOpenDoc = searchParams.get('autoOpenDoc');
+      if (!autoOpenDoc) {
+        setAutoOpenProcessed(false);
+      }
+    }
+  }, [process?.documents, searchParams]);
 
   if (loading) return <ComponentLoader />;
   if (error)
@@ -857,13 +860,13 @@ useEffect(() => {
     }
   /> */}
 
-          <CustomButton
+          {/* <CustomButton
             variant={'secondary'}
             text={'Reject'}
             className={'min-w-[150px]'}
             click={() => setOpenModal('query')}
             disabled={actionsLoading || isCompleted || disableActions}
-          />
+          /> */}
           <CustomButton
             variant={'secondary'}
             text={'Ask Recommendation'}
@@ -1272,7 +1275,7 @@ useEffect(() => {
                       title="View Document"
                       text={<IconEye size={18} className="text-white" />}
                     />
-                    <CustomButton
+                    {/* <CustomButton
                       variant="success"
                       className="px-2"
                       click={() =>
@@ -1310,7 +1313,7 @@ useEffect(() => {
                       }
                       title="Reject Document"
                       text={<IconX size={18} className="text-white" />}
-                    />
+                    /> */}
                     <CustomButton
                       variant="info"
                       className="px-2"
