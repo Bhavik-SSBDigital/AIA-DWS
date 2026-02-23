@@ -427,7 +427,7 @@ export const forgotPassword = (data) => {
 };
 
 export const changePassword = (data) => {
-  return apiClient.post('/change_password', data); // adjust endpoint as needed
+  return apiClient.post('/changePassword', data); // adjust endpoint as needed
 };
 
 export const removeCoordinates = async (data) => {
