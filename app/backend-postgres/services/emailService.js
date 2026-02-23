@@ -348,6 +348,86 @@ const getLastApprovedBy = async (
 export const emailTemplates = {
   // Step Assignment Email
   // In emailService.js, update stepAssigned template generation
+
+  userCreated: (user, plainPassword) => {
+    const loginUrl = `${process.env.FRONTEND_URL}/login`;
+    return {
+      title: "Account Successfully Created",
+      greeting: `Hello ${user.username},`,
+      message: `
+        <p>Your account has been successfully created. Below are your login credentials:</p>
+        <div style="background-color: #ffffff; padding: 15px; border-radius: 4px; margin: 15px 0; border: 1px solid #ddd;">
+          <p><strong>Username:</strong> ${user.username}</p>
+          <p><strong>Password:</strong> ${plainPassword}</p>
+        </div>
+        <p><strong style="color: #e74c3c;">Important:</strong> Please change your password after your first login.</p>
+      `,
+      quickAccessLinks: `
+        <div style="margin: 20px 0;">
+          <a href="${loginUrl}" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Go to Login</a>
+        </div>
+      `,
+      closingMessage: `
+        <p>If you didn't request this account, please contact our support team immediately.</p>
+        <p>Best regards,<br>${process.env.EMAIL_COMPANY_NAME || "AIA DWS Team"}</p>
+      `,
+      text: `Hello ${user.username},
+
+Your account has been successfully created. Here are your login credentials:
+
+Username: ${user.username}
+Password: ${plainPassword}
+
+Important: Please change your password after your first login.
+
+Login URL: ${loginUrl}
+
+If you didn't request this account, please contact our support team immediately.
+
+Best regards,
+${process.env.EMAIL_COMPANY_NAME || "AIA DWS Team"}`,
+    };
+  },
+
+  passwordReset: (user, newPlainPassword) => {
+    const loginUrl = `${process.env.FRONTEND_URL}/login`;
+    return {
+      title: "Password Reset Successful",
+      greeting: `Hello ${user.username},`,
+      message: `
+        <p>Your password has been reset successfully. Below is your new login credentials:</p>
+        <div style="background-color: #ffffff; padding: 15px; border-radius: 4px; margin: 15px 0; border: 1px solid #ddd;">
+          <p><strong>Username:</strong> ${user.username}</p>
+          <p><strong>Password:</strong> ${newPlainPassword}</p>
+        </div>
+        <p><strong style="color: #e74c3c;">Important:</strong> For security reasons, please change this password immediately after logging in.</p>
+      `,
+      quickAccessLinks: `
+        <div style="margin: 20px 0;">
+          <a href="${loginUrl}" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Go to Login</a>
+        </div>
+      `,
+      closingMessage: `
+        <p>If you did not request this password reset, please contact our support team immediately.</p>
+        <p>Best regards,<br>${process.env.EMAIL_COMPANY_NAME || "AIA DWS Team"}</p>
+      `,
+      text: `Hello ${user.username},
+
+Your password has been reset successfully. Here is your new login credentials:
+
+Username: ${user.username}
+Password: ${newPlainPassword}
+
+Important: For security reasons, please change this password immediately after logging in.
+
+Login URL: ${loginUrl}
+
+If you did not request this password reset, please contact our support team immediately.
+
+Best regards,
+${process.env.EMAIL_COMPANY_NAME || "AIA DWS Team"}`,
+    };
+  },
   stepAssigned: async (process, stepInstance, documents, assignedUser) => {
     console.log("assigned user", assignedUser);
     console.log("process", process);
@@ -697,6 +777,16 @@ export const sendProcessNotification = async (eventType, data) => {
     console.error(`Error sending ${eventType} notification:`, error);
     throw error;
   }
+};
+
+export const sendUserEmail = async (eventType, user, plainPassword) => {
+  const template = emailTemplates[eventType];
+  if (!template) {
+    throw new Error(`No template found for event type: ${eventType}`);
+  }
+
+  const templateData = template(user, plainPassword);
+  await sendEmail(user.email, templateData.title, templateData);
 };
 
 // Get recipients based on event type

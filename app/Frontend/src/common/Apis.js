@@ -416,14 +416,20 @@ export const signIn = async (data) => {
 };
 
 // signUp endpoints
-export const changePassword = async (data) => {
-  return apiClient.post(`/changePassword`, data);
-};
 
 // viewer endpoints
 export const storeSignCoordinates = async (data) => {
   return apiClient.post(`/storeSignCoordinates`, data);
 };
+
+export const forgotPassword = (data) => {
+  return apiClient.post('/forgetPassword', data); // adjust endpoint as needed
+};
+
+export const changePassword = (data) => {
+  return apiClient.post('/change_password', data); // adjust endpoint as needed
+};
+
 export const removeCoordinates = async (data) => {
   return apiClient.post(`/removeCoordinates`, data);
 };

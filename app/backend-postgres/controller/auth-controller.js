@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { send_mail_for_sign_up } from "./email-handler.js";
+import { sendEmail } from "../services/emailService.js";
 import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
 import ExcelJS from "exceljs";
@@ -32,11 +32,12 @@ function generateRandomPassword(length) {
 */
 export const sign_up = async (req, res) => {
   try {
-    const accessToken = req.headers["authorization"].substring(7);
+    const accessToken = req.headers["authorization"]?.substring(7);
     const userData = await verifyUser(accessToken);
     if (userData === "Unauthorized") {
       return res.status(401).json({ message: "Unauthorized request" });
     }
+
     const {
       username,
       email,
@@ -48,20 +49,18 @@ export const sign_up = async (req, res) => {
       status,
     } = req.body;
 
-    // Generate a random password
-    let password = req.body.password;
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Generate a random password (12 characters)
+    const plainPassword = generateRandomPassword(12);
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
     // Check if the user already exists
     const existingUser = await prisma.user.findFirst({
-      where: {
-        username: username,
-      },
+      where: { username },
     });
 
     if (existingUser) {
       return res.status(400).json({
-        message: "User with given email or username already exists",
+        message: "User with given username already exists",
       });
     }
 
@@ -94,7 +93,7 @@ export const sign_up = async (req, res) => {
       },
     });
 
-    // Manually create UserRole entries
+    // Create UserRole entries
     await prisma.userRole.createMany({
       data: roles.map((roleId) => ({
         userId: user.id,
@@ -102,16 +101,17 @@ export const sign_up = async (req, res) => {
       })),
     });
 
-    // Attempt to send the email
-    // const emailSent = await send_mail_for_sign_up(username, email, password);
-
-    // if (!emailSent) {
-    //   // If email sending fails, rollback the user creation
-    //   await prisma.user.delete({ where: { id: user.id } });
-    //   return res.status(500).json({
-    //     message: "Error sending email. User creation rolled back.",
-    //   });
-    // }
+    // Send email with credentials
+    try {
+      await sendUserEmail("userCreated", user, plainPassword);
+    } catch (emailError) {
+      // Rollback user creation if email fails
+      await prisma.user.delete({ where: { id: user.id } });
+      console.error("Email sending failed, user rolled back:", emailError);
+      return res.status(500).json({
+        message: "Error sending credentials email. User creation rolled back.",
+      });
+    }
 
     res.status(200).json({ message: "User created successfully" });
   } catch (error) {
@@ -520,6 +520,60 @@ export const validateAutoLogin = async (req, res) => {
     return res
       .status(500)
       .json({ valid: false, message: "Error validating token" });
+  }
+};
+
+export const forget_password = async (req, res) => {
+  try {
+    const { username, email } = req.body;
+
+    // Validate input
+    if (!username || !email) {
+      return res
+        .status(400)
+        .json({ message: "Username and email are required" });
+    }
+
+    // Find user
+    const user = await prisma.user.findUnique({
+      where: { username },
+    });
+
+    if (!user || user.email !== email) {
+      return res.status(400).json({
+        message: "Username does not exist or email does not match",
+      });
+    }
+
+    // Generate new random password
+    const newPlainPassword = generateRandomPassword(12);
+    const hashedPassword = await bcrypt.hash(newPlainPassword, 10);
+
+    // Update password in database
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { password: hashedPassword },
+    });
+
+    // Send email with new password
+    try {
+      await sendUserEmail("passwordReset", user, newPlainPassword);
+    } catch (emailError) {
+      // Rollback password change? (Optional, but you could revert)
+      console.error("Password reset email failed:", emailError);
+      return res.status(500).json({
+        message: "Error sending password reset email, please try again later",
+      });
+    }
+
+    return res.status(200).json({
+      message: "New password has been sent to your registered email",
+    });
+  } catch (error) {
+    console.error("Forget password error:", error);
+    return res.status(500).json({
+      message: "Error while processing password reset request",
+    });
   }
 };
 

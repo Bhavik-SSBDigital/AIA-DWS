@@ -26,6 +26,8 @@ import ForgotPass from './pages/Authentication/ForgotPass';
 import PhysicalDocuments from './pages/PhysicalDocuments/PhysicalDocuments';
 import SearchDocument from './pages/SearchDocuments/SearchDocument';
 import MeetingManager from './pages/Meeting';
+import ForgotPassword from './pages/Authentication/ForgotPassword';
+import ChangePassword from './pages/Authentication/ChangePassword';
 import MetaData from './pages/MetaData';
 import Workflows from './pages/workflows';
 import RecycleBin from './pages/RecycleBin';
@@ -155,6 +157,24 @@ function App() {
             <DefaultLayout>
               <PageTitle title="Archive Files" />
               <Archive />
+            </DefaultLayout>
+          }
+        />
+        {/* <Route
+          path="/auth/forgot"
+          element={
+            <DefaultLayout>
+              <PageTitle title="Forgot Password" />
+              <ForgotPassword />
+            </DefaultLayout>
+          }
+        /> */}
+        <Route
+          path="/change-password"
+          element={
+            <DefaultLayout>
+              <PageTitle title="Change Password" />
+              <ChangePassword />
             </DefaultLayout>
           }
         />

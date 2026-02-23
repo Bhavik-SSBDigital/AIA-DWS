@@ -132,7 +132,7 @@ export default function NewUser() {
               )}
             </div>
 
-            <div>
+            {/* <div>
               <label className="block text-sm font-medium text-gray-700">
                 Password
               </label>
@@ -160,9 +160,9 @@ export default function NewUser() {
                   {errors.password.message}
                 </p>
               )}
-            </div>
+            </div> */}
 
-            <div>
+            {/* <div>
               <label className="block text-sm font-medium text-gray-700">
                 Confirm Password
               </label>
@@ -191,7 +191,7 @@ export default function NewUser() {
                   {errors.confirmPassword.message}
                 </p>
               )}
-            </div>
+            </div> */}
 
             <div>
               <label className="block text-sm font-medium text-gray-700">

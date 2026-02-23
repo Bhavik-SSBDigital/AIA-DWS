@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-
 import { backButtonPath, setPath } from '../../Slices/PathSlice';
 import { useDispatch } from 'react-redux';
 import sessionData from '../../Store';
@@ -42,9 +41,11 @@ const DropdownUser = () => {
     document.addEventListener('keydown', keyHandler);
     return () => document.removeEventListener('keydown', keyHandler);
   });
+
   const resetStore = sessionData((state) => state.reset);
   const navigate = useNavigate();
   const dispatch = useDispatch();
+
   const handleLogout = async () => {
     try {
       const response = await LogOut();
@@ -53,7 +54,6 @@ const DropdownUser = () => {
       setNotifications([]);
       setAlerts([]);
       setProfileImage('');
-      // setWork('');
       dispatch(setPath('..'));
       dispatch(backButtonPath('..'));
       navigate('/auth/signin');
@@ -62,6 +62,7 @@ const DropdownUser = () => {
       toast?.error(error?.response?.data?.error || error?.message);
     }
   };
+
   const fetchProfilePic = async () => {
     try {
       const url = backendUrl + '/getUserProfilePic';
@@ -86,67 +87,18 @@ const DropdownUser = () => {
       console.error('Error fetching profile picture:', error.message);
     }
   };
+
   useEffect(() => {
     fetchProfilePic();
   }, []);
+
   const username = sessionStorage.getItem('username');
+
   return (
     <div className="relative" style={{ userSelect: 'none' }}>
-      {/* <Link
-        ref={trigger}
-        onClick={() => setDropdownOpen(!dropdownOpen)}
-        className="flex items-center gap-4"
-        to="#"
-      >
-
-        <span className="h-12 w-12 rounded-full">
-          {profileImage ? (
-            <img
-              src={profileImage}
-              alt="User"
-              style={{
-                height: '50px',
-                width: '50px',
-                borderRadius: '50%',
-                border: '1px solid lightgray',
-              }}
-            />
-          ) : (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="43"
-              height="43"
-              viewBox="0 0 24 24"
-              style={{ border: '1px solid lightgray', borderRadius: '50%' }}
-              fill="currentColor"
-            >
-              <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-              <path d="M12 2a5 5 0 1 1 -5 5l.005 -.217a5 5 0 0 1 4.995 -4.783z" />
-              <path d="M14 14a5 5 0 0 1 5 5v1a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-1a5 5 0 0 1 5 -5h4z" />
-            </svg>
-          )}
-        </span>
-
-        <svg
-          className="hidden fill-current sm:block"
-          width="12"
-          height="8"
-          viewBox="0 0 12 8"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            fillRule="evenodd"
-            clipRule="evenodd"
-            d="M0.410765 0.910734C0.736202 0.585297 1.26384 0.585297 1.58928 0.910734L6.00002 5.32148L10.4108 0.910734C10.7362 0.585297 11.2638 0.585297 11.5893 0.910734C11.9147 1.23617 11.9147 1.76381 11.5893 2.08924L6.58928 7.08924C6.26384 7.41468 5.7362 7.41468 5.41077 7.08924L0.410765 2.08924C0.0853277 1.76381 0.0853277 1.23617 0.410765 0.910734Z"
-            fill=""
-          />
-        </svg>
-      </Link> */}
       <Stack
         flexDirection="row"
         alignItems="center"
-        // gap={1}
         onClick={() => setDropdownOpen(!dropdownOpen)}
       >
         <div
@@ -160,7 +112,6 @@ const DropdownUser = () => {
             background: '#EFF4FB',
             borderRadius: '50%',
             border: '1px solid lightgray',
-            // padding: '2px',
           }}
         >
           <span className="h-12 w-12 rounded-full">
@@ -169,8 +120,6 @@ const DropdownUser = () => {
                 src={profileImage}
                 alt="User"
                 style={{
-                  // height: '50px',
-                  // width: '50px',
                   height: '100%',
                   width: '100%',
                   borderRadius: '50%',
@@ -180,10 +129,7 @@ const DropdownUser = () => {
             ) : (
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                // width="40"
-                // height="40"
                 viewBox="0 0 24 24"
-                // style={{ border: '1px solid lightgray', borderRadius: '50%' }}
                 fill="currentColor"
               >
                 <path stroke="none" d="M0 0h24v24H0z" fill="none" />
@@ -193,13 +139,9 @@ const DropdownUser = () => {
             )}
           </span>
         </div>
-        {/* {!dropdownOpen ? (
-          <IconArrowBadgeDown color="#A9A9A9" />
-        ) : (
-          <IconArrowBadgeUp color="#A9A9A9" />
-        )} */}
       </Stack>
-      {/* <!-- Dropdown Start --> */}
+
+      {/* Dropdown Overlay */}
       {dropdownOpen && (
         <div
           className="fixed inset-0 bg-black opacity-0"
@@ -207,6 +149,7 @@ const DropdownUser = () => {
           style={{ height: '100vh', width: '100vw' }}
         ></div>
       )}
+
       <div
         ref={dropdown}
         onFocus={() => setDropdownOpen(true)}
@@ -215,14 +158,14 @@ const DropdownUser = () => {
           dropdownOpen === true ? 'block' : 'hidden'
         }`}
       >
-        {/* <Stack alignItems="center" p={1}> */}
         <span className="block text-right p-2 border-b-2">
           <span className="block text-lg font-medium text-black dark:text-white text-center">
             <h2>{username}</h2>
           </span>
         </span>
-        {/* </Stack> */}
+
         <ul className="flex flex-col gap-5 border-b border-stroke px-6 py-5 dark:border-strokedark">
+          {/* My Profile */}
           <li>
             <Link
               to="/profile"
@@ -249,7 +192,57 @@ const DropdownUser = () => {
               My Profile
             </Link>
           </li>
+
+          {/* Change Password */}
+          <li>
+            <Link
+              to="/change-password"
+              onClick={() => setDropdownOpen(false)}
+              className="flex items-center gap-3.5 text-sm font-medium duration-300 ease-in-out hover:text-primary lg:text-base"
+            >
+              <svg
+                className="fill-current"
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 2C8.13 2 5 5.13 5 9v3c0 .78.16 1.53.46 2.22L3.7 16.7c-.44.88-.1 2.05.78 2.49.22.11.46.17.72.17h.5c0 1.1.9 2 2 2h.8c.11.6.5 1.07 1 1.37V21c0 1.1.9 2 2 2s2-.9 2-2v-.27c.5-.3.89-.77 1-1.37h.8c1.1 0 2-.9 2-2h.5c.26 0 .5-.06.72-.17.88-.44 1.22-1.61.78-2.49l-1.76-2.48c.3-.69.46-1.44.46-2.22V9c0-3.87-3.13-7-7-7zm-3 15h6v2h-6v-2zm3-10c1.1 0 2 .9 2 2v1h-4v-1c0-1.1.9-2 2-2z"
+                  fill=""
+                />
+              </svg>
+              Change Password
+            </Link>
+          </li>
+
+          {/* Forgot Password */}
+          {/* <li>
+            <Link
+              to="/auth/forgot"
+              onClick={() => setDropdownOpen(false)}
+              className="flex items-center gap-3.5 text-sm font-medium duration-300 ease-in-out hover:text-primary lg:text-base"
+            >
+              <svg
+                className="fill-current"
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 2C8.13 2 5 5.13 5 9v3c0 2.38 1.19 4.47 3 5.74V18c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2v-.26c1.81-1.27 3-3.36 3-5.74V9c0-3.87-3.13-7-7-7z"
+                  fill=""
+                />
+                <path d="M0 0h24v24H0z" fill="none" />
+              </svg>
+              Forgot Password
+            </Link>
+          </li> */}
         </ul>
+
         <button
           onClick={handleLogout}
           className="flex items-center gap-3.5 px-6 py-4 text-sm font-medium duration-300 ease-in-out hover:text-primary lg:text-base"
@@ -274,7 +267,6 @@ const DropdownUser = () => {
           Log Out
         </button>
       </div>
-      {/* <!-- Dropdown End --> */}
     </div>
   );
 };
