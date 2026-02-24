@@ -4,6 +4,7 @@ import { sendEmail } from "../services/emailService.js";
 import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
 import ExcelJS from "exceljs";
+import { sendUserEmail } from "../services/emailService.js";
 
 const prisma = new PrismaClient();
 
