@@ -291,6 +291,8 @@ router.get("/getUserProcesses", get_user_processes);
 
 router.post("/changePassword", change_password);
 
+router.post("/forgetPassword", forget_password);
+
 router.post("/signDocument", sign_document);
 
 router.post("/signDocuments", sign_documents);
