@@ -321,6 +321,16 @@ const generate_unique_process_name = async (workflowId) => {
   }
 };
 
+// Helper to get process tags (unique tags from all processDocuments)
+const getProcessTags = async (processId) => {
+  const processDocs = await prisma.processDocument.findMany({
+    where: { processId },
+    select: { tags: true },
+  });
+  const allTags = processDocs.flatMap((pd) => pd.tags || []);
+  return [...new Set(allTags)]; // unique tags
+};
+
 export const initiate_process = async (req, res, next) => {
   try {
     const accessToken = req.headers["authorization"]?.substring(7);
@@ -577,7 +587,8 @@ export const initiate_process = async (req, res, next) => {
           include: { document: true },
         });
 
-        const documentIds = processDocs.map((pd) => pd.documentId);
+        const tags = await getProcessTags(process.id);
+        const processDescription = process.description;
 
         if (assignedUser) {
           await sendProcessNotification("stepAssigned", {
@@ -586,6 +597,8 @@ export const initiate_process = async (req, res, next) => {
               firstStepInstance,
               processDocs,
               assignedUser,
+              processDescription,
+              tags, // new parameters
             ],
           });
         }
@@ -4385,49 +4398,46 @@ export const complete_process_step = async (req, res) => {
       });
 
       if (stepInstance) {
-        // Helper function to get next assignee
         const getNextAssignee = async (currentStepInstance) => {
           const currentStep = await prisma.workflowStep.findUnique({
             where: { id: currentStepInstance.stepId },
           });
-
           if (!currentStep) return null;
-
           const nextStep = await prisma.workflowStep.findFirst({
             where: {
               workflowId: currentStep.workflowId,
               stepNumber: currentStep.stepNumber + 1,
             },
           });
-
           if (!nextStep) return null;
-
           const nextInstance = await prisma.processStepInstance.findFirst({
             where: {
               processId: currentStepInstance.processId,
               stepId: nextStep.id,
               status: "IN_PROGRESS",
             },
-            select: {
-              assignedTo: true, // This is the user ID
-            },
+            select: { assignedTo: true },
           });
-
           if (!nextInstance || !nextInstance.assignedTo) return null;
-
-          // Fetch user details using the assignedTo ID
-          const user = await prisma.user.findUnique({
+          return await prisma.user.findUnique({
             where: { id: nextInstance.assignedTo },
             select: { id: true, username: true, name: true, email: true },
           });
-
-          return user;
         };
 
         const nextAssignee = await getNextAssignee(stepInstance);
+        const tags = await getProcessTags(stepInstance.processId);
+        const processDescription = stepInstance.process.description;
 
         await sendProcessNotification("stepAssigned", {
-          params: [stepInstance.process, stepInstance, userData, nextAssignee],
+          params: [
+            stepInstance.process,
+            stepInstance,
+            userData, // completedByUser (though not used in template)
+            nextAssignee,
+            processDescription,
+            tags,
+          ],
         });
 
         // If process is completed, send processCompleted notification
@@ -4441,10 +4451,16 @@ export const complete_process_step = async (req, res) => {
             where: { id: processStatus.initiatorId },
             select: { id: true, email: true, username: true, name: true },
           });
-
           if (initiator) {
+            const tags = await getProcessTags(stepInstance.processId);
+            const processDescription = stepInstance.process.description;
             await sendProcessNotification("processCompleted", {
-              params: [stepInstance.process, initiator],
+              params: [
+                stepInstance.process,
+                initiator,
+                processDescription,
+                tags,
+              ],
             });
           }
         }
@@ -5032,7 +5048,18 @@ export const createQuery = async (req, res) => {
         include: {
           stepInstance: {
             include: {
-              process: true,
+              process: {
+                include: {
+                  initiator: {
+                    select: {
+                      id: true,
+                      email: true,
+                      username: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
               workflowStep: true,
             },
           },
@@ -5043,7 +5070,7 @@ export const createQuery = async (req, res) => {
       });
 
       if (processQA) {
-        // Get the user assigned to respond to the query
+        // 1. Send email to the assigned user (to respond)
         const assignedToId = processQA.entityId;
         const assignedUser = await prisma.user.findUnique({
           where: { id: assignedToId },
@@ -5051,14 +5078,36 @@ export const createQuery = async (req, res) => {
         });
 
         if (assignedUser) {
-          // await sendProcessNotification("queryRaised", {
-          //   params: [
-          //     processQA.stepInstance.process,
-          //     processQA,
-          //     userData,
-          //     assignedUser,
-          //   ],
-          // });
+          const tags = await getProcessTags(processId);
+          const processDescription = processQA.stepInstance.process.description;
+          await sendProcessNotification("queryRaised", {
+            params: [
+              processQA.stepInstance.process,
+              processQA,
+              userData, // raisedByUser
+              assignedUser,
+              processDescription,
+              tags,
+            ],
+          });
+        }
+
+        // 2. Send email to the process initiator
+        const initiator = processQA.stepInstance.process.initiator;
+        if (initiator && initiator.id !== userData.id) {
+          // avoid sending to self if initiator raised query
+          const tags = await getProcessTags(processId);
+          const processDescription = processQA.stepInstance.process.description;
+          await sendProcessNotification("queryRaisedToInitiator", {
+            params: [
+              processQA.stepInstance.process,
+              processQA,
+              userData, // raisedByUser
+              initiator,
+              processDescription,
+              tags,
+            ],
+          });
         }
       }
     } catch (emailError) {
@@ -5193,7 +5242,13 @@ export const createRecommendation = async (req, res) => {
       const recommendation = await prisma.recommendation.findUnique({
         where: { id: result.id },
         include: {
-          process: true,
+          process: {
+            include: {
+              initiator: {
+                select: { id: true, username: true, name: true, email: true },
+              },
+            },
+          },
           stepInstance: {
             include: {
               workflowStep: true,
@@ -5209,14 +5264,18 @@ export const createRecommendation = async (req, res) => {
       });
 
       if (recommendation && recommendation.recommender) {
-        // await sendProcessNotification("recommendationRequested", {
-        //   params: [
-        //     recommendation.process,
-        //     recommendation,
-        //     userData,
-        //     recommendation.recommender,
-        //   ],
-        // });
+        const tags = await getProcessTags(processId);
+        const processDescription = recommendation.process.description;
+        await sendProcessNotification("recommendationRequested", {
+          params: [
+            recommendation.process,
+            recommendation,
+            userData, // requesterUser
+            recommendation.recommender,
+            processDescription,
+            tags,
+          ],
+        });
       }
     } catch (emailError) {
       console.error("Error sending email notification:", emailError);
@@ -5470,6 +5529,44 @@ export const submitRecommendationResponse = async (req, res) => {
 
       return { recommendation: updatedRecommendation, documentHistoryEntries };
     });
+
+    try {
+      const recommendation = await prisma.recommendation.findUnique({
+        where: { id: recommendationId },
+        include: {
+          process: {
+            include: {
+              initiator: {
+                select: { id: true, username: true, name: true, email: true },
+              },
+            },
+          },
+          initiator: {
+            select: { id: true, username: true, name: true, email: true },
+          },
+          recommender: {
+            select: { id: true, email: true, username: true, name: true },
+          },
+        },
+      });
+
+      if (recommendation && recommendation.initiator) {
+        const tags = await getProcessTags(recommendation.processId);
+        const processDescription = recommendation.process.description;
+        await sendProcessNotification("recommendationResponded", {
+          params: [
+            recommendation.process,
+            recommendation,
+            userData, // recommenderUser (who responded)
+            recommendation.initiator, // requesterUser
+            processDescription,
+            tags,
+          ],
+        });
+      }
+    } catch (emailError) {
+      console.error("Error sending email notification:", emailError);
+    }
 
     return res.status(200).json({
       message: "Recommendation response submitted successfully",

@@ -34,6 +34,11 @@ const transporter = nodemailer.createTransport({
   // debug: true
 });
 
+const formatTags = (tags) => {
+  if (!tags || tags.length === 0) return "<p>No tags</p>";
+  return `<ul style="list-style-type: none; padding-left: 0; margin: 10px 0;">${tags.map((tag) => `<li style="display: inline-block; background-color: #e9ecef; border-radius: 16px; padding: 4px 12px; margin: 4px; font-size: 13px;">${tag}</li>`).join("")}</ul>`;
+};
+
 // Generate auto-login token with short expiration
 const generateAutoLoginToken = (
   userId,
@@ -428,20 +433,17 @@ Best regards,
 ${process.env.EMAIL_COMPANY_NAME || "AIA DWS Team"}`,
     };
   },
-  stepAssigned: async (process, stepInstance, documents, assignedUser) => {
-    console.log("assigned user", assignedUser);
-    console.log("process", process);
-
+  stepAssigned: async (
+    process,
+    stepInstance,
+    documents,
+    assignedUser,
+    processDescription,
+    tags,
+  ) => {
     const processUrl = generateAutoLoginProcessUrl(
       process.id,
       assignedUser?.id || process.initiator.id,
-    );
-
-    // Generate document links for each document - FIXED
-
-    // Get last approved user
-    const lastStep = process.steps?.find(
-      (step) => step.status === "COMPLETED" && step.actionType === "APPROVAL",
     );
 
     const lastApprovedBy = await getLastApprovedBy(
@@ -454,72 +456,102 @@ ${process.env.EMAIL_COMPANY_NAME || "AIA DWS Team"}`,
       title: `Request for Workflow Approval – Process ${process.name}`,
       greeting: `Dear Sir,`,
       message: `
-      <p>I would like to request your recommendation and review for the following process, which is currently in progress.</p>
-    `,
+        <p>I would like to request your recommendation and review for the following process, which is currently in progress.</p>
+      `,
       processDetails: `
-      <p><strong>Process Details:</strong></p>
-      <ul style="list-style-type: none; padding-left: 0; margin: 10px 0;">
-        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
-          <span style="position: absolute; left: 0;">•</span>
-          <strong>Process Name:</strong> ${process.name}
-        </li>
-        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
-          <span style="position: absolute; left: 0;">•</span>
-          <strong>Initiator Name:</strong> ${process.initiator.username || "Unknown"}
-        </li>
-        <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
-          <span style="position: absolute; left: 0;">•</span>
-          <strong>Last Approved By:</strong> ${lastApprovedBy}
-        </li>
-      </ul>
-    `,
+        <p><strong>Process Details:</strong></p>
+        <ul style="list-style-type: none; padding-left: 0; margin: 10px 0;">
+          <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+            <span style="position: absolute; left: 0;">•</span>
+            <strong>Process Name:</strong> ${process.name}
+          </li>
+          <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+            <span style="position: absolute; left: 0;">•</span>
+            <strong>Description:</strong> ${processDescription || "N/A"}
+          </li>
+          <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+            <span style="position: absolute; left: 0;">•</span>
+            <strong>Initiator Name:</strong> ${process.initiator.username || "Unknown"}
+          </li>
+          <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+            <span style="position: absolute; left: 0;">•</span>
+            <strong>Last Approved By:</strong> ${lastApprovedBy}
+          </li>
+          <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
+            <span style="position: absolute; left: 0;">•</span>
+            <strong>Tags:</strong> ${formatTags(tags)}
+          </li>
+        </ul>
+      `,
       quickAccessLinks: `
-      <div style="margin: 20px 0; padding: 15px; background-color: #f0f8ff; border-left: 4px solid #007bff;">
-        <p style="margin-top: 0;"><strong>Quick Access Links:</strong></p>
-        <div style="margin: 10px 0;">
-          <a href="${processUrl}" 
-             style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; margin: 5px 10px 5px 0; font-weight: 500;">
-            📋 View Process
-          </a>
+        <div style="margin: 20px 0; padding: 15px; background-color: #f0f8ff; border-left: 4px solid #007bff;">
+          <p style="margin-top: 0;"><strong>Quick Access Links:</strong></p>
+          <div style="margin: 10px 0;">
+            <a href="${processUrl}" 
+               style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; margin: 5px 10px 5px 0; font-weight: 500;">
+              📋 View Process
+            </a>
+          </div>
         </div>
-      </div>
-    `,
+      `,
       closingMessage: `
-      <p style="margin-top: 20px;">You may use the above links to directly access the process and review the associated documents.  </p>
-      <p style="margin-top: 30px; font-style: italic;">Warm regards,<br/>
-      <strong>${process.initiator.username || "Initiator"}</strong></p>
-    `,
+        <p style="margin-top: 20px;">You may use the above links to directly access the process and review the associated documents.</p>
+        <p style="margin-top: 30px; font-style: italic;">Warm regards,<br/>
+        <strong>${process.initiator.username || "Initiator"}</strong></p>
+      `,
       text: `Dear Sir,
 
-I hope this email finds you well.
-
-I would like to request your recommendation and review for the following process, which is currently in progress. The complete details are provided below for your reference.
+I would like to request your recommendation and review for the following process, which is currently in progress.
 
 Process Details:
-• Process ID: ${process.id}
 • Process Name: ${process.name}
-• Process Version: ${process.issueNo || "N/A"}
-• Description: ${process.description || "N/A"}
+• Description: ${processDescription || "N/A"}
 • Initiator Name: ${process.initiator.username || "Unknown"}
-• Current Status: ${process.status}
 • Last Approved By: ${lastApprovedBy}
-
-Timeline Information:
-• Created At: ${new Date(process.createdAt).toLocaleDateString("en-GB")}, ${new Date(process.createdAt).toLocaleTimeString()}
-• Last Updated At: ${process.updatedAt ? `${new Date(process.updatedAt).toLocaleDateString("en-GB")}, ${new Date(process.updatedAt).toLocaleTimeString()}` : "N/A"}
-• Completed At: ${process.completedAt ? `${new Date(process.completedAt).toLocaleDateString("en-GB")}, ${new Date(process.completedAt).toLocaleTimeString()}` : "N/A"}
+• Tags: ${tags?.join(", ") || "None"}
 
 Quick Access Links:
 • View Process: ${processUrl}
 
-You may use the above links to directly access the process and review the associated documents. Kindly let me know if any additional information or clarification is required from my end.
-
-I would appreciate your guidance and recommendation to proceed further.
-
-Thank you for your time and support.
-
 Warm regards,
 ${process.initiator.username || "Initiator"}`,
+    };
+  },
+
+  queryRaisedToInitiator: async (
+    process,
+    query,
+    raisedByUser,
+    initiator,
+    processDescription,
+    tags,
+  ) => {
+    const processUrl = generateAutoLoginProcessUrl(process.id, initiator.id);
+    return {
+      title: `Query Raised on Process ${process.name}`,
+      greeting: `Dear ${initiator.username},`,
+      message: `
+        <p>A query has been raised on a process you initiated.</p>
+        <p><strong>Process:</strong> ${process.name}</p>
+        <p><strong>Description:</strong> ${processDescription || "N/A"}</p>
+        <p><strong>Tags:</strong> ${formatTags(tags)}</p>
+        <p><strong>Query:</strong> ${query.question}</p>
+        <p><strong>Raised by:</strong> ${raisedByUser.username}</p>
+        <p><strong>Raised at:</strong> ${new Date(query.createdAt).toLocaleString()}</p>
+      `,
+      quickAccessLinks: `
+        <div style="margin: 20px 0;">
+          <a href="${processUrl}" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">View Process</a>
+        </div>
+      `,
+      closingMessage: `<p>Please review and take necessary action.</p>`,
+      text: `Dear ${initiator.username},
+
+A query has been raised on process "${process.name}":
+Query: ${query.question}
+Raised by: ${raisedByUser.username}
+
+View process: ${processUrl}`,
     };
   },
 
@@ -607,33 +639,78 @@ ${process.initiator.username || "Initiator"}`,
     recommendation,
     requesterUser,
     recommenderUser,
+    processDescription,
+    tags,
   ) => {
+    const processUrl = generateAutoLoginProcessUrl(
+      process.id,
+      recommenderUser.id,
+    );
     return {
-      title: "Recommendation Requested",
-      greeting: `Dear Sir`,
+      title: `Recommendation Requested – Process ${process.name}`,
+      greeting: `Dear ${recommenderUser.username},`,
       message: `
-        <p>You have been requested to provide a recommendation.</p>
+        <p>You have been requested to provide a recommendation for the following process:</p>
         <p><strong>Process:</strong> ${process.name}</p>
+        <p><strong>Description:</strong> ${processDescription || "N/A"}</p>
+        <p><strong>Tags:</strong> ${formatTags(tags)}</p>
         <p><strong>Requested by:</strong> ${requesterUser.username}</p>
-        <p><strong>Recommendation:</strong> ${recommendation.recommendationText}</p>
+        <p><strong>Recommendation details:</strong> ${recommendation.recommendationText}</p>
       `,
-      processDetails: `
-        <p><strong>Process ID:</strong> ${process.id}</p>
-        <p><strong>Process Name:</strong> ${process.name}</p>
+      quickAccessLinks: `
+        <div style="margin: 20px 0;">
+          <a href="${processUrl}" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">View Process</a>
+        </div>
       `,
-      actions: [
-        {
-          text: "View Recommendation",
-          url: `${env.FRONTEND_URL}/recommendations/${recommendation.id}`,
-          color: "#007bff",
-        },
-        {
-          text: "Provide Recommendation",
-          url: `${env.FRONTEND_URL}/recommendations/respond/${recommendation.id}`,
-          color: "#28a745",
-        },
-      ],
-      footerNote: "Your expert opinion is requested for this process.",
+      closingMessage: `<p>Please provide your response at your earliest convenience.</p>`,
+      text: `Dear ${recommenderUser.username},
+
+You have been requested to provide a recommendation for process "${process.name}":
+Description: ${processDescription || "N/A"}
+Tags: ${tags?.join(", ") || "None"}
+Requested by: ${requesterUser.username}
+Recommendation: ${recommendation.recommendationText}
+
+View process: ${processUrl}`,
+    };
+  },
+  recommendationResponded: async (
+    process,
+    recommendation,
+    recommenderUser,
+    requesterUser,
+    processDescription,
+    tags,
+  ) => {
+    const processUrl = generateAutoLoginProcessUrl(
+      process.id,
+      requesterUser.id,
+    );
+    return {
+      title: `Recommendation Response Received – Process ${process.name}`,
+      greeting: `Dear ${requesterUser.username},`,
+      message: `
+          <p>A recommendation has been responded to.</p>
+          <p><strong>Process:</strong> ${process.name}</p>
+          <p><strong>Description:</strong> ${processDescription || "N/A"}</p>
+          <p><strong>Tags:</strong> ${formatTags(tags)}</p>
+          <p><strong>Recommender:</strong> ${recommenderUser.username}</p>
+          <p><strong>Response:</strong> ${recommendation.responseText || "N/A"}</p>
+          <p><strong>Status:</strong> ${recommendation.status}</p>
+        `,
+      quickAccessLinks: `
+          <div style="margin: 20px 0;">
+            <a href="${processUrl}" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">View Process</a>
+          </div>
+        `,
+      closingMessage: `<p>You may now continue with the process.</p>`,
+      text: `Dear ${requesterUser.username},
+  
+  A recommendation has been responded to for process "${process.name}":
+  Recommender: ${recommenderUser.username}
+  Response: ${recommendation.responseText || "N/A"}
+  
+  View process: ${processUrl}`,
     };
   },
 
@@ -670,34 +747,31 @@ ${process.initiator.username || "Initiator"}`,
   },
 
   // Process Completed Email
-  processCompleted: async (process, initiator) => {
+  processCompleted: async (process, initiator, processDescription, tags) => {
+    const processUrl = generateAutoLoginProcessUrl(process.id, initiator.id);
     return {
-      title: "Process Completed Successfully",
-      greeting: `Dear Sir`,
+      title: `Process Completed Successfully – ${process.name}`,
+      greeting: `Dear ${initiator.username},`,
       message: `
         <p>Your process has been completed successfully!</p>
         <p><strong>Process:</strong> ${process.name}</p>
+        <p><strong>Description:</strong> ${processDescription || "N/A"}</p>
+        <p><strong>Tags:</strong> ${formatTags(tags)}</p>
         <p><strong>Completed at:</strong> ${new Date().toLocaleString()}</p>
-        <p><strong>Status:</strong> ${process.status}</p>
       `,
-      processDetails: `
-        <p><strong>Process ID:</strong> ${process.id}</p>
-        <p><strong>Description:</strong> ${process.description || "N/A"}</p>
-        <p><strong>Total Steps:</strong> ${process.steps?.length || "N/A"}</p>
+      quickAccessLinks: `
+        <div style="margin: 20px 0;">
+          <a href="${processUrl}" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">View Process</a>
+        </div>
       `,
-      actions: [
-        {
-          text: "View Process",
-          url: generatePublicProcessUrl(process.id, initiator.id),
-          color: "#007bff",
-        },
-        {
-          text: "Download Documents",
-          url: `${env.FRONTEND_URL}/processes/${process.id}/export`,
-          color: "#28a745",
-        },
-      ],
-      footerNote: "All steps have been completed and documents are ready.",
+      closingMessage: `<p>All steps have been completed.</p>`,
+      text: `Dear ${initiator.username},
+
+Your process "${process.name}" has been completed successfully.
+Description: ${processDescription || "N/A"}
+Tags: ${tags?.join(", ") || "None"}
+
+View process: ${processUrl}`,
     };
   },
 
@@ -795,111 +869,75 @@ const getRecipientsForEvent = async (eventType, data) => {
   console.log("data", data);
 
   const recipients = new Set();
-
-  // Extract params safely
   const params = data?.params || [];
 
   switch (eventType) {
     case "stepAssigned": {
-      // params: [process, stepInstance, documents, assignedUser]
       const [, , , assignedUser] = params;
-
-      if (assignedUser) {
-        recipients.add(assignedUser);
-      }
+      if (assignedUser) recipients.add(assignedUser);
       break;
     }
-
     case "stepCompleted": {
-      // params: [process, stepInstance, completedByUser, nextAssignee]
       const [process, , , nextAssignee] = params;
-
-      if (nextAssignee) {
-        recipients.add(nextAssignee);
-      }
-
+      if (nextAssignee) recipients.add(nextAssignee);
       if (process?.initiatorId) {
         const initiator = await prisma.user.findUnique({
           where: { id: process.initiatorId },
-          select: { id: true, email: true, username: true, name: true },
         });
         if (initiator) recipients.add(initiator);
       }
       break;
     }
-
     case "queryRaised": {
-      // params: [process, query, raisedByUser, assignedToUser]
       const [process, , , assignedToUser] = params;
-
-      if (assignedToUser) {
-        recipients.add(assignedToUser);
-      }
-
-      if (process?.initiatorId) {
-        const initiator = await prisma.user.findUnique({
-          where: { id: process.initiatorId },
-          select: { id: true, email: true, username: true, name: true },
-        });
-        if (initiator) recipients.add(initiator);
-      }
+      if (assignedToUser) recipients.add(assignedToUser);
       break;
     }
-
+    case "queryRaisedToInitiator": {
+      const [process, , , initiator] = params;
+      if (initiator) recipients.add(initiator);
+      break;
+    }
     case "recommendationRequested": {
-      // params: [process, recommendation, requesterUser, recommenderUser]
       const [, , , recommenderUser] = params;
-
-      if (recommenderUser) {
-        recipients.add(recommenderUser);
-      }
+      if (recommenderUser) recipients.add(recommenderUser);
       break;
     }
-
+    case "recommendationResponded": {
+      const [, , , requesterUser] = params; // requester is the one who requested recommendation
+      if (requesterUser) recipients.add(requesterUser);
+      break;
+    }
     case "processCompleted": {
-      // params: [process, initiator]
       const [process, initiator] = params;
-
-      if (initiator) {
-        recipients.add(initiator);
-      }
-
-      // Notify all unique participants
+      if (initiator) recipients.add(initiator);
+      // Also notify all participants
       let participants = await prisma.processStepInstance.findMany({
         where: { processId: process.id },
         distinct: ["assignedTo"],
-        select: {
-          assignedTo: true,
-        },
+        select: { assignedTo: true },
       });
-
       participants = await Promise.all(
         participants.map(async (p) => {
           if (p.assignedTo) {
-            const user = await prisma.user.findUnique({
+            return await prisma.user.findUnique({
               where: { id: p.assignedTo },
-              select: { id: true, email: true, username: true, name: true },
             });
-            return user;
           }
           return null;
         }),
       );
       participants.forEach((p) => {
-        if (p.assignedTo && (!initiator || p.assignedTo.id !== initiator.id)) {
-          recipients.add(p.assignedTo);
-        }
+        if (p && (!initiator || p.id !== initiator.id)) recipients.add(p);
       });
       break;
     }
-
     default:
       break;
   }
 
   const result = Array.from(recipients);
   console.log("resolved recipients", result);
-
   return result;
 };
 
