@@ -423,7 +423,7 @@ export default function Logs() {
             rowsPerPageOptions={[10, 25, 50]}
             autoHeight
             disableSelectionOnClick
-            className="border rounded-lg"
+            className="border !rounded-[12px]"
           />
 
           {/* Filter Modal */}
