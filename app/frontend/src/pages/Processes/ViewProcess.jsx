@@ -803,6 +803,8 @@ const ViewProcess = () => {
         </div>
       </CustomCard>
     );
+  const isInitiator =
+    process?.initiatorName === sessionStorage.getItem('username');
 
   if (!process)
     return (
@@ -816,7 +818,7 @@ const ViewProcess = () => {
       {actionsLoading && <TopLoader />}
       <CustomCard>
         <div className="flex justify-end flex-row gap-2 flex-wrap">
-          {process?.currentStepNumber != 1 && (
+          {!isInitiator && (
             <CustomButton
               text={'Approve'}
               click={() => openModelSignAllDoec(process?.processStepInstanceId)}
@@ -826,7 +828,7 @@ const ViewProcess = () => {
               // }
             />
           )}
-          {process?.currentStepNumber != 1 && (
+          {!isInitiator && (
             <CustomButton
               variant={'danger'}
               text={'Reject'}
