@@ -2141,12 +2141,11 @@ export const view_process_ = async (req, res) => {
         documentVersioning,
         sededDocuments,
         workflow,
-        currentStepNumber:
-          currentStepInstance?.workflowStep?.stepNumber || null,
+        currentStepNumber: process.currentStep?.stepNumber || null,
         currentStepType:
           process.status === "COMPLETED" || process.initiator.id === userData.id
             ? "APPROVAL"
-            : currentStepInstance?.workflowStep?.stepType,
+            : process.currentStep?.stepType || null,
       },
     };
 
@@ -3458,12 +3457,11 @@ export const view_process = async (req, res) => {
         documentVersioning: finalDocumentVersioning,
         sededDocuments,
         workflow,
-        currentStepNumber:
-          currentStepInstance?.workflowStep?.stepNumber || null,
+        currentStepNumber: process.currentStep?.stepNumber || null,
         currentStepType:
           process.status === "COMPLETED" || process.initiator.id === userData.id
             ? "APPROVAL"
-            : currentStepInstance?.workflowStep?.stepType,
+            : process.currentStep?.stepType || null,
         // Email threads in consistent structure
         emailThreads: normalizedEmailThreads,
       },
