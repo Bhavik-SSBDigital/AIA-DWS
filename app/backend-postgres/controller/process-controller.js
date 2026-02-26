@@ -4048,22 +4048,15 @@ export const get_user_processes = async (req, res, next) => {
             initiator: {
               select: { username: true },
             },
-            // queries: {
-            //   where: {
-            //     OR: [
-            //       { raisedById: userId },
-            //       { recirculationApprovals: { some: { approverId: userId } } },
-            //     ],
-            //   },
-            //   select: { id: true, queryText: true, status: true },
-            // },
-            // recommendations: {
-            //   where: {
-            //     OR: [{ requestedById: userId }, { recommendedToId: userId }],
-            //     status: "IN_PROGRESS",
-            //   },
-            //   select: { id: true, remarks: true, status: true },
-            // },
+            // Use the correct relation name: qaChannels
+            qaChannels: {
+              where: {
+                entityId: userId,
+                status: "OPEN",
+              },
+              select: { id: true },
+            },
+            // Recommendations are not directly included here; if needed, query separately
           },
         },
         workflowAssignment: {
@@ -4087,6 +4080,9 @@ export const get_user_processes = async (req, res, next) => {
         ? new Date(step.deadline.getTime() - escalationHours * 60 * 60 * 1000)
         : null;
 
+      const hasOpenQuery = step.process.qaChannels.length > 0;
+      const isRejected = hasOpenQuery; // You can extend this to include recommendations if needed
+
       return {
         processId: step.process.id,
         processName: step.process?.name || "Unnamed Process",
@@ -4094,7 +4090,7 @@ export const get_user_processes = async (req, res, next) => {
         initiatorUsername: step.process?.initiator?.username || "System User",
         createdAt: step.createdAt,
         actionType:
-          process.initiatorId === userData.id
+          step.process.initiatorId === userId
             ? "APPROVAL"
             : step.workflowAssignment?.step?.stepType || "GENERAL",
         stepName: step.workflowAssignment?.step?.stepName || "Pending Step",
@@ -4102,16 +4098,7 @@ export const get_user_processes = async (req, res, next) => {
         assignmentId: step.assignmentId,
         deadline: step.deadline,
         stepInstanceId: step.id,
-        // queries: step.process.queries.map((q) => ({
-        //   id: q.id,
-        //   queryText: q.queryText,
-        //   status: q.status,
-        // })),
-        // recommendations: step.process.recommendations.map((r) => ({
-        //   id: r.id,
-        //   remarks: r.remarks,
-        //   status: r.status,
-        // })),
+        isRejected, // true if there is an open query
       };
     });
 
