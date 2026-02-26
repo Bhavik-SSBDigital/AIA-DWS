@@ -238,7 +238,7 @@ export default function Dashboard() {
           </CustomCard>
 
           <CustomCard
-            className="cursor-pointer hover:shadow-md"
+            className="cursor-pointer hover:shadow-md text-red-600 font-bold"
             title="Rejected Documents"
             onClick={() => setOpenModal('rejectedDocuments')}
           >
