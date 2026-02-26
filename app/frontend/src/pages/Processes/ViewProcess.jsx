@@ -816,21 +816,25 @@ const ViewProcess = () => {
       {actionsLoading && <TopLoader />}
       <CustomCard>
         <div className="flex justify-end flex-row gap-2 flex-wrap">
-          <CustomButton
-            text={'Approve'}
-            click={() => openModelSignAllDoec(process?.processStepInstanceId)}
-            className={'min-w-[150px]'}
-            // disabled={
-            //   actionsLoading || isCompleted || process?.toBePicked === true
-            // }
-          />
-          <CustomButton
-            variant={'danger'}
-            text={'Reject'}
-            className={'min-w-[150px]'}
-            click={() => setOpenModal('query')}
-            disabled={actionsLoading || isCompleted || disableActions}
-          />
+          {process?.currentStepNumber != 1 && (
+            <CustomButton
+              text={'Approve'}
+              click={() => openModelSignAllDoec(process?.processStepInstanceId)}
+              className={'min-w-[150px]'}
+              // disabled={
+              //   actionsLoading || isCompleted || process?.toBePicked === true
+              // }
+            />
+          )}
+          {process?.currentStepNumber != 1 && (
+            <CustomButton
+              variant={'danger'}
+              text={'Reject'}
+              className={'min-w-[150px]'}
+              click={() => setOpenModal('query')}
+              disabled={actionsLoading || isCompleted || disableActions}
+            />
+          )}
           {isCompleted && !disableActions && (
             <CustomButton
               variant={'primary'}
@@ -876,7 +880,7 @@ const ViewProcess = () => {
           />
           <CustomButton
             variant={'secondary'}
-            text={'Timeline'}
+            text={'Activity Logs'}
             click={() => navigate(`/timeline/${process?.processId}`)}
             className={'min-w-[150px]'}
             disabled={actionsLoading}
