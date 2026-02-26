@@ -21,15 +21,15 @@ const DropdownNotification = () => {
           return diffInDays <= 15;
         });
 
-        // Optional: Rejected on top
-        const sorted = filtered.sort((a, b) => {
-          if (a.isRejected === b.isRejected) {
-            return new Date(b.createdAt) - new Date(a.createdAt);
-          }
-          return a.isRejected ? -1 : 1;
-        });
+        setNotifications(filtered);
+        // const sorted = filtered.sort((a, b) => {
+        //   if (a.isRejected === b.isRejected) {
+        //     return new Date(b.createdAt) - new Date(a.createdAt);
+        //   }
+        //   return a.isRejected ? -1 : 1;
+        // });
 
-        setNotifications(sorted);
+        // setNotifications(sorted);
       }
     } catch (error) {
       console.error('Failed to fetch notifications', error);
