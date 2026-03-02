@@ -1,15 +1,28 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { IconTags, IconPlus, IconX, IconLoader2 } from '@tabler/icons-react';
+import {
+  IconTags,
+  IconPlus,
+  IconX,
+  IconLoader2,
+  IconPencil,
+  IconTrash,
+} from '@tabler/icons-react';
 import apiClient from '../../common/Apis';
-import CustomButton from '../../CustomComponents/CustomButton';
 import { toast } from 'react-toastify';
 
 export default function TagsMasterPage() {
-  const [tags, setTags] = useState([]);
+  const [tags, setTags] = useState([]); // { id, name }
   const [newTags, setNewTags] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Edit state
+  const [editingTag, setEditingTag] = useState(null); // { id, name }
+  const [editInput, setEditInput] = useState('');
+
+  // Delete confirmation state
+  const [deletingTag, setDeletingTag] = useState(null); // { id, name }
 
   const inputRef = useRef(null);
 
@@ -18,11 +31,10 @@ export default function TagsMasterPage() {
     try {
       setLoading(true);
       const { data } = await apiClient.get('/tags');
-
-      // setTags(data.map((t) => t.name.toLowerCase()));
-      setTags(data.map((t) => t.name));
+      setTags(data);
     } catch (err) {
       console.error('Fetch tags failed:', err);
+      toast.error('Failed to load tags.');
     } finally {
       setLoading(false);
     }
@@ -32,51 +44,47 @@ export default function TagsMasterPage() {
     fetchTags();
   }, [fetchTags]);
 
-  // Add tag (button only)
+  // Add tag
   const addTag = useCallback(() => {
     const tag = input.trim();
-    // const tag = input.trim().toLowerCase();
     if (!tag) return;
 
-    if (newTags.includes(tag) || tags.includes(tag)) {
+    if (
+      newTags.some((t) => t.toLowerCase() === tag.toLowerCase()) ||
+      tags.some((t) => t.name.toLowerCase() === tag.toLowerCase())
+    ) {
       setInput('');
-      // inputRef.current.focus();
       return;
     }
 
     setNewTags((prev) => [...prev, tag]);
     setInput('');
-    // inputRef.current.focus();
   }, [input, newTags, tags]);
 
   const removeTag = (tag) => {
     setNewTags((prev) => prev.filter((t) => t !== tag));
   };
 
+  // Helper for repeated words
   const getRepeatedWords = () => {
     const countMap = newTags.reduce((acc, word) => {
       const lower = word.toLowerCase().trim();
-      if (!lower) return acc; // skip empty
+      if (!lower) return acc;
       acc[lower] = (acc[lower] || 0) + 1;
       return acc;
     }, {});
-
-    // Only keep words that appear ≥ 2 times
     return Object.entries(countMap)
       .filter(([_, count]) => count >= 2)
       .map(([word, count]) => ({ word, count }))
-      .sort((a, b) => b.count - a.count); // most frequent first
+      .sort((a, b) => b.count - a.count);
   };
 
   const [open, setOpen] = useState(false);
   const [hasRepeats, setHasRepeats] = useState([]);
 
-  // Submit tags
   const checkTags = async () => {
     if (!newTags.length) return;
-
     const repeated = getRepeatedWords();
-
     if (repeated.length) {
       setOpen(true);
       setHasRepeats(repeated);
@@ -84,9 +92,9 @@ export default function TagsMasterPage() {
       handleSubmit();
     }
   };
+
   const handleSubmit = async () => {
     if (!newTags.length) return;
-
     try {
       setSubmitting(true);
       await apiClient.post('/tags', { tags: newTags });
@@ -102,43 +110,83 @@ export default function TagsMasterPage() {
       setSubmitting(false);
     }
   };
+
   const handleClose = () => {
     setOpen(false);
     setHasRepeats([]);
   };
 
+  // Delete handlers
+  const confirmDelete = (tag) => {
+    setDeletingTag(tag);
+  };
+
+  const cancelDelete = () => {
+    setDeletingTag(null);
+  };
+
+  const handleDelete = async () => {
+    if (!deletingTag) return;
+    try {
+      setDeletingTag({ ...deletingTag, loading: true });
+      await apiClient.delete(`/tags/${deletingTag.id}`);
+      setTags((prev) => prev.filter((tag) => tag.id !== deletingTag.id));
+      toast.success('Tag deleted.');
+      cancelDelete();
+    } catch (err) {
+      console.error('Delete failed:', err);
+      toast.error('Failed to delete tag.');
+      setDeletingTag((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
+  // Edit handlers
+  const startEdit = (tag) => {
+    setEditingTag(tag);
+    setEditInput(tag.name);
+  };
+
+  const cancelEdit = () => {
+    setEditingTag(null);
+    setEditInput('');
+  };
+
+  const saveEdit = async () => {
+    if (!editInput.trim()) return;
+    try {
+      const { data } = await apiClient.put(`/tags/${editingTag.id}`, {
+        name: editInput.trim(),
+      });
+      setTags((prev) =>
+        prev.map((tag) => (tag.id === editingTag.id ? data : tag))
+      );
+      toast.success('Tag updated.');
+      cancelEdit();
+    } catch (err) {
+      console.error('Edit failed:', err);
+      toast.error(err.response?.data?.message || 'Failed to update tag.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4">
+      {/* Repeated words warning modal */}
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          {/* overlay click to close */}
           <div
             className="absolute inset-0"
             onClick={handleClose}
             aria-hidden="true"
           />
-
-          {/* dialog panel */}
-          <div
-            className={`
-        relative w-full max-w-md mx-4 sm:mx-6 
-        bg-white rounded-xl shadow-2xl 
-        overflow-hidden transform transition-all
-        scale-100
-      `}
-          >
-            {/* Header */}
+          <div className="relative w-full max-w-md mx-4 sm:mx-6 bg-white rounded-xl shadow-2xl overflow-hidden">
             <div className="px-6 py-5 border-b border-gray-200">
               <h2 className="text-xl font-semibold text-gray-900">
                 Repeated Words Found
               </h2>
             </div>
-
-            {/* Body */}
             <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">
               {hasRepeats.length > 0 ? (
                 <>
-                  {/* Warning banner */}
                   <div className="mb-5 p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-800">
                     <div className="flex items-center gap-3">
                       <svg
@@ -153,11 +201,9 @@ export default function TagsMasterPage() {
                       </p>
                     </div>
                   </div>
-
                   <p className="mb-3 text-gray-700 font-medium">
                     Repeated words ({hasRepeats.length}):
                   </p>
-
                   <ul className="space-y-2">
                     {hasRepeats.map(({ word, count }) => (
                       <li
@@ -184,33 +230,16 @@ export default function TagsMasterPage() {
                 </p>
               )}
             </div>
-
-            {/* Footer */}
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
               <button
                 onClick={handleClose}
-                className="
-            px-5 py-2.5 
-            text-gray-700 font-medium 
-            bg-white border border-gray-300 
-            rounded-lg hover:bg-gray-50 
-            focus:outline-none focus:ring-2 focus:ring-gray-300
-            transition-colors
-          "
+                className="px-5 py-2.5 text-gray-700 font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Close
               </button>
-
               <button
                 onClick={handleSubmit}
-                className="
-            px-5 py-2.5 
-            text-white font-medium 
-            bg-indigo-600 rounded-lg 
-            hover:bg-indigo-700 
-            focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
-            transition-colors
-          "
+                className="px-5 py-2.5 text-white font-medium bg-indigo-600 rounded-lg hover:bg-indigo-700"
               >
                 Continue
               </button>
@@ -218,6 +247,83 @@ export default function TagsMasterPage() {
           </div>
         </div>
       )}
+
+      {/* Edit tag modal */}
+      {editingTag && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="absolute inset-0" onClick={cancelEdit} />
+          <div className="relative w-full max-w-md mx-4 bg-white rounded-xl shadow-2xl overflow-hidden">
+            <div className="px-6 py-5 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900">Edit Tag</h2>
+            </div>
+            <div className="px-6 py-5">
+              <input
+                type="text"
+                value={editInput}
+                onChange={(e) => setEditInput(e.target.value)}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none"
+                placeholder="Tag name"
+                autoFocus
+              />
+            </div>
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={cancelEdit}
+                className="px-5 py-2.5 text-gray-700 font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={!editInput.trim()}
+                className="px-5 py-2.5 text-white font-medium bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deletingTag && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="absolute inset-0" onClick={cancelDelete} />
+          <div className="relative w-full max-w-md mx-4 bg-white rounded-xl shadow-2xl overflow-hidden">
+            <div className="px-6 py-5 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900">Delete Tag</h2>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-gray-700">
+                Are you sure you want to delete{' '}
+                <span className="font-semibold text-indigo-600">
+                  {deletingTag.name}
+                </span>
+                ? This action cannot be undone.
+              </p>
+            </div>
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={cancelDelete}
+                className="px-5 py-2.5 text-gray-700 font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deletingTag.loading}
+                className="px-5 py-2.5 text-white font-medium bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {deletingTag.loading && (
+                  <IconLoader2 size={18} className="animate-spin" />
+                )}
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-5xl mx-auto space-y-10">
         {/* Header */}
         <div className="flex items-center gap-4">
@@ -257,8 +363,6 @@ export default function TagsMasterPage() {
                 placeholder="Type tag"
                 className="flex-1 min-w-[160px] outline-none text-sm"
               />
-
-              {/* <CustomButton text="Add" className="px-4 py-2" click={addTag} /> */}
             </div>
             <button
               onClick={addTag}
@@ -274,7 +378,7 @@ export default function TagsMasterPage() {
             </button>
           </div>
 
-          {/* Submit */}
+          {/* Submit button */}
           <button
             onClick={checkTags}
             disabled={submitting || !newTags.length}
@@ -301,12 +405,28 @@ export default function TagsMasterPage() {
             </div>
           ) : (
             <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-              {tags.map((tag, idx) => (
+              {tags.map((tag) => (
                 <div
-                  key={tag + idx}
-                  className="px-4 py-2 text-center bg-gray-100 rounded-lg text-gray-700"
+                  key={tag.id}
+                  className="flex items-center justify-between px-4 py-2 bg-gray-100 rounded-lg text-gray-700"
                 >
-                  {tag}
+                  <span className="truncate font-medium">{tag.name}</span>
+                  <div className="flex gap-1 ml-2">
+                    <button
+                      onClick={() => startEdit(tag)}
+                      className="p-1 text-gray-500 hover:text-indigo-600 transition-colors"
+                      title="Edit tag"
+                    >
+                      <IconPencil size={16} />
+                    </button>
+                    <button
+                      onClick={() => confirmDelete(tag)}
+                      className="p-1 text-gray-500 hover:text-red-600 transition-colors"
+                      title="Delete tag"
+                    >
+                      <IconTrash size={16} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

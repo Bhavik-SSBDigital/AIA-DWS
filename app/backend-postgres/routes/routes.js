@@ -187,7 +187,12 @@ import {
 } from "../controller/doc-tracking-controller.js";
 import { export_file_logs } from "../controller/file-operation-handler.js";
 
-import { add_tags, get_tags } from "../controller/tag-controller.js";
+import {
+  add_tags,
+  get_tags,
+  update_tag,
+  delete_tag,
+} from "../controller/tag-controller.js";
 
 const router = express.Router();
 
@@ -197,6 +202,8 @@ router.get("/auto-login", autoLogin);
 router.post("/validate-auto-login", validateAutoLogin);
 router.post("/tags", add_tags);
 router.get("/tags", get_tags);
+router.put("/tags/:id", update_tag);
+router.delete("/tags/:id", delete_tag);
 
 // backend/routes/auth.js
 

@@ -86,7 +86,7 @@ const DropdownNotification = () => {
         {/* Header */}
         <div className="px-5 py-4 border-b border-gray-100">
           <h5 className="text-sm font-semibold text-gray-800">Notifications</h5>
-          <p className="text-xs text-gray-500 mt-1">Last 15 days updates</p>
+          {/* <p className="text-xs text-gray-500 mt-1">Last 15 days updates</p> */}
         </div>
 
         {/* Notification List */}
