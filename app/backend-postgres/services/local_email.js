@@ -10,22 +10,37 @@ const prisma = new PrismaClient();
 
 // Configure email transporter
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT || "25"),
-  secure: false, // true for 465, false for other ports
-  // auth: {
-  //   user: process.env.SMTP_USER,
-  //   pass: process.env.SMTP_PASSWORD,
-  // },
-  // Recommended: Increase timeout for corporate SMTP servers
-  connectionTimeout: 10000, // 10 seconds
-  socketTimeout: 15000, // 15 seconds
-  // Optional: For debugging
-  // logger: true,
-  // debug: true
-});
+//const transporter = nodemailer.createTransport({
+// host: process.env.SMTP_HOST,
+// port: 25,
+// secure: false,
+// ignoreTLS: true,
+//});
 
+console.log("smtp host", process.env.SMTP_HOST);
+// const transporter = nodemailer.createTransport({
+//   host: process.env.SMTP_HOST,
+//   port: parseInt(process.env.SMTP_PORT || "25"),
+//   secure: false, // true for 465, false for other ports
+//   // auth: {
+//   //   user: process.env.SMTP_USER,
+//   //   pass: process.env.SMTP_PASSWORD,
+//   // },
+//   // Recommended: Increase timeout for corporate SMTP servers
+//   connectionTimeout: 10000, // 10 seconds
+//   socketTimeout: 15000, // 15 seconds
+//   // Optional: For debugging
+//   // logger: true,
+//   // debug: true
+// });
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: env.EMAIL_FROM,
+    pass: env.EMAIL_PASS,
+  },
+});
 const formatTags = (tags) => {
   if (!tags || tags.length === 0) return "<p>No tags</p>";
   return `<ul style="list-style-type: none; padding-left: 0; margin: 10px 0;">${tags.map((tag) => `<li style="display: inline-block; background-color: #e9ecef; border-radius: 16px; padding: 4px 12px; margin: 4px; font-size: 13px;">${tag}</li>`).join("")}</ul>`;
@@ -625,49 +640,6 @@ View process: ${processUrl}`,
     };
   },
 
-  queryResolved: async (
-    process,
-    query,
-    resolvedByUser,
-    originalRaiser,
-    processDescription,
-    tags,
-  ) => {
-    const processUrl = generateAutoLoginProcessUrl(
-      process.id,
-      originalRaiser.id,
-    );
-    return {
-      title: `Query Resolved – Process ${process.name}`,
-      greeting: `Dear ${originalRaiser.username},`,
-      message: `
-      <p>A query you raised has been resolved.</p>
-      <p><strong>Process:</strong> ${process.name}</p>
-      <p><strong>Description:</strong> ${processDescription || "N/A"}</p>
-      <p><strong>Tags:</strong> ${formatTags(tags)}</p>
-      <p><strong>Query:</strong> ${query.question}</p>
-      <p><strong>Answer:</strong> ${query.answer}</p>
-      <p><strong>Resolved by:</strong> ${resolvedByUser.username}</p>
-      <p><strong>Resolved at:</strong> ${new Date().toLocaleString()}</p>
-    `,
-      quickAccessLinks: `
-      <div style="margin: 20px 0;">
-        <a href="${processUrl}" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">View Process</a>
-      </div>
-    `,
-      closingMessage: `<p>Please review the resolution.</p>`,
-      text: `Dear ${originalRaiser.username},
-
-A query you raised has been resolved:
-Process: ${process.name}
-Query: ${query.question}
-Answer: ${query.answer}
-Resolved by: ${resolvedByUser.username}
-
-View process: ${processUrl}`,
-    };
-  },
-
   // Recommendation Request Email
   recommendationRequested: async (
     process,
@@ -941,11 +913,6 @@ const getRecipientsForEvent = async (eventType, data) => {
     case "recommendationResponded": {
       const [, , , requesterUser] = params; // requester is the one who requested recommendation
       if (requesterUser) recipients.add(requesterUser);
-      break;
-    }
-    case "queryResolved": {
-      const [process, query, resolvedByUser, originalRaiser] = params;
-      if (originalRaiser) recipients.add(originalRaiser);
       break;
     }
     case "processCompleted": {

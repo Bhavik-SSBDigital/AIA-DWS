@@ -5027,6 +5027,7 @@ export const createQuery = async (req, res) => {
       return { processQA, documentHistoryEntries };
     });
 
+    // Inside createQuery, after the transaction
     try {
       const processQA = await prisma.processQA.findUnique({
         where: { id: result.processQA.id },
@@ -5055,44 +5056,45 @@ export const createQuery = async (req, res) => {
       });
 
       if (processQA) {
-        // 1. Send email to the assigned user (to respond)
-        const assignedToId = processQA.entityId;
-        const assignedUser = await prisma.user.findUnique({
-          where: { id: assignedToId },
-          select: { id: true, email: true, username: true, name: true },
-        });
+        const isSolvingQuery = !!req.body.queryRaiserStepInstanceId;
 
-        if (assignedUser) {
-          const tags = await getProcessTags(processId);
-          const processDescription = processQA.stepInstance.process.description;
-          await sendProcessNotification("queryRaised", {
-            params: [
-              processQA.stepInstance.process,
-              processQA,
-              userData, // raisedByUser
-              assignedUser,
-              processDescription,
-              tags,
-            ],
-          });
-        }
-
-        // 2. Send email to the process initiator
-        const initiator = processQA.stepInstance.process.initiator;
-        if (initiator && initiator.id !== userData.id) {
-          // avoid sending to self if initiator raised query
-          const tags = await getProcessTags(processId);
-          const processDescription = processQA.stepInstance.process.description;
-          await sendProcessNotification("queryRaisedToInitiator", {
-            params: [
-              processQA.stepInstance.process,
-              processQA,
-              userData, // raisedByUser
-              initiator,
-              processDescription,
-              tags,
-            ],
-          });
+        if (isSolvingQuery) {
+          // --- ANSWERING A QUERY --- send only one email to the original raiser
+          const originalRaiser = processQA.initiator;
+          if (originalRaiser) {
+            const tags = await getProcessTags(processId);
+            const processDescription =
+              processQA.stepInstance.process.description;
+            await sendProcessNotification("queryResolved", {
+              params: [
+                processQA.stepInstance.process,
+                processQA,
+                userData, // resolver
+                originalRaiser,
+                processDescription,
+                tags,
+              ],
+            });
+          }
+        } else {
+          // --- CREATING A NEW QUERY --- send only ONE email (to the process initiator)
+          const initiator = processQA.stepInstance.process.initiator;
+          // Avoid sending to self if the raiser is the initiator
+          if (initiator && initiator.id !== userData.id) {
+            const tags = await getProcessTags(processId);
+            const processDescription =
+              processQA.stepInstance.process.description;
+            await sendProcessNotification("queryRaisedToInitiator", {
+              params: [
+                processQA.stepInstance.process,
+                processQA,
+                userData, // raisedByUser
+                initiator,
+                processDescription,
+                tags,
+              ],
+            });
+          }
         }
       }
     } catch (emailError) {
