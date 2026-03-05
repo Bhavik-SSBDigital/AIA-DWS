@@ -1852,12 +1852,12 @@ export default function InitiateProcess() {
               Process Details
             </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
                 <label className="block text-sm font-medium text-gray-700">
                   Description
                 </label>
-                <input
+                <textarea
                   {...register('description', {
                     required: 'Description is required',
                   })}
@@ -1895,7 +1895,7 @@ export default function InitiateProcess() {
               </div>
             </div>
 
-            {workflowId && (
+            {/* {workflowId && (
               <div className="border mt-3 w-full border-gray-400 rounded-md p-4 shadow-lg">
                 <Show
                   steps={
@@ -1905,7 +1905,7 @@ export default function InitiateProcess() {
                   }
                 />
               </div>
-            )}
+            )} */}
           </section>
 
           {/* Templates Section */}

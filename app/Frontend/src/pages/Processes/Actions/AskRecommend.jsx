@@ -11,6 +11,7 @@ export default function AskRecommend({
   steps,
   close,
   stepInstanceId,
+  initiatorName = '',
   documents,
 }) {
   // variables
@@ -67,7 +68,9 @@ export default function AskRecommend({
   const getUsers = async () => {
     try {
       const response = await GetUsersWithDetails();
-      setUsers(response?.data);
+      setUsers(
+        response?.data?.filter((user) => user.username !== initiatorName),
+      );
     } catch (error) {
       console.error(error?.response?.data?.message || error?.message);
     }

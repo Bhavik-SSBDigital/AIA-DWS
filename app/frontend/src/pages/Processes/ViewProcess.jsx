@@ -1210,6 +1210,8 @@ const ViewProcess = () => {
             {process.documents.map((doc) => {
               const isSelected = selectedDocs.includes(doc.id);
               const toggleSelect = () => {
+                // if not pdf retun
+                if (doc.mimeType !== 'application/pdf') return;
                 setSelectedDocs((prev) =>
                   isSelected
                     ? prev.filter((id) => id !== doc.id)
@@ -1240,6 +1242,7 @@ const ViewProcess = () => {
                         type="checkbox"
                         className="mt-1 shrink-0"
                         checked={isSelected}
+                        disabled={doc.mimeType !== 'application/pdf'}
                         onChange={toggleSelect}
                       />
                       <div className="w-10 h-10 shrink-0 rounded-full bg-gray-100 border flex items-center justify-center">
@@ -1980,6 +1983,7 @@ const ViewProcess = () => {
           close={() => {
             setOpenModal('');
           }}
+          initiatorName={process?.initiatorName || ''} // Pass initiatorName to AskRecommend component
           stepInstanceId={process.processStepInstanceId}
           documents={process.documents}
         />
