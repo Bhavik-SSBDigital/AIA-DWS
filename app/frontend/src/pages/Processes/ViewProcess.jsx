@@ -39,6 +39,7 @@ import {
   IconUser,
   IconClock,
   IconAt,
+  IconAlertSquareRoundedFilled,
 } from '@tabler/icons-react';
 import CustomCard from '../../CustomComponents/CustomCard';
 import ComponentLoader from '../../common/Loader/ComponentLoader';
@@ -790,6 +791,25 @@ const ViewProcess = () => {
     }
   }, [process?.documents, searchParams]);
 
+  // Add this useEffect after your existing useEffects
+  useEffect(() => {
+    // Check if there are any unsolved queries
+    const hasUnsolvedQueries = process?.queryDetails?.some(
+      (query) => !query.answerText,
+    );
+
+    if (hasUnsolvedQueries) {
+      // Auto-scroll to query section
+      const querySection = document.getElementById('queries-section');
+      if (querySection) {
+        querySection.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+      }
+    }
+  }, [process?.queryDetails]);
+
   if (loading) return <ComponentLoader />;
   if (error)
     return (
@@ -1187,6 +1207,17 @@ const ViewProcess = () => {
         </section>
       )}
 
+      {process?.queryDetails?.some((query) => !query.answerText) && (
+        <div className="flex items-center justify-center m-4">
+          <span className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-300 rounded-lg">
+            <IconAlertSquareRoundedFilled size={18} className="text-red-600" />
+            <span className="text-sm font-medium text-red-700">
+              Query raised on this process — please review and address it.
+            </span>
+          </span>
+        </div>
+      )}
+
       {/* Active Documents Section */}
       {process?.documents?.length > 0 && (
         <>
@@ -1537,7 +1568,7 @@ const ViewProcess = () => {
 
       {/* Queries Section */}
       {process?.queryDetails?.length > 0 && (
-        <>
+        <div id="queries-section">
           <div className="flex items-center mt-12 mb-2">
             <div className="flex-grow border-t border-slate-400"></div>
             <span className="mx-4 text-sm text-gray-500 uppercase tracking-wide font-medium">
@@ -1549,6 +1580,19 @@ const ViewProcess = () => {
             <div className="space-y-4">
               {process?.queryDetails?.map((query, index) => (
                 <CustomCard key={index}>
+                  <div className="mt-4 flex justify-end">
+                    <CustomButton
+                      disabled={
+                        actionsLoading ||
+                        isCompleted ||
+                        disableActions ||
+                        query.answerText
+                      }
+                      text={query.answerText ? 'Already Solved' : 'Solve Query'}
+                      variant="primary"
+                      click={() => handleSolveQuery(query)}
+                    />
+                  </div>
                   <div className="space-y-1">
                     {query.stepName && (
                       <p className="text-sm text-gray-700">
@@ -1593,24 +1637,11 @@ const ViewProcess = () => {
                       </p>
                     )}
                   </div>
-                  <div className="mt-4 flex justify-end">
-                    <CustomButton
-                      disabled={
-                        actionsLoading ||
-                        isCompleted ||
-                        disableActions ||
-                        query.answerText
-                      }
-                      text={query.answerText ? 'Already Solved' : 'Solve Query'}
-                      variant="primary"
-                      click={() => handleSolveQuery(query)}
-                    />
-                  </div>
                 </CustomCard>
               ))}
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {/* Recommendations Section */}
