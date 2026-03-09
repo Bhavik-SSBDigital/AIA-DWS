@@ -1,7 +1,16 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import CustomButton from '../../../CustomComponents/CustomButton';
-import { IconSquareX } from '@tabler/icons-react';
+import { 
+  IconSquareX, 
+  IconCheck, 
+  IconMessageCircleQuestion, 
+  IconMessageCircle,
+  IconFiles,
+  IconPlus,
+  IconUpload,
+  IconReplace
+} from '@tabler/icons-react';
 import { toast } from 'react-toastify';
 import {
   CreateQuery,
@@ -18,12 +27,12 @@ export default function QuerySolve({
   queryRaiserStepInstanceId,
   existingQuery,
   storagePath,
+  documents,
 }) {
   const {
     register,
     control,
     handleSubmit,
-    setValue,
     getValues,
     reset,
     watch,
@@ -34,55 +43,52 @@ export default function QuerySolve({
       processId,
       stepInstanceId,
       queryRaiserStepInstanceId,
+      answerText: '', 
     },
   });
+
   const navigate = useNavigate();
-  const {
-    fields: summaryFields,
-    append: appendSummary,
-    remove: removeSummary,
-  } = useFieldArray({ control, name: 'documentSummaries' });
+  const { fields: summaryFields } = useFieldArray({ control, name: 'documentSummaries' });
+  const { fields: changeFields, append: appendChange, remove: removeChange } = useFieldArray({ control, name: 'documentChanges' });
 
-  const {
-    fields: changeFields,
-    append: appendChange,
-    remove: removeChange,
-  } = useFieldArray({ control, name: 'documentChanges' });
-
-  //   handlers
   const handleDocumentUpload = async (file, index, replacedDocId) => {
     if (!file) return;
 
     try {
-      // 🔹 Step 1: Generate document name from backend
-      const generatedName = replacedDocId
-        ? { data: { documentName: file.name } }
-        : await GenerateDocumentName(
-            workflowId,
-            replacedDocId,
-            file.name.split('.').pop(),
-          );
+      let documentName = file.name;
+      
+      if (replacedDocId) {
+        const oldDoc = documents?.find((d) => d.id == replacedDocId);
+        if (oldDoc && oldDoc.name) {
+          const dotIndex = oldDoc.name.lastIndexOf('.');
+          const baseName = dotIndex !== -1 ? oldDoc.name.substring(0, dotIndex) : oldDoc.name;
+          const newDotIndex = file.name.lastIndexOf('.');
+          const ext = newDotIndex !== -1 ? file.name.substring(newDotIndex) : '';
+          documentName = `${baseName}${ext}`;
+        }
+      } else {
+        const generatedName = await GenerateDocumentName(
+          workflowId,
+          replacedDocId,
+          file.name.split('.').pop(),
+        );
+        if (!generatedName) {
+          toast.error('Failed to generate document name');
+          return;
+        }
+        documentName = generatedName.data.documentName;
+      }
 
-      // 🔹 Step 2: Upload document with generated name
-      const response = await uploadDocumentInProcess(
-        [file],
-        generatedName?.data?.documentName,
-        [],
-        storagePath,
-        replacedDocId,
-      );
+      const response = await uploadDocumentInProcess([file], documentName, [], storagePath, replacedDocId);
 
       if (!response || !response.length || !response[0]) {
         throw new Error('Upload failed or returned no document ID');
       }
 
       const uploadedDocumentId = response[0];
-
-      // 🔹 Step 3: Update form data
       const updatedChanges = [...getValues('documentChanges')];
       updatedChanges[index].documentId = uploadedDocumentId;
-      updatedChanges[index].uploadedFileName =
-        generatedName?.data?.documentName;
+      updatedChanges[index].uploadedFileName = documentName;
 
       reset((prev) => ({
         ...prev,
@@ -91,27 +97,11 @@ export default function QuerySolve({
 
       toast.success('Document uploaded successfully');
     } catch (err) {
-      const errorMsg =
-        err?.response?.data?.message ||
-        err?.message ||
-        'Unexpected error occurred';
-      toast.error(errorMsg);
+      toast.error(err?.response?.data?.message || err?.message || 'Unexpected error occurred');
     }
   };
-  const handleStepChange = (e) => {
-    const selectedStepName = e.target.value;
-    const fullStepObj = steps.find(
-      (step) => step.stepName === selectedStepName,
-    );
 
-    setValue('assignedStepName', selectedStepName); // Update form field
-    setSelectedStep(fullStepObj); // Store the full object
-  };
   const onSubmit = async (data) => {
-    if (!data.documentChanges.length) {
-      toast.warn('Document Changes Part Is Required.');
-      return;
-    }
     try {
       const response = await CreateQuery(data);
       toast.success(response?.data?.message);
@@ -122,164 +112,200 @@ export default function QuerySolve({
   };
 
   return (
-    <div className="space-y-3">
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-        <div>
-          <label className="block text-sm font-medium mb-1">Query Text</label>
+    <div className="space-y-6 text-slate-800">
+      {/* Header */}
+      <div className="border-b border-slate-200 pb-4">
+        <h2 className="text-xl font-bold flex items-center gap-2 text-slate-800">
+          <IconCheck className="text-emerald-500" size={26} />
+          Resolve Query
+        </h2>
+        <p className="text-sm text-slate-500 mt-1">
+          Review the raised query, provide your resolution, and upload any necessary document corrections.
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        
+        {/* Read-Only Context: Original Query */}
+        <div className="bg-yellow-50/50 border border-yellow-200 p-4 rounded-lg shadow-sm">
+          <label className="flex items-center gap-2 text-xs font-bold text-yellow-700 uppercase tracking-wider mb-2">
+            <IconMessageCircleQuestion size={16} /> Original Query
+          </label>
+          <div className="bg-white p-3 rounded border border-yellow-100 text-slate-700 text-sm whitespace-pre-wrap">
+            {watch('queryText') || <span className="italic text-slate-400">No query description provided.</span>}
+          </div>
+        </div>
+        
+        {/* Resolution Input */}
+        <div className="bg-emerald-50/30 p-4 rounded-lg border border-emerald-200 shadow-sm">
+          <label className="flex items-center gap-2 text-sm font-bold text-emerald-800 uppercase tracking-wider mb-2">
+            <IconMessageCircle size={18} />
+            Resolution / Answer Text <span className="text-red-500">*</span>
+          </label>
           <textarea
-            {...register('queryText')}
+            {...register('answerText')}
             required
-            disabled
-            className="w-full border p-2 rounded"
-            rows={3}
-            placeholder="Write your query here"
+            className="w-full border border-emerald-300 p-3 rounded-md focus:ring-2 focus:ring-emerald-200 focus:border-emerald-500 outline-none transition-all shadow-sm"
+            rows={4}
+            placeholder="Explain how you resolved the query..."
           />
         </div>
-        {summaryFields.length !== 0 && (
+
+        {/* Read-Only Context: Document Summaries (Feedback) */}
+        {summaryFields.length > 0 && (
           <div>
-            <h3 className="text-lg font-semibold mb-2">Document Summaries</h3>
-            <table className="w-full border border-gray-300 text-sm">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="border p-2 text-left">Document Name</th>
-                  <th className="border p-2 text-left">Summary Text</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summaryFields.map((doc, index) => (
-                  <tr key={doc.documentId} className="bg-white">
-                    <td className="border p-2">{doc?.documentDetails?.name}</td>
-                    <td className="border p-2">
-                      <textarea
-                        {...register(`documentSummaries.${index}.feedbackText`)}
-                        className="w-full border p-2 rounded"
-                        disabled
-                        rows={2}
-                        placeholder="Enter document summary"
-                      />
-                      {/* Hidden input to include documentId in form submission */}
-                      <input
-                        type="hidden"
-                        disabled
-                        value={doc.id}
-                        {...register(`documentSummaries.${index}.documentId`)}
-                      />
-                    </td>
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-700 uppercase tracking-wider mb-3">
+              <IconFiles size={16} className="text-slate-500" /> Original Document Feedback
+            </label>
+            <div className="border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
+                  <tr>
+                    <th className="p-3 font-semibold w-1/3">Document Name</th>
+                    <th className="p-3 font-semibold">Summary Text</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {summaryFields.map((doc, index) => (
+                    <tr key={doc.documentId} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-3 font-medium text-slate-800 align-top break-words">
+                        {doc?.documentDetails?.name}
+                      </td>
+                      <td className="p-3 align-top text-slate-600 whitespace-pre-wrap">
+                        {doc.feedbackText}
+                        {/* Hidden inputs to preserve existing data on submit */}
+                        <input type="hidden" value={doc.feedbackText} {...register(`documentSummaries.${index}.feedbackText`)} />
+                        <input type="hidden" value={doc.id} {...register(`documentSummaries.${index}.documentId`)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
+        
+        {/* Document Changes Section */}
         <div>
-          <h3 className="text-lg font-semibold mb-2">Document Changes</h3>
-          {changeFields.map((field, index) => {
-            const isReplacement = watch(
-              `documentChanges.${index}.isReplacement`,
-            );
-            const uploadedFileName = watch(
-              `documentChanges.${index}.uploadedFileName`,
-            );
+          <div className="flex items-center justify-between mb-4">
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-700 uppercase tracking-wider">
+              <IconUpload size={18} className="text-blue-500" />
+              Document Changes
+            </label>
+            <CustomButton
+              type="button"
+              variant="outline"
+              click={() => appendChange({ documentId: '', requiresApproval: false, isReplacement: false })}
+              text={<span className="flex items-center gap-1"><IconPlus size={16}/> Add Change</span>}
+              className="py-1.5 text-sm border-slate-300"
+            />
+          </div>
 
-            return (
-              <div
-                key={field.id}
-                className="border rounded p-4 mb-4 space-y-3 bg-gray-50 relative"
-              >
-                {summaryFields.length !== 0 && (
-                  <label className="flex items-center gap-2 text-sm font-medium">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4"
-                      {...register(`documentChanges.${index}.isReplacement`)}
-                    />
-                    Is Replacement
-                  </label>
-                )}
-
-                {isReplacement && (
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Document to Change
-                    </label>
-                    <select
-                      {...register(
-                        `documentChanges.${index}.replacesDocumentId`,
-                      )}
-                      required
-                      className="w-full border p-2 rounded"
-                    >
-                      <option value="">Select Document</option>
-                      {summaryFields?.map((doc) => (
-                        <option key={doc.documentId} value={doc.documentId}>
-                          {doc?.documentDetails?.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium mb-1">
-                    Upload {!isReplacement ? 'New' : 'Replacement'} Document
-                  </label>
-                  <input
-                    type="file"
-                    className="block w-full border p-2 rounded"
-                    onChange={(e) =>
-                      handleDocumentUpload(
-                        e.target.files[0],
-                        index,
-                        getValues(
-                          `documentChanges.${index}.replacesDocumentId`,
-                        ),
-                      )
-                    }
-                  />
-                  {uploadedFileName && (
-                    <p className="text-sm text-green-600 mt-1">
-                      Uploaded: {uploadedFileName}
-                    </p>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeChange(index)}
-                  className="font-bold text-red-500 absolute top-[-5px] right-1"
-                >
-                  <IconSquareX size={20} />
-                </button>
+          <div className="space-y-4">
+            {changeFields.length === 0 ? (
+              <div className="text-center py-6 bg-slate-50 border border-dashed border-slate-300 rounded-lg text-slate-500 text-sm">
+                No document changes added. Click 'Add Change' to replace or upload new documents.
               </div>
-            );
-          })}
+            ) : (
+              changeFields.map((field, index) => {
+                const isReplacement = watch(`documentChanges.${index}.isReplacement`);
+                const uploadedFileName = watch(`documentChanges.${index}.uploadedFileName`);
 
-          <CustomButton
-            type="button"
-            click={() =>
-              appendChange({
-                documentId: '',
-                requiresApproval: false,
-                isReplacement: false,
+                return (
+                  <div key={field.id} className="relative bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
+                    {/* Delete Button */}
+                    <button
+                      type="button"
+                      onClick={() => removeChange(index)}
+                      className="absolute top-4 right-4 text-slate-400 hover:text-red-500 transition-colors"
+                      title="Remove Change"
+                    >
+                      <IconSquareX size={24} />
+                    </button>
+
+                    <div className="space-y-4 pr-8">
+                      {/* Replacement Toggle */}
+                      <label className="flex items-center gap-3 text-sm font-medium text-slate-700 cursor-pointer w-max">
+                        <div className="relative flex items-center">
+                          <input
+                            type="checkbox"
+                            className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            {...register(`documentChanges.${index}.isReplacement`)}
+                          />
+                        </div>
+                        <span className="flex items-center gap-1.5">
+                          <IconReplace size={16} className={isReplacement ? "text-blue-500" : "text-slate-400"} />
+                          This is a replacement document
+                        </span>
+                      </label>
+
+                      {/* Document Selection (If replacing) */}
+                      {isReplacement && (
+                        <div className="bg-slate-50 p-3 rounded border border-slate-200">
+                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                            Select Document to Replace <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            {...register(`documentChanges.${index}.replacesDocumentId`)}
+                            required
+                            className="w-full border border-slate-300 p-2.5 rounded-md bg-white focus:ring-2 focus:ring-blue-100 outline-none text-sm"
+                          >
+                            <option value="">-- Choose Document --</option>
+                            {documents?.map((doc) => (
+                              <option key={doc.id} value={doc.id}>{doc.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* File Upload Area */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                          Upload {isReplacement ? 'Corrected' : 'New'} File
+                        </label>
+                        <div className="flex items-center gap-4">
+                          <input
+                            type="file"
+                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-300 rounded-md bg-slate-50 cursor-pointer"
+                            onChange={(e) =>
+                              handleDocumentUpload(
+                                e.target.files[0],
+                                index,
+                                getValues(`documentChanges.${index}.replacesDocumentId`)
+                              )
+                            }
+                          />
+                        </div>
+                        {uploadedFileName && (
+                          <p className="text-sm font-medium text-emerald-600 mt-2 flex items-center gap-1">
+                            <IconCheck size={16}/> Successfully uploaded: <span className="text-slate-800">{uploadedFileName}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
               })
-            }
-            text={'Add Change'}
-          />
+            )}
+          </div>
         </div>
-        <div className="flex gap-1">
+
+        {/* Action Footer */}
+        <div className="flex items-center justify-end gap-3 pt-6 border-t border-slate-200">
           <CustomButton
-            className={'w-full'}
             click={close}
             type="button"
-            variant={'danger'}
-            text={'Cancel'}
+            variant="danger"
+            text="Cancel"
             disabled={isSubmitting}
+            className="px-6"
           />
           <CustomButton
-            className={'w-full'}
             type="submit"
-            text={'Submit'}
+            text="Submit Resolution"
+            variant="primary"
             disabled={isSubmitting}
+            className="px-6"
           />
         </div>
       </form>

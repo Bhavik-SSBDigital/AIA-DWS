@@ -20,6 +20,7 @@ import Grid2 from '@mui/material/Grid2';
 import {
   IconEye,
   IconCheck,
+  IconMessageCircle,
   IconX,
   IconArrowBackUp,
   IconArrowForwardUp,
@@ -105,67 +106,12 @@ const ViewProcess = () => {
   const [recommendations, setRecommendations] = useState([]);
   const [canEdit, setCanEdit] = useState({});
 
-  // Email thread states - MODIFIED
+  // Email thread states
   const [showEmailThreadModal, setShowEmailThreadModal] = useState(false);
   const [autoOpenProcessed, setAutoOpenProcessed] = useState(false);
 
   const [selectedEmailThread, setSelectedEmailThread] = useState(null);
   const [expandedEmailThreads, setExpandedEmailThreads] = useState({});
-  const threadExample = {
-    id: 'thread_12345',
-    threadText: 'Discussion regarding project timeline and deliverables.',
-    extractedAt: '2026-01-23T10:15:30.000Z',
-    createdBy: {
-      id: 'user_001',
-      username: 'john_doe',
-      name: 'John Doe',
-      email: 'john.doe@example.com',
-    },
-    metadata: {
-      priority: 'high',
-      source: 'gmail',
-      labels: ['project', 'timeline'],
-    },
-    emails: [
-      {
-        id: 'email_1001',
-        subject: 'Project Timeline Update',
-        from: 'manager@example.com',
-        to: ['john.doe@example.com'],
-        cc: ['team@example.com'],
-        bcc: [],
-        date: '2026-01-20T08:30:00.000Z',
-        bodyText: 'Please find the updated project timeline attached.',
-        bodyHtml:
-          '<p>Please find the <strong>updated project timeline</strong> attached.</p>',
-        attachments: [
-          {
-            filename: 'timeline.pdf',
-            mimeType: 'application/pdf',
-            size: 245760,
-          },
-        ],
-        messageId: '<msg-1001@example.com>',
-        inReplyTo: null,
-        references: [],
-      },
-      {
-        id: 'email_1002',
-        subject: 'Re: Project Timeline Update',
-        from: 'john.doe@example.com',
-        to: ['manager@example.com'],
-        cc: [],
-        bcc: [],
-        date: '2026-01-21T11:45:00.000Z',
-        bodyText: 'Thanks for the update. I have reviewed the timeline.',
-        bodyHtml: '<p>Thanks for the update. I have reviewed the timeline.</p>',
-        attachments: [],
-        messageId: '<msg-1002@example.com>',
-        inReplyTo: '<msg-1001@example.com>',
-        references: ['<msg-1001@example.com>'],
-      },
-    ],
-  };
 
   const [customSignModal, setCustomSignModal] = useState({
     open: false,
@@ -216,9 +162,7 @@ const ViewProcess = () => {
       const response = await GetProcessData(id);
       setProcess({
         ...response?.data?.process,
-        // emailThreads: [threadExample] || [],
       });
-      // Check edit permissions for each document
       const editChecks = {};
       await Promise.all(
         response?.data?.process?.documents.map(async (doc) => {
@@ -314,7 +258,6 @@ const ViewProcess = () => {
       stepId,
       processStepInstanceId: process?.processStepInstanceId,
       processId: process?.processId,
-      // filter only  active and pdf map details processStepInstanceId,documentId,processId,name, remarks
       listOfDocuments: process.documents
         .filter((doc) => !doc.rejectionDetails && doc.type === 'pdf')
         .map((doc) => ({
@@ -504,10 +447,8 @@ const ViewProcess = () => {
     const lineageMap = new Map();
     const newDocuments = [];
 
-    // Step 1: Normalize data
     documentVersioning.forEach((group) => {
       if (group.chains) {
-        // New structure with chains
         group.chains.forEach((chain) => {
           const versions = [...chain.versions].sort(
             (a, b) => a.reopenCycle - b.reopenCycle,
@@ -517,12 +458,10 @@ const ViewProcess = () => {
           if (hasOriginal) {
             lineageMap.set(chain.latestDocumentId, versions);
           } else {
-            // ✅ NEW DOCUMENT (no reopenCycle 0)
             newDocuments.push(versions[0]);
           }
         });
       } else {
-        // Old structure (direct versions)
         const versions = [...group.versions].sort(
           (a, b) => a.reopenCycle - b.reopenCycle,
         );
@@ -541,10 +480,8 @@ const ViewProcess = () => {
 
     const reopenCycles = [...allReopenCycles].sort((a, b) => a - b);
 
-    // Step 2: Build cycles
     return reopenCycles.map((cycle) => {
       const documents = [];
-      // Existing lineages (original + replacements)
       lineageMap.forEach((versions) => {
         let selected = null;
         for (let i = versions.length - 1; i >= 0; i--) {
@@ -556,14 +493,12 @@ const ViewProcess = () => {
         if (selected) documents.push(selected);
       });
 
-      // New documents appear only from their cycle onward
       newDocuments.forEach((doc) => {
         if (doc.reopenCycle <= cycle) {
           documents.push(doc);
         }
       });
 
-      // SOP Issue No resolution
       const sopMatch = documents.find(
         (d) => d.reopenCycle === cycle && d.SOPIssueNo,
       );
@@ -576,11 +511,7 @@ const ViewProcess = () => {
   }
 
   const DocumentsCycle = (process) => {
-    // Extract cycles
     const cycles = extractDocumentsByReopenCycle(process);
-    console.log(cycles);
-
-    // Maximum number of documents in any cycle
     const maxDocs = Math.max(...cycles?.map((cycle) => cycle.documents.length));
 
     if (cycles?.length === 0) return null;
@@ -738,24 +669,19 @@ const ViewProcess = () => {
     GetRecommendations();
   }, [id]);
 
-  // In ViewProcess component, update the useEffect
   useEffect(() => {
     if (!process?.documents || autoOpenProcessed) return;
 
     const autoOpenDoc = searchParams.get('autoOpenDoc');
 
     if (autoOpenDoc) {
-      console.log('Auto-opening document:', autoOpenDoc);
       setAutoOpenProcessed(true);
 
-      // Find the document
       const documentToOpen = process.documents.find(
         (doc) => doc.id.toString() === autoOpenDoc || doc.id === autoOpenDoc,
       );
 
       if (documentToOpen) {
-        console.log('Found document to open:', documentToOpen);
-        // Use setTimeout to ensure the component is fully rendered
         setTimeout(() => {
           handleViewFile(
             documentToOpen.name,
@@ -764,26 +690,17 @@ const ViewProcess = () => {
             documentToOpen.type?.toLowerCase() || 'pdf',
             false,
           );
-        }, 500); // Increased delay to ensure DOM is ready
+        }, 500); 
 
-        // Clean up URL without reload
         const url = new URL(window.location);
         url.searchParams.delete('autoOpenDoc');
         window.history.replaceState({}, '', url.toString());
-      } else {
-        console.warn('Document not found for autoOpenDoc:', autoOpenDoc);
-        console.log(
-          'Available documents:',
-          process.documents.map((d) => ({ id: d.id, name: d.name })),
-        );
       }
     }
   }, [process?.documents, searchParams, autoOpenProcessed]);
 
-  // Also add this useEffect to reset autoOpenProcessed when process changes
   useEffect(() => {
     if (process?.documents) {
-      // Reset autoOpenProcessed when process documents are loaded
       const autoOpenDoc = searchParams.get('autoOpenDoc');
       if (!autoOpenDoc) {
         setAutoOpenProcessed(false);
@@ -791,15 +708,12 @@ const ViewProcess = () => {
     }
   }, [process?.documents, searchParams]);
 
-  // Add this useEffect after your existing useEffects
   useEffect(() => {
-    // Check if there are any unsolved queries
     const hasUnsolvedQueries = process?.queryDetails?.some(
       (query) => !query.answerText,
     );
 
     if (hasUnsolvedQueries) {
-      // Auto-scroll to query section
       const querySection = document.getElementById('queries-section');
       if (querySection) {
         querySection.scrollIntoView({
@@ -843,9 +757,6 @@ const ViewProcess = () => {
               text={'Approve'}
               click={() => openModelSignAllDoec(process?.processStepInstanceId)}
               className={'min-w-[150px]'}
-              // disabled={
-              //   actionsLoading || isCompleted || process?.toBePicked === true
-              // }
             />
           )}
           {!isInitiator && (
@@ -873,26 +784,6 @@ const ViewProcess = () => {
             click={() => setOpenModal('document-upload')}
             disabled={actionsLoading || !isCompleted || disableActions}
           />
-          {/* <CustomButton
-    variant={'primary'}
-    text={'Claim'}
-    className={'min-w-[150px]'}
-    click={handleClaim}
-    disabled={
-      disableActions ||
-      actionsLoading ||
-      isCompleted ||
-      process?.toBePicked === false
-    }
-  /> */}
-
-          {/* <CustomButton
-            variant={'secondary'}
-            text={'Reject'}
-            className={'min-w-[150px]'}
-            click={() => setOpenModal('query')}
-            disabled={actionsLoading || isCompleted || disableActions}
-          /> */}
           <CustomButton
             variant={'secondary'}
             text={'Ask Recommendation'}
@@ -923,7 +814,6 @@ const ViewProcess = () => {
       </CustomCard>
 
       {/* Email Threads Section */}
-      {/* Email Threads Section - IMPROVED */}
       {process?.emailThreads?.length > 0 && (
         <section className="mt-8">
           <div className="flex items-center mb-6">
@@ -941,13 +831,11 @@ const ViewProcess = () => {
               const threadEmails = thread.emails || [];
               const totalEmails = threadEmails.length;
               const totalAttachments =
-                // (thread.attachmentsMapping?.length || 0) +
                 threadEmails.reduce(
                   (sum, email) => sum + (email.attachments?.length || 0),
                   0,
                 );
 
-              // Extract participants from all emails
               threadEmails.forEach((email) => {
                 if (email.from)
                   participants.add(email.from.split('<')[0]?.trim());
@@ -967,7 +855,6 @@ const ViewProcess = () => {
                   key={thread.id || index}
                   className="group relative bg-gradient-to-br from-white to-blue-50 border border-blue-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-lg transition-all duration-300"
                 >
-                  {/* Thread status indicator */}
                   <div className="absolute top-4 right-4">
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -995,7 +882,6 @@ const ViewProcess = () => {
                           {firstEmail?.subject || 'Email Conversation'}
                         </h3>
 
-                        {/* Thread stats */}
                         <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3">
                           <div className="flex items-center gap-1">
                             <div className="w-2 h-2 rounded-full bg-blue-500"></div>
@@ -1017,7 +903,6 @@ const ViewProcess = () => {
                           )}
                         </div>
 
-                        {/* Participants preview */}
                         {participantsList.length > 0 && (
                           <div className="mb-4">
                             <div className="flex items-center gap-2 text-sm text-gray-700 mb-2">
@@ -1042,111 +927,9 @@ const ViewProcess = () => {
                           </div>
                         )}
 
-                        {/* Email preview */}
                         {threadEmails.length > 0 && (
                           <div className="space-y-3">
-                            {/* {!expandedEmailThreads[thread.id || index] ? (
-                              <div className="bg-white border border-gray-200 rounded-lg p-4">
-                                <div className="flex items-start gap-3 mb-3">
-                                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                                    <span className="text-xs font-semibold text-blue-600">
-                                      1
-                                    </span>
-                                  </div>
-                                  <div className="flex-1">
-                                    <div className="text-sm font-medium text-gray-800 mb-1">
-                                      {firstEmail?.from?.split('<')[0]?.trim()}
-                                    </div>
-                                    <div className="text-xs text-gray-500">
-                                      {firstEmail?.subject?.substring(0, 60)}
-                                      {firstEmail?.subject?.length > 60
-                                        ? '...'
-                                        : ''}
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="flex items-start gap-3">
-                                  <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                                    <span className="text-xs font-semibold text-green-600">
-                                      {totalEmails}
-                                    </span>
-                                  </div>
-                                  <div className="flex-1">
-                                    <div className="text-sm font-medium text-gray-800 mb-1">
-                                      {latestEmail?.from?.split('<')[0]?.trim()}
-                                    </div>
-                                    <div className="text-xs text-gray-500">
-                                      Latest:{' '}
-                                      {latestEmail?.subject?.substring(0, 60)}
-                                      {latestEmail?.subject?.length > 60
-                                        ? '...'
-                                        : ''}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="space-y-2">
-                                {threadEmails.slice(0, 3).map((email, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="bg-white border border-gray-200 rounded-lg p-3"
-                                  >
-                                    <div className="flex justify-between items-start mb-2">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
-                                          <span className="text-xs font-semibold text-blue-600">
-                                            {idx + 1}
-                                          </span>
-                                        </div>
-                                        <div className="text-sm font-medium text-gray-800 truncate">
-                                          {email.from?.split('<')[0]?.trim()}
-                                        </div>
-                                      </div>
-                                      <div className="text-xs text-gray-500">
-                                        {new Date(
-                                          email.date,
-                                        ).toLocaleDateString()}
-                                      </div>
-                                    </div>
-                                    <div className="text-sm text-gray-600 line-clamp-2">
-                                      {email.bodyText?.substring(0, 120)}
-                                      {email.bodyText?.length > 120
-                                        ? '...'
-                                        : ''}
-                                    </div>
-                                  </div>
-                                ))}
-                                {threadEmails.length > 3 && (
-                                  <div className="text-center py-2">
-                                    <span className="text-sm text-gray-500">
-                                      + {threadEmails.length - 3} more messages
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            )} */}
-
                             <div className="flex items-center justify-between mt-4">
-                              {/* <button
-                                type="button"
-                                onClick={() =>
-                                  toggleEmailThreadExpansion(thread.id || index)
-                                }
-                                className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
-                              >
-                                {expandedEmailThreads[thread.id || index] ? (
-                                  <>
-                                    <IconChevronUp size={16} />
-                                    Show Less
-                                  </>
-                                ) : (
-                                  <>
-                                    <IconChevronDown size={16} />
-                                    Show Conversation Preview
-                                  </>
-                                )}
-                              </button> */}
                               <div></div>
                               <div className="flex items-center gap-2">
                                 <CustomButton
@@ -1163,41 +946,6 @@ const ViewProcess = () => {
                           </div>
                         )}
                       </div>
-
-                      {/* Extracted documents preview */}
-                      {/* {thread.attachmentsMapping &&
-                        thread.attachmentsMapping.length > 0 && (
-                          <div className="mt-4 pt-4 border-t">
-                            <div className="flex items-center gap-2 mb-2">
-                              <IconPaperclip
-                                size={16}
-                                className="text-green-600"
-                              />
-                              <span className="text-sm font-medium text-gray-700">
-                                Extracted Documents (
-                                {thread.attachmentsMapping.length})
-                              </span>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {thread.attachmentsMapping
-                                .slice(0, 3)
-                                .map((att, idx) => (
-                                  <span
-                                    key={idx}
-                                    className="px-3 py-1.5 bg-green-50 text-green-800 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors truncate max-w-[150px]"
-                                    title={`Document: ${att.originalFilename}`}
-                                  >
-                                    {att.originalFilename}
-                                  </span>
-                                ))}
-                              {thread.attachmentsMapping.length > 3 && (
-                                <span className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs">
-                                  +{thread.attachmentsMapping.length - 3} more
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )} */}
                     </div>
                   </div>
                 </div>
@@ -1241,14 +989,15 @@ const ViewProcess = () => {
             {process.documents.map((doc) => {
               const isSelected = selectedDocs.includes(doc.id);
               const toggleSelect = () => {
-                // if not pdf retun
-                if (doc.mimeType !== 'application/pdf') return;
-                setSelectedDocs((prev) =>
-                  isSelected
-                    ? prev.filter((id) => id !== doc.id)
-                    : [...prev, doc.id],
-                );
-              };
+  if (doc.type !== 'pdf') return;
+
+  setSelectedDocs((prev) =>
+    isSelected
+      ? prev.filter((id) => id !== doc.id)
+      : [...prev, doc.id],
+  );
+};
+              
               const extension = doc.name?.split('.').pop()?.toLowerCase();
               return (
                 <CustomCard
@@ -1273,7 +1022,7 @@ const ViewProcess = () => {
                         type="checkbox"
                         className="mt-1 shrink-0"
                         checked={isSelected}
-                        disabled={doc.mimeType !== 'application/pdf'}
+                        disabled={doc.type !== 'pdf'}
                         onChange={toggleSelect}
                       />
                       <div className="w-10 h-10 shrink-0 rounded-full bg-gray-100 border flex items-center justify-center">
@@ -1315,45 +1064,6 @@ const ViewProcess = () => {
                       title="View Document"
                       text={<IconEye size={18} className="text-white" />}
                     />
-                    {/* <CustomButton
-                      variant="success"
-                      className="px-2"
-                      click={() =>
-                        setCustomSignModal({
-                          open: true,
-                          id: doc.id,
-                          remarks: '',
-                        })
-                      }
-                      disabled={
-                        actionsLoading ||
-                        doc?.signedBy?.find(
-                          (entry) => entry?.signedBy == username,
-                        ) ||
-                        doc?.type?.toUpperCase() !== 'PDF' ||
-                        doc?.rejectionDetails ||
-                        doc?.preApproved ||
-                        disableActions
-                      }
-                      title="Sign Document"
-                      text={<IconCheck size={18} className="text-white" />}
-                    />
-                    <CustomButton
-                      variant="danger"
-                      className="px-2"
-                      click={() =>
-                        setRemarksModalOpen({ id: doc.id, open: 'reject' })
-                      }
-                      disabled={
-                        actionsLoading ||
-                        isCompleted ||
-                        doc.rejectionDetails ||
-                        doc?.preApproved ||
-                        disableActions
-                      }
-                      title="Reject Document"
-                      text={<IconX size={18} className="text-white" />}
-                    /> */}
                     <CustomButton
                       variant="info"
                       className="px-2"
@@ -1567,79 +1277,255 @@ const ViewProcess = () => {
       )}
 
       {/* Queries Section */}
+      {/* Queries Section */}
+     {/* Queries Section */}
       {process?.queryDetails?.length > 0 && (
-        <div id="queries-section">
-          <div className="flex items-center mt-12 mb-2">
-            <div className="flex-grow border-t border-slate-400"></div>
-            <span className="mx-4 text-sm text-gray-500 uppercase tracking-wide font-medium">
-              Queries ({process.queryDetails.length})
+        <div id="queries-section" className="mt-12">
+          <div className="flex items-center mb-6">
+            <div className="flex-grow border-t border-slate-300"></div>
+            <span className="mx-4 text-sm text-gray-600 uppercase tracking-wider font-semibold flex items-center gap-2">
+              <IconQuestionMark size={16} />
+              Queries / Clarifications ({process.queryDetails.length})
             </span>
-            <div className="flex-grow border-t border-slate-400"></div>
+            <div className="flex-grow border-t border-slate-300"></div>
           </div>
-          <div className="mt-2">
-            <div className="space-y-4">
-              {process?.queryDetails?.map((query, index) => (
-                <CustomCard key={index}>
-                  <div className="mt-4 flex justify-end">
-                    <CustomButton
-                      disabled={
-                        actionsLoading ||
-                        isCompleted ||
-                        disableActions ||
-                        query.answerText
-                      }
-                      text={query.answerText ? 'Already Solved' : 'Solve Query'}
-                      variant="primary"
-                      click={() => handleSolveQuery(query)}
-                    />
+
+          <div className="space-y-6">
+            {process?.queryDetails?.map((query, index) => {
+              const isResolved = !!query.answerText;
+              const assigneeName = query.assigneeDetails?.assignedAssigneeName || 'Unknown User';
+              const assigneeStep = query.assigneeDetails?.assignedStepName || 'Unknown Step';
+              
+              // Helper to safely get document name when the nested relation is null
+              const getDocumentName = (id, fallbackObj) => {
+                if (fallbackObj?.name) return fallbackObj.name;
+                const found = process.documents?.find(d => d.id === id);
+                return found?.name || `Document ID: ${id}`;
+              };
+
+              return (
+                <CustomCard
+                  key={index}
+                  className={`border-l-4 overflow-hidden shadow-sm ${
+                    isResolved ? 'border-l-emerald-500' : 'border-l-yellow-500'
+                  }`}
+                >
+                  {/* --- Header Section --- */}
+                  <div className="flex justify-between items-start mb-5 border-b pb-4 border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-3 mb-1">
+                        <h3 className="font-semibold text-lg text-slate-800">
+                          {query.stepName ? `Query at ${query.stepName}` : 'Process Query'}
+                        </h3>
+                        <span
+                          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                            isResolved
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                              : 'bg-yellow-50 text-yellow-700 border-yellow-300'
+                          }`}
+                        >
+                          {isResolved ? 'Resolved' : 'Pending Resolution'}
+                        </span>
+                      </div>
+                      
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-500 mt-2">
+                        <div className="flex items-center gap-1.5">
+                          <IconAt size={14} className="text-slate-400" />
+                          <span>
+                            <strong className="text-slate-700 font-medium">Raised by:</strong> {query.initiatorName || 'Process Reviewer'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <IconUser size={14} className="text-blue-400" />
+                          <span>
+                            <strong className="text-slate-700 font-medium">Assigned to:</strong> {assigneeName} <span className="text-slate-400">({assigneeStep})</span>
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <IconClock size={14} className="text-slate-400" />
+                          <span>
+                            <strong className="text-slate-700 font-medium">Created:</strong> {new Date(query.createdAt).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    {query.stepName && (
-                      <p className="text-sm text-gray-700">
-                        <span className="font-semibold">Step Name:</span>{' '}
-                        {query.stepName}
-                      </p>
-                    )}
-                    {query.stepNumber && (
-                      <p className="text-sm text-gray-700">
-                        <span className="font-semibold">Step Number:</span>{' '}
-                        {query.stepNumber}
-                      </p>
-                    )}
-                    {query.status && (
-                      <p className="text-sm text-gray-700">
-                        <span className="font-semibold">Status:</span>{' '}
-                        {query.status}
-                      </p>
-                    )}
-                    {query.taskType && (
-                      <p className="text-sm text-gray-700">
-                        <span className="font-semibold">Task Type:</span>{' '}
-                        {query.taskType}
-                      </p>
-                    )}
-                    {query.queryText && (
-                      <p className="text-sm text-gray-700">
-                        <span className="font-semibold">Query Text:</span>{' '}
-                        {query.queryText}
-                      </p>
-                    )}
-                    {query.answerText && (
-                      <p className="text-sm text-gray-700">
-                        <span className="font-semibold">Answer Text:</span>{' '}
-                        {query.answerText}
-                      </p>
-                    )}
-                    {query.createdAt && (
-                      <p className="text-sm text-gray-700">
-                        <span className="font-semibold">Created At:</span>{' '}
-                        {new Date(query.createdAt).toLocaleString()}
-                      </p>
-                    )}
+
+                  {/* --- Query Description (What was asked) --- */}
+                  <div className="bg-slate-50/50 p-4 rounded-md border border-slate-200 mb-5">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <IconAlertSquareRoundedFilled size={14} className="text-yellow-500" />
+                      Query Description
+                    </p>
+                    <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">
+                      {query.queryText || <span className="text-slate-400 italic">No description provided.</span>}
+                    </p>
                   </div>
+
+                  {/* --- Document Specific Feedback (What was asked about specific docs) --- */}
+                  {query.documentSummaries?.length > 0 && (
+                    <div className="mb-5">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                        Document Specific Feedback
+                      </p>
+                      <div className="overflow-x-auto rounded-md border border-slate-200">
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
+                            <tr>
+                              <th className="p-3 font-semibold w-1/3">Document</th>
+                              <th className="p-3 font-semibold">Feedback</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {query.documentSummaries.map((ds) => (
+                              <tr key={ds.documentId} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-3 font-medium text-slate-800 align-top break-words">
+                                  {getDocumentName(ds.documentId, ds.documentDetails)}
+                                </td>
+                                <td className="p-3 text-slate-600 align-top whitespace-pre-wrap">
+                                  {ds.feedbackText}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* --- Resolution Section (Shown ONLY if resolved) --- */}
+                  {isResolved && (
+                    <div className="bg-emerald-50/60 p-5 rounded-lg border border-emerald-200 mt-6 relative shadow-sm">
+                      {/* Floating Status Badge */}
+                      <div className="absolute -top-3 left-5 bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded shadow-sm flex items-center gap-1.5">
+                        <IconCheck size={14} stroke={3} /> Query Resolved
+                      </div>
+
+                      <div className="pt-2">
+                        {/* Stylish Label for Resolution Text */}
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="bg-emerald-100 text-emerald-800 text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded flex items-center gap-1.5 border border-emerald-200 shadow-sm">
+                            <IconMessageCircle size={16} className="text-emerald-600" />
+                            Resolution Provided
+                          </div>
+                          <div className="flex-grow border-t border-dashed border-emerald-300"></div>
+                        </div>
+                        
+                        {/* Resolution Text Box */}
+                        <div className="bg-white/80 p-4 rounded-md border border-emerald-100 shadow-sm">
+                          <p className="text-emerald-950 whitespace-pre-wrap text-sm leading-relaxed">
+                            {query.answerText}
+                          </p>
+                        </div>
+
+                        {query.answeredAt && (
+                          <div className="flex justify-end mt-2">
+                            <span className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
+                              <IconClock size={12} />
+                              Resolved on {new Date(query.answeredAt).toLocaleString()}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Document Changes made DURING resolution */}
+                      {query.documentChanges?.length > 0 && (
+                        <div className="mt-5 border-t border-emerald-200/60 pt-4">
+                          <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+                            <IconPaperclip size={14} />
+                            Documents Updated in Resolution
+                          </p>
+                          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {query.documentChanges.map((dc, idx) => {
+                              const docName = getDocumentName(dc.documentId, dc.document);
+                              const replacedDocName = dc.replacedDocument?.name;
+
+                              return (
+                                <li
+                                  key={idx}
+                                  className="text-sm bg-white border border-emerald-200/80 p-3 rounded-md flex items-start gap-3 shadow-sm"
+                                >
+                                  <IconFileText
+                                    size={20}
+                                    className={`${dc.isReplacement ? 'text-orange-500' : 'text-emerald-500'} mt-0.5 shrink-0`}
+                                  />
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+                                      {dc.isReplacement ? 'Replaced Document' : 'New Document Uploaded'}
+                                    </span>
+                                    <span className="text-slate-800 font-medium break-words">
+                                      {docName}
+                                    </span>
+                                    {dc.isReplacement && replacedDocName && (
+                                      <span className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                                        Replaced: <span className="line-through">{replacedDocName}</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* --- Targeted Documents (Shown ONLY if pending and attached to the query) --- */}
+                  {!isResolved && query.documentChanges?.length > 0 && (
+                    <div className="mb-5">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                        <IconPaperclip size={14} className="text-blue-500" />
+                        Targeted Documents
+                      </p>
+                      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {query.documentChanges.map((dc, idx) => {
+                          const docName = getDocumentName(dc.documentId, dc.document);
+                          const replacedDocName = dc.replacedDocument?.name;
+
+                          return (
+                            <li
+                              key={idx}
+                              className="text-sm bg-white border border-slate-200 p-3 rounded-md flex items-start gap-3 shadow-sm"
+                            >
+                              <IconFileText
+                                size={20}
+                                className={`${dc.isReplacement ? 'text-orange-500' : 'text-blue-500'} mt-0.5 shrink-0`}
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+                                  {dc.isReplacement ? 'Replacement Required' : 'Action Required'}
+                                </span>
+                                <span className="text-slate-800 font-medium break-words">
+                                  {docName}
+                                </span>
+                                {dc.isReplacement && replacedDocName && (
+                                  <span className="text-xs text-slate-500 mt-1">
+                                    To Replace: {replacedDocName}
+                                  </span>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* --- Action Footer --- */}
+                  {!isResolved && (
+                    <div className="mt-4 flex justify-end pt-4 border-t border-slate-100">
+                      <CustomButton
+                        disabled={actionsLoading || isCompleted || disableActions}
+                        text="Solve Query"
+                        variant="primary"
+                        click={() => handleSolveQuery(query)}
+                      />
+                    </div>
+                  )}
                 </CustomCard>
-              ))}
-            </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1857,7 +1743,6 @@ const ViewProcess = () => {
         </CustomModal>
       ) : null}
 
-      {/* Custom Sign Modal */}
       <CustomModal
         isOpen={customSignModal.open}
         onClose={() =>
@@ -1908,7 +1793,6 @@ const ViewProcess = () => {
         </div>
       </CustomModal>
 
-      {/* Email Thread Modal - FIXED: Only renders when showEmailThreadModal is true */}
       {showEmailThreadModal && selectedEmailThread && (
         <EmailThreadModal
           thread={selectedEmailThread}
@@ -1998,6 +1882,7 @@ const ViewProcess = () => {
           stepInstanceId={process.processStepInstanceId}
           queryRaiserStepInstanceId={process?.queryDetails[0]?.stepInstanceId}
           existingQuery={existingQuery}
+          documents={process.documents} // <-- UPDATED LINE
         />
       </CustomModal>
 
@@ -2014,7 +1899,7 @@ const ViewProcess = () => {
           close={() => {
             setOpenModal('');
           }}
-          initiatorName={process?.initiatorName || ''} // Pass initiatorName to AskRecommend component
+          initiatorName={process?.initiatorName || ''}
           stepInstanceId={process.processStepInstanceId}
           documents={process.documents}
         />
