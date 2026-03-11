@@ -1853,24 +1853,6 @@ export default function InitiateProcess() {
             </h3>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <label className="block text-sm font-medium text-gray-700">
-                  Description
-                </label>
-                <textarea
-                  {...register('description', {
-                    required: 'Description is required',
-                  })}
-                  className="w-full border border-gray-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter process description"
-                />
-                {errors.description && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.description.message}
-                  </p>
-                )}
-              </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700">
                   Select Workflow
@@ -1892,6 +1874,23 @@ export default function InitiateProcess() {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="lg:col-span-3">
+                <label className="block text-sm font-medium text-gray-700">
+                  Description
+                </label>
+                <textarea
+                  {...register('description', {
+                    required: 'Description is required',
+                  })}
+                  className="w-full border border-gray-300 p-3 h-15 max-h-30 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter process description"
+                />
+                {errors.description && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.description.message}
+                  </p>
+                )}
               </div>
             </div>
 
