@@ -11,20 +11,27 @@ const prisma = new PrismaClient();
 // Configure email transporter
 
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT || "25"),
-  secure: false, // true for 465, false for other ports
-  // auth: {
-  //   user: process.env.SMTP_USER,
-  //   pass: process.env.SMTP_PASSWORD,
-  // },
-  // Recommended: Increase timeout for corporate SMTP servers
-  connectionTimeout: 10000, // 10 seconds
-  socketTimeout: 15000, // 15 seconds
-  // Optional: For debugging
-  // logger: true,
-  // debug: true
+  service: "gmail",
+  auth: {
+    user: env.EMAIL_FROM,
+    pass: env.EMAIL_PASS,
+  },
 });
+// const transporter = nodemailer.createTransport({
+//   host: process.env.SMTP_HOST,
+//   port: parseInt(process.env.SMTP_PORT || "25"),
+//   secure: false, // true for 465, false for other ports
+//   // auth: {
+//   //   user: process.env.SMTP_USER,
+//   //   pass: process.env.SMTP_PASSWORD,
+//   // },
+//   // Recommended: Increase timeout for corporate SMTP servers
+//   connectionTimeout: 10000, // 10 seconds
+//   socketTimeout: 15000, // 15 seconds
+//   // Optional: For debugging
+//   // logger: true,
+//   // debug: true
+// });
 
 const formatTags = (tags) => {
   if (!tags || tags.length === 0) return "<p>No tags</p>";
@@ -339,6 +346,20 @@ const getLastApprovedBy = async (
     console.error("Error fetching last approved by:", error);
     return "None";
   }
+};
+
+const generateAutoLoginRecommendationUrl = (
+  recommendationId,
+  userId,
+  processId,
+) => {
+  const token = generateAutoLoginToken(
+    userId,
+    "recommendation",
+    recommendationId,
+    processId,
+  );
+  return `${env.FRONTEND_URL}/auth/auto-login?token=${token}&redirect=/recommendation/${recommendationId}`;
 };
 
 // Email templates for different events
@@ -669,6 +690,7 @@ View process: ${processUrl}`,
   },
 
   // Recommendation Request Email
+  // Recommendation Request Email
   recommendationRequested: async (
     process,
     recommendation,
@@ -677,10 +699,13 @@ View process: ${processUrl}`,
     processDescription,
     tags,
   ) => {
-    const processUrl = generateAutoLoginProcessUrl(
-      process.id,
+    // Replaced generateAutoLoginProcessUrl with generateAutoLoginRecommendationUrl
+    const recommendationUrl = generateAutoLoginRecommendationUrl(
+      recommendation.id,
       recommenderUser.id,
+      process.id,
     );
+
     return {
       title: `Recommendation Requested – Process ${process.name}`,
       greeting: `Dear ${recommenderUser.username},`,
@@ -694,7 +719,7 @@ View process: ${processUrl}`,
       `,
       quickAccessLinks: `
         <div style="margin: 20px 0;">
-          <a href="${processUrl}" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">View Process</a>
+          <a href="${recommendationUrl}" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">View Recommendation</a>
         </div>
       `,
       closingMessage: `<p>Please provide your response at your earliest convenience.</p>`,
@@ -706,7 +731,7 @@ Tags: ${tags?.join(", ") || "None"}
 Requested by: ${requesterUser.username}
 Recommendation: ${recommendation.recommendationText}
 
-View process: ${processUrl}`,
+View recommendation: ${recommendationUrl}`,
     };
   },
   recommendationResponded: async (

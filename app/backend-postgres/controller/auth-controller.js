@@ -422,13 +422,17 @@ export const autoLogin = async (req, res) => {
       },
     });
 
+    console.log("decoded", decoded);
     // Check if redirect is provided
     const redirectUrl =
       decoded.resourceType === "process"
         ? `${process.env.FRONTEND_URL}/process/view/${decoded.resourceId}` ||
           "/dashboard"
-        : `${process.env.FRONTEND_URL}/process/view/${decoded.processId}?autoOpenDoc=${decoded.resourceId}` ||
-          "/dashboard";
+        : decoded.resourceType === "recommendation"
+          ? `${process.env.FRONTEND_URL}/recommendation/${decoded.resourceId}` ||
+            "/dashboard"
+          : `${process.env.FRONTEND_URL}/process/view/${decoded.processId}?autoOpenDoc=${decoded.resourceId}` ||
+            "/dashboard";
 
     // Return success with tokens and redirect URL
     res.status(200).json({

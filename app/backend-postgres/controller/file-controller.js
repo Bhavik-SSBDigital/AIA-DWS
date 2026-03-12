@@ -109,17 +109,22 @@ async function executeTextExtractionScript(filePath) {
 }
 
 export const file_upload = async (req, res) => {
-  const accessToken = req.headers["x-authorization"].substring(7);
+  const accessToken = req.headers["x-authorization"]?.substring(7);
   const userData = await verifyUser(accessToken);
+
   try {
+    const uploadedFileName = decodeURIComponent(req.headers["x-file-name"]);
+    const chunkNumber = parseInt(req.headers["x-current-chunk"]);
+    const totalChunks = parseInt(req.headers["x-total-chunks"]);
+
     logger.info({
       action: "FILE_UPLOAD_START",
       userId: userData.id,
       details: {
         username: userData.username,
-        fileName: decodeURIComponent(req.headers["x-file-name"]),
-        chunkNumber: req.headers["x-current-chunk"],
-        totalChunks: req.headers["x-total-chunks"],
+        fileName: uploadedFileName,
+        chunkNumber,
+        totalChunks,
       },
     });
 
@@ -131,14 +136,12 @@ export const file_upload = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
-    const fileName = decodeURIComponent(req.headers["x-file-name"]);
-    const chunkNumber = parseInt(req.headers["x-current-chunk"]);
-    const totalChunks = parseInt(req.headers["x-total-chunks"]);
     const chunkSize = parseInt(req.headers["x-chunk-size"]);
     let isInvolvedInProcess = Boolean(req.headers["x-involved-in-process"]);
     let tags = req.headers["x-tags"] ? req.headers["x-tags"].split(",") : [];
     let departmentName = req.headers["x-department-name"];
     let documentId = req.headers["x-file-id"];
+
     isInvolvedInProcess =
       isInvolvedInProcess === "undefined" || undefined
         ? false
@@ -146,49 +149,81 @@ export const file_upload = async (req, res) => {
 
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    const fileExtension = fileName.split(".").pop();
+    const fileExtension = uploadedFileName.split(".").pop();
     let extra = req.headers["x-file-path"].substring(2);
-    let relativePath = STORAGE_PATH + extra;
+
+    const isExplicitReplacement =
+      documentId && documentId !== "undefined" && documentId !== undefined;
     let document;
 
-    if (documentId && documentId !== "undefined" && documentId !== undefined) {
+    // Default target variables for new uploads
+    let targetFileName = uploadedFileName;
+    let targetPath = extra + "/" + uploadedFileName;
+
+    if (isExplicitReplacement) {
       document = await prisma.document.findUnique({
         where: { id: parseInt(documentId) },
       });
+
+      if (document) {
+        // Retain old base name, apply new extension
+        const oldBaseName = document.name.includes(".")
+          ? document.name.substring(0, document.name.lastIndexOf("."))
+          : document.name;
+
+        targetFileName = `${oldBaseName}.${fileExtension}`;
+
+        // Reconstruct path keeping the old directory
+        const oldDir = document.path.includes("/")
+          ? document.path.substring(0, document.path.lastIndexOf("/"))
+          : extra;
+
+        targetPath = `${oldDir}/${targetFileName}`;
+      }
     }
 
-    const saveTo =
-      documentId && documentId !== "undefined"
-        ? path.join(__dirname, STORAGE_PATH, document.path)
-        : path.join(__dirname, relativePath, fileName);
-    relativePath = relativePath + `/${fileName}`;
+    const saveTo = path.join(__dirname, STORAGE_PATH, targetPath);
 
-    // Check if file exists and this is the first chunk
     let existingDocument = null;
     let fileReplaced = false;
+
+    // ==========================================
+    // 1. CHUNK 0: FILE COLLISION & CLEANUP
+    // ==========================================
     if (chunkNumber === 0) {
+      // If replacing and the extension/path changed, delete the old physical file
+      if (isExplicitReplacement && document && document.path !== targetPath) {
+        try {
+          const oldFilePath = path.join(__dirname, STORAGE_PATH, document.path);
+          await fs.unlink(oldFilePath);
+          logger.info({
+            action: "FILE_UPLOAD_DELETED_OLD_EXTENSION",
+            userId: userData.id,
+            details: { path: oldFilePath },
+          });
+        } catch (err) {
+          // Ignore if file does not exist on disk
+        }
+      }
+
       try {
         await fs.access(saveTo);
-        // File exists, check if there's a document record for it
-        const documentPath = extra + "/" + fileName;
         existingDocument = await prisma.document.findUnique({
-          where: { path: documentPath },
+          where: { path: targetPath },
         });
 
-        if (existingDocument) {
-          // Delete existing document from database
+        if (existingDocument && !isExplicitReplacement) {
           await prisma.document.delete({
             where: { id: existingDocument.id },
           });
 
-          // Remove from search index
           await SearchIndexService.removeDocumentFromIndex(existingDocument.id);
 
           logger.info({
             action: "FILE_UPLOAD_DELETE_EXISTING",
             userId: userData.id,
             details: {
-              fileName,
+              fileName: targetFileName,
               path: saveTo,
               deletedDocumentId: existingDocument.id,
             },
@@ -197,12 +232,15 @@ export const file_upload = async (req, res) => {
 
         fileReplaced = true;
         logger.info({
-          action: "FILE_UPLOAD_REPLACE",
+          action: "FILE_UPLOAD_REPLACE_DISK",
           userId: userData.id,
-          details: { fileName, path: saveTo },
+          details: {
+            fileName: targetFileName,
+            path: saveTo,
+            keptRecordAlive: isExplicitReplacement,
+          },
         });
       } catch (err) {
-        // File does not exist; continue normally
         fileReplaced = false;
       }
     }
@@ -211,35 +249,70 @@ export const file_upload = async (req, res) => {
       flags: fileReplaced && chunkNumber === 0 ? "w" : "a+",
       start: chunkNumber * chunkSize,
     });
+
     req.pipe(writableStream);
 
     writableStream.on("finish", async () => {
       if (chunkNumber === totalChunks - 1) {
         try {
-          if (
-            documentId !== "undefined" &&
-            documentId !== undefined &&
-            documentId
-          ) {
-            logger.info({
-              action: "FILE_UPLOAD_COMPLETED",
-              userId: userData.id,
-              details: { documentId, fileName, username: userData.username },
+          // ==========================================
+          // 2. EXPLICIT REPLACEMENT COMPLETION
+          // ==========================================
+          if (isExplicitReplacement) {
+            await prisma.document.update({
+              where: { id: parseInt(documentId) },
+              data: {
+                name: targetFileName,
+                type: fileExtension,
+                path: targetPath,
+                lastUpdatedOn: new Date(),
+              },
             });
+
+            setTimeout(async () => {
+              try {
+                const extractionResult =
+                  await executeTextExtractionScript(saveTo);
+                if (extractionResult.success) {
+                  await SearchIndexService.indexDocumentContent(
+                    parseInt(documentId),
+                    extractionResult.text,
+                  );
+                }
+              } catch (error) {
+                logger.error({
+                  action: "FILE_UPLOAD_REINDEX_ERROR",
+                  userId: userData.id,
+                  details: { error: error.message, path: saveTo },
+                });
+              }
+            }, 1000);
+
+            logger.info({
+              action: "FILE_UPLOAD_COMPLETED_IN_PLACE",
+              userId: userData.id,
+              details: {
+                documentId,
+                fileName: targetFileName,
+                username: userData.username,
+              },
+            });
+
             return res.status(200).json({
-              message: fileReplaced
-                ? "File has been replaced."
-                : "File upload completed.",
-              documentId,
+              message: "File has been replaced in place.",
+              documentId: parseInt(documentId),
+              replaced: true,
             });
           }
 
-          // Create new document entry
+          // ==========================================
+          // 3. NORMAL UPLOAD COMPLETION
+          // ==========================================
           const newDocument = await prisma.document.create({
             data: {
-              name: fileName,
+              name: targetFileName,
               type: fileExtension,
-              path: extra + "/" + fileName,
+              path: targetPath,
               createdById: userData.id,
               isInvolvedInProcess: isInvolvedInProcess || false,
               tags: tags,
@@ -281,7 +354,6 @@ export const file_upload = async (req, res) => {
                 return;
               }
 
-              const ext = path.extname(absolutePath).toLowerCase();
               let content = "";
               try {
                 const extractionResult =
@@ -307,7 +379,7 @@ export const file_upload = async (req, res) => {
                 userId: userData.id,
                 details: {
                   documentId: newDocument.id,
-                  fileName,
+                  fileName: targetFileName,
                   contentLength: content.length,
                   username: userData.username,
                 },
@@ -326,7 +398,7 @@ export const file_upload = async (req, res) => {
             userId: userData.id,
             details: {
               documentId: newDocument.id,
-              fileName,
+              fileName: targetFileName,
               path: saveTo,
               username: userData.username,
               replaced: fileReplaced,
@@ -344,7 +416,7 @@ export const file_upload = async (req, res) => {
           logger.error({
             action: "FILE_UPLOAD_DB_ERROR",
             userId: userData.id,
-            details: { error: err.message, fileName },
+            details: { error: err.message, fileName: targetFileName },
           });
           return res
             .status(500)
@@ -354,7 +426,7 @@ export const file_upload = async (req, res) => {
         logger.info({
           action: "FILE_UPLOAD_CHUNK",
           userId: userData.id,
-          details: { fileName, chunkNumber, totalChunks },
+          details: { fileName: targetFileName, chunkNumber, totalChunks },
         });
         return res
           .status(200)
@@ -366,12 +438,11 @@ export const file_upload = async (req, res) => {
       logger.error({
         action: "FILE_UPLOAD_WRITE_ERROR",
         userId: userData.id,
-        details: { error: err.message, fileName },
+        details: { error: err.message, fileName: targetFileName },
       });
       res.status(500).send("Error writing the file.");
     });
   } catch (error) {
-    console.log("Error uploading file", error);
     logger.error({
       action: "FILE_UPLOAD_ERROR",
       userId: userData?.id,

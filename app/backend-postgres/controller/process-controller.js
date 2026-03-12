@@ -256,7 +256,7 @@ export async function generateUniqueDocumentName({
     console.error("Error generating unique document name:", error);
     throw error;
   } finally {
-    await prisma.$disconnect();
+    // await prisma.$disconnect();
   }
 }
 
@@ -317,7 +317,7 @@ const generate_unique_process_name = async (workflowId) => {
     console.error("Error generating unique process name:", error);
     throw error;
   } finally {
-    await prisma.$disconnect();
+    // await prisma.$disconnect();
   }
 };
 
@@ -414,16 +414,18 @@ export const initiate_process = async (req, res, next) => {
 
     documentIds = copiedDocumentIds;
 
-    if (documentIds.length === 0) {
-      return res.status(400).json({
-        message: "Documents are required to initiate a process",
+    // FIX: Ensure all documents copied successfully before proceeding
+    const requestedDocCount = req.body.documents?.length || 0;
+    if (documentIds.length === 0 || documentIds.length !== requestedDocCount) {
+      return res.status(500).json({
+        message:
+          "Failed to copy one or more documents. Process initiation aborted.",
       });
     }
 
     const initiatorId = userData.id;
 
     const process = await prisma.$transaction(async (tx) => {
-      // Create process instance
       const process_ = await tx.processInstance.create({
         data: {
           workflowId,
@@ -438,34 +440,21 @@ export const initiate_process = async (req, res, next) => {
         },
       });
 
-      // Create email thread if provided - FIXED STRUCTURE
       if (emailThreads && emailThreads.length > 0) {
         for (const thread of emailThreads) {
-          console.log("mails", thread);
-          // Create email thread with the thread text
-          // In initiate_process, when creating email thread:
-          // In initiate_process, when creating email thread:
           await tx.emailThread.create({
             data: {
               processId: process_.id,
               threadText: thread.threadText || "Email thread",
               createdById: userData.id,
-              // Store the full extraction data in metadata
               metadata: {
-                // Store the complete data from extractEMLDetails
                 extractionData: {
-                  // threadText: thread.threadText,
                   attachments: thread.attachmentsMapping || [],
-                  // emails: thread.emails || [],
                   threadTree: thread.threadTree || {},
                   summary: thread.summary || {},
-                  // originalEmail: thread.originalEmail || null,
-                  // extractedDocumentIds: thread.extractedDocumentIds || [],
-                  // attachmentsMapping: thread.attachmentsMapping || [],
                 },
                 extractedAt: thread.extractedAt || new Date(),
               },
-              // Also store individual emails for easier querying
               originalEmails: thread.emails
                 ? {
                     create: thread.emails.map((email) => ({
@@ -498,7 +487,6 @@ export const initiate_process = async (req, res, next) => {
                       references: Array.isArray(email.references)
                         ? email.references
                         : [],
-                      // Store the complete email object for reconstruction
                       originalData: email,
                     })),
                   }
@@ -508,7 +496,6 @@ export const initiate_process = async (req, res, next) => {
         }
       }
 
-      // Ensure documents array exists before mapping
       const documentsArray = req.body.documents || [];
       const processDocumentData = documentsArray.map((item, index) => ({
         processId: process_.id,
@@ -558,7 +545,6 @@ export const initiate_process = async (req, res, next) => {
       return process_;
     });
 
-    // Email notification logic (existing code)
     try {
       const firstStepInstance = await prisma.processStepInstance.findFirst({
         where: {
@@ -598,7 +584,7 @@ export const initiate_process = async (req, res, next) => {
               processDocs,
               assignedUser,
               processDescription,
-              tags, // new parameters
+              tags,
             ],
           });
         }
@@ -949,7 +935,21 @@ async function handleUserAssignment(
   fromInitiator,
   workflowId,
 ) {
+  // FIX: Fetch valid users to prevent P2003 Foreign Key crashes for deleted users
+  const validUsers = await tx.user.findMany({
+    where: { id: { in: assignment.assigneeIds } },
+    select: { id: true },
+  });
+  const validUserIds = new Set(validUsers.map((u) => u.id));
+
   for (const userId of assignment.assigneeIds) {
+    if (!validUserIds.has(userId)) {
+      console.warn(
+        `User ID ${userId} not found in database. Skipping assignment.`,
+      );
+      continue;
+    }
+
     const hasAccess = await checkUserProcessAssignment(
       progress.processId,
       userId,
@@ -1004,23 +1004,27 @@ async function handleUserAssignment(
     });
 
     const nextStep = workflow.steps[1];
-    for (const nextAssignment of nextStep.assignments) {
-      await processAssignment(
-        tx,
-        process,
-        nextStep,
-        nextAssignment,
-        documentIds,
-        false,
-        false,
-        workflowId,
-      );
-    }
 
-    await tx.processInstance.update({
-      where: { id: process.id },
-      data: { currentStepId: nextStep.id, status: "IN_PROGRESS" },
-    });
+    // FIX: Safely check if a next step exists
+    if (nextStep) {
+      for (const nextAssignment of nextStep.assignments) {
+        await processAssignment(
+          tx,
+          process,
+          nextStep,
+          nextAssignment,
+          documentIds,
+          false,
+          false,
+          workflowId,
+        );
+      }
+
+      await tx.processInstance.update({
+        where: { id: process.id },
+        data: { currentStepId: nextStep.id, status: "IN_PROGRESS" },
+      });
+    }
   }
 }
 async function handleRoleAssignment(
@@ -2389,7 +2393,7 @@ export const view_process = async (req, res) => {
       },
     });
   } finally {
-    await prisma.$disconnect();
+    // await prisma.$disconnect();
   }
 };
 
@@ -5445,7 +5449,7 @@ export const get_completed_initiator_processes = async (req, res) => {
       },
     });
   } finally {
-    await prisma.$disconnect();
+    // await prisma.$disconnect();
   }
 };
 
@@ -5531,7 +5535,7 @@ export const get_process_documents = async (req, res) => {
     console.error("Error fetching process documents:", error);
     return res.status(500).json({ error: "Internal server error" });
   } finally {
-    await prisma.$disconnect();
+    // await prisma.$disconnect();
   }
 };
 
