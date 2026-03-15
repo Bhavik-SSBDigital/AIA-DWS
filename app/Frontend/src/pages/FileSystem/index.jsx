@@ -190,21 +190,27 @@ const handleDownloadFolder = async (name, path) => {
   try {
     const response = await DownloadFolder(path, name);
 
-    const blob = new Blob([response.data], {
+    // Guard against global Axios interceptors that return response.data directly
+    const fileData = response.data || response;
+
+    const blob = new Blob([fileData], {
       type: "application/zip",
     });
 
     const url = window.URL.createObjectURL(blob);
-
     const link = document.createElement("a");
     link.href = url;
     link.download = `${name}.zip`;
+    link.style.display = "none"; // Prevent layout shifts
 
     document.body.appendChild(link);
     link.click();
-    link.remove();
 
-    window.URL.revokeObjectURL(url);
+    // Delay cleanup to ensure the OS download manager claims the file
+    setTimeout(() => {
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    }, 1000);
   } catch (error) {
     toast.error(error?.response?.data?.message || error?.message);
   }

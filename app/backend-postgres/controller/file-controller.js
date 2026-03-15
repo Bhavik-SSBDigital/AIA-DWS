@@ -1266,7 +1266,18 @@ export const folder_download = async (req, res) => {
         },
       });
 
-      res.status(500).end();
+      // Check if response headers are already sent
+      if (res.headersSent) {
+        // Force close the connection to indicate an incomplete/corrupted file to the client
+        if (res.socket) {
+          res.socket.destroy();
+        } else {
+          res.end();
+        }
+      } else {
+        // Headers not sent, safe to return standard HTTP error
+        res.status(500).json({ message: "Error generating archive stream" });
+      }
     });
 
     res.on("close", () => {
@@ -1282,10 +1293,8 @@ export const folder_download = async (req, res) => {
     });
 
     archive.pipe(res);
-
     archive.directory(fullFolderPath, false);
-
-    archive.finalize(); // IMPORTANT: do not await
+    archive.finalize();
   } catch (error) {
     logger.error({
       action: "FOLDER_DOWNLOAD_ERROR",
@@ -1299,9 +1308,12 @@ export const folder_download = async (req, res) => {
 
     console.error("error downloading folder", error);
 
-    res.status(500).json({
-      message: "Error downloading folder",
-    });
+    // Ensure we don't crash here if headers are already sent either
+    if (!res.headersSent) {
+      res.status(500).json({
+        message: "Error downloading folder",
+      });
+    }
   }
 };
 
