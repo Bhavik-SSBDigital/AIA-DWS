@@ -1187,19 +1187,10 @@ const storeParentIdInChildDocument = async (childId, parentId) => {
 };
 
 export const folder_download = async (req, res) => {
-  const accessToken = req.headers["authorization"].substring(7);
+  const accessToken = req.headers["authorization"]?.substring(7);
   const userData = await verifyUser(accessToken);
-  try {
-    logger.info({
-      action: "FOLDER_DOWNLOAD_START",
-      userId: userData.id,
-      details: {
-        username: userData.username,
-        departmentId: req.body.departmentId,
-        folderName: req.body.folderName,
-      },
-    });
 
+  try {
     if (userData === "Unauthorized") {
       logger.warn({
         action: "FOLDER_DOWNLOAD_UNAUTHORIZED",
@@ -1208,32 +1199,49 @@ export const folder_download = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
-    const departmentId = req.body.departmentId;
-    const folderName = req.body.folderName;
+    const { folderName, folderPath } = req.body;
 
-    if (!departmentId || !folderName) {
-      return res.status(400).json({
-        message: "departmentId and folderName are required",
-      });
-    }
-
-    const department = await prisma.department.findUnique({
-      where: { id: Number(departmentId) },
-      include: { documents: true },
+    logger.info({
+      action: "FOLDER_DOWNLOAD_START",
+      userId: userData.id,
+      details: {
+        username: userData.username,
+        folderName,
+        folderPath,
+      },
     });
 
-    if (!department) {
-      logger.warn({
-        action: "FOLDER_DOWNLOAD_DEPT_NOT_FOUND",
-        userId: userData.id,
-        details: { departmentId },
+    if (!folderName || !folderPath) {
+      return res.status(400).json({
+        message: "folderName and folderPath are required",
       });
-      return res.status(404).json({ message: "Department not found" });
     }
 
-    let folderPath =
-      STORAGE_PATH + `/departments/${department.code}/${folderName}`;
-    folderPath = path.join(__dirname, folderPath);
+    /**
+     * Construct absolute path
+     */
+    const fullFolderPath = path.join(
+      __dirname,
+      STORAGE_PATH,
+      folderPath,
+      folderName,
+    );
+
+    /**
+     * Check folder exists
+     */
+    if (!fs.existsSync(fullFolderPath)) {
+      logger.warn({
+        action: "FOLDER_DOWNLOAD_NOT_FOUND",
+        userId: userData.id,
+        details: { fullFolderPath },
+      });
+
+      return res.status(404).json({
+        message: "Folder not found",
+      });
+    }
+
     const zipFileName = `${folderName}.zip`;
 
     res.setHeader("Content-Type", "application/zip");
@@ -1242,14 +1250,20 @@ export const folder_download = async (req, res) => {
       `attachment; filename="${zipFileName}"`,
     );
 
-    const archive = archiver("zip", { zlib: { level: 9 } });
-    archive.pipe(res);
-    archive.directory(folderPath, false);
-
-    department.documents.forEach((doc) => {
-      const documentPath = path.join(__dirname, doc.path);
-      archive.file(documentPath, { name: doc.name });
+    const archive = archiver("zip", {
+      zlib: { level: 9 },
     });
+
+    archive.on("error", (err) => {
+      throw err;
+    });
+
+    archive.pipe(res);
+
+    /**
+     * Zip the whole directory
+     */
+    archive.directory(fullFolderPath, false);
 
     await archive.finalize();
 
@@ -1257,23 +1271,27 @@ export const folder_download = async (req, res) => {
       action: "FOLDER_DOWNLOAD_SUCCESS",
       userId: userData.id,
       details: {
-        departmentId,
-        folderName,
         username: userData.username,
+        folderName,
+        folderPath,
       },
     });
   } catch (error) {
-    console.log("error downloading folder", error);
+    console.error("error downloading folder", error);
+
     logger.error({
       action: "FOLDER_DOWNLOAD_ERROR",
       userId: userData?.id,
       details: {
         error: error.message,
-        departmentId: req.body.departmentId,
         folderName: req.body.folderName,
+        folderPath: req.body.folderPath,
       },
     });
-    res.status(500).json({ message: "Error downloading folder" });
+
+    res.status(500).json({
+      message: "Error downloading folder",
+    });
   }
 };
 
