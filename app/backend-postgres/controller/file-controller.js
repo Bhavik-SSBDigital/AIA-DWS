@@ -1210,8 +1210,15 @@ export const folder_download = async (req, res) => {
 
     const departmentId = req.body.departmentId;
     const folderName = req.body.folderName;
+
+    if (!departmentId || !folderName) {
+      return res.status(400).json({
+        message: "departmentId and folderName are required",
+      });
+    }
+
     const department = await prisma.department.findUnique({
-      where: { id: departmentId },
+      where: { id: Number(departmentId) },
       include: { documents: true },
     });
 
