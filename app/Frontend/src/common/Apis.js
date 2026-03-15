@@ -263,7 +263,7 @@ export const RevokeRejection = async (processId, documentId) => {
 };
 export const DownloadFolder = (path, name) => {
   return axios.post(
-    '/download-folder',
+    '/downloadFolder',
     {
       folderPath: path,
       folderName: name,
