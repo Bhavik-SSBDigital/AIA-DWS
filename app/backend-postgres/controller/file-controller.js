@@ -1231,7 +1231,7 @@ export const folder_download = async (req, res) => {
       folderName,
     );
 
-    if (!fs.existsSync(fullFolderPath)) {
+    if (!fsCB.existsSync(fullFolderPath)) {
       logger.warn({
         action: "FOLDER_DOWNLOAD_NOT_FOUND",
         userId: userData.id,
