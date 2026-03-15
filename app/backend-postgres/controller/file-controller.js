@@ -1187,10 +1187,9 @@ const storeParentIdInChildDocument = async (childId, parentId) => {
 };
 
 export const folder_download = async (req, res) => {
+  const accessToken = req.headers["authorization"].substring(7);
+  const userData = await verifyUser(accessToken);
   try {
-    const accessToken = req.headers["authorization"].substring(7);
-    const userData = await verifyUser(accessToken);
-
     logger.info({
       action: "FOLDER_DOWNLOAD_START",
       userId: userData.id,
