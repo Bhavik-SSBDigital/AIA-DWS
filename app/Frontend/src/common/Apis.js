@@ -262,14 +262,15 @@ export const RevokeRejection = async (processId, documentId) => {
   });
 };
 export const DownloadFolder = (path, name) => {
-  return axios.post(
+  return apiClient.post(
+    // <-- Uses interceptor to attach token
     '/downloadFolder',
     {
       folderPath: path,
       folderName: name,
     },
     {
-      responseType: 'blob', // ❗ REQUIRED
+      responseType: 'blob',
     },
   );
 };
