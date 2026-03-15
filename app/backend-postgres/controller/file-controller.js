@@ -1256,6 +1256,7 @@ export const folder_download = async (req, res) => {
       },
     });
   } catch (error) {
+    console.log("error downloading folder", error);
     logger.error({
       action: "FOLDER_DOWNLOAD_ERROR",
       userId: userData?.id,
