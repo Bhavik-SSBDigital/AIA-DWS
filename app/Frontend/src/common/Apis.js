@@ -261,14 +261,16 @@ export const RevokeRejection = async (processId, documentId) => {
     documentId,
   });
 };
-export const DownloadFolder = async (folderPath, folderName) => {
-  return apiClient.post(
-    '/downloadFolder',
+export const DownloadFolder = (path, name) => {
+  return axios.post(
+    '/download-folder',
     {
-      folderPath,
-      folderName,
+      folderPath: path,
+      folderName: name,
     },
-    { responseType: 'arraybuffer' },
+    {
+      responseType: 'blob', // ❗ REQUIRED
+    },
   );
 };
 export const DownloadFile = async (name, path) => {

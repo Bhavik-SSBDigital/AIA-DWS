@@ -186,17 +186,29 @@ export default function FileSysten() {
   };
 
   // handler download folder
-  const handleDownloadFolder = async (name, path) => {
-    setActionsLoading(true);
-    try {
-      const response = await DownloadFolder(path, name);
-      setIsMenuOpen(false);
-    } catch (error) {
-      toast.error(error?.response?.data?.message || error?.message);
-    } finally {
-      setActionsLoading(false);
-    }
-  };
+const handleDownloadFolder = async (name, path) => {
+  try {
+    const response = await DownloadFolder(path, name);
+
+    const blob = new Blob([response.data], {
+      type: "application/zip",
+    });
+
+    const url = window.URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${name}.zip`;
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    toast.error(error?.response?.data?.message || error?.message);
+  }
+};
 
   const handleDownloadWithWatermark = async (data) => {
     try {

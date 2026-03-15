@@ -1196,6 +1196,7 @@ export const folder_download = async (req, res) => {
         action: "FOLDER_DOWNLOAD_UNAUTHORIZED",
         details: { accessToken },
       });
+
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
@@ -1212,14 +1213,17 @@ export const folder_download = async (req, res) => {
     });
 
     if (!folderName || !folderPath) {
+      logger.warn({
+        action: "FOLDER_DOWNLOAD_INVALID_PAYLOAD",
+        userId: userData.id,
+        details: { folderName, folderPath },
+      });
+
       return res.status(400).json({
         message: "folderName and folderPath are required",
       });
     }
 
-    /**
-     * Construct absolute path
-     */
     const fullFolderPath = path.join(
       __dirname,
       STORAGE_PATH,
@@ -1227,10 +1231,7 @@ export const folder_download = async (req, res) => {
       folderName,
     );
 
-    /**
-     * Check folder exists
-     */
-    if (!fsCB.existsSync(fullFolderPath)) {
+    if (!fs.existsSync(fullFolderPath)) {
       logger.warn({
         action: "FOLDER_DOWNLOAD_NOT_FOUND",
         userId: userData.id,
@@ -1255,39 +1256,48 @@ export const folder_download = async (req, res) => {
     });
 
     archive.on("error", (err) => {
-      throw err;
+      logger.error({
+        action: "FOLDER_DOWNLOAD_ARCHIVE_ERROR",
+        userId: userData.id,
+        details: {
+          error: err.message,
+          folderName,
+          folderPath,
+        },
+      });
+
+      res.status(500).end();
+    });
+
+    res.on("close", () => {
+      logger.info({
+        action: "FOLDER_DOWNLOAD_SUCCESS",
+        userId: userData.id,
+        details: {
+          username: userData.username,
+          folderName,
+          folderPath,
+        },
+      });
     });
 
     archive.pipe(res);
 
-    /**
-     * Zip the whole directory
-     */
     archive.directory(fullFolderPath, false);
 
-    await archive.finalize();
-
-    logger.info({
-      action: "FOLDER_DOWNLOAD_SUCCESS",
-      userId: userData.id,
-      details: {
-        username: userData.username,
-        folderName,
-        folderPath,
-      },
-    });
+    archive.finalize(); // IMPORTANT: do not await
   } catch (error) {
-    console.error("error downloading folder", error);
-
     logger.error({
       action: "FOLDER_DOWNLOAD_ERROR",
       userId: userData?.id,
       details: {
         error: error.message,
-        folderName: req.body.folderName,
-        folderPath: req.body.folderPath,
+        folderName: req.body?.folderName,
+        folderPath: req.body?.folderPath,
       },
     });
+
+    console.error("error downloading folder", error);
 
     res.status(500).json({
       message: "Error downloading folder",
