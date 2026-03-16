@@ -60,6 +60,7 @@ import DocumentsVersionWise from './DocumentsVersionWise';
 import ProcessDocumentUpload from '../../CustomComponents/ProcessDocumentUpload';
 import DeleteConfirmationModal from '../../CustomComponents/DeleteConfirmation';
 import EmailThreadModal, { normalizeRecipients } from './EmailThreadModal';
+import { download } from '../../components/drop-file-input/FileUploadDownload';
 
 const ViewProcess = () => {
   const [selectedDocs, setSelectedDocs] = useState([]);
@@ -690,7 +691,7 @@ const ViewProcess = () => {
             documentToOpen.type?.toLowerCase() || 'pdf',
             false,
           );
-        }, 500); 
+        }, 500);
 
         const url = new URL(window.location);
         url.searchParams.delete('autoOpenDoc');
@@ -723,6 +724,16 @@ const ViewProcess = () => {
       }
     }
   }, [process?.queryDetails]);
+
+  const handleDownload = (path, name) => {
+    try {
+      download(name, path);
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      toast.error('An error occurred while downloading the file.');
+    }
+    handleClose();
+  };
 
   if (loading) return <ComponentLoader />;
   if (error)
@@ -830,11 +841,10 @@ const ViewProcess = () => {
               const participants = new Set();
               const threadEmails = thread.emails || [];
               const totalEmails = threadEmails.length;
-              const totalAttachments =
-                threadEmails.reduce(
-                  (sum, email) => sum + (email.attachments?.length || 0),
-                  0,
-                );
+              const totalAttachments = threadEmails.reduce(
+                (sum, email) => sum + (email.attachments?.length || 0),
+                0,
+              );
 
               threadEmails.forEach((email) => {
                 if (email.from)
@@ -989,15 +999,15 @@ const ViewProcess = () => {
             {process.documents.map((doc) => {
               const isSelected = selectedDocs.includes(doc.id);
               const toggleSelect = () => {
-  if (doc.type !== 'pdf') return;
+                if (doc.type !== 'pdf') return;
 
-  setSelectedDocs((prev) =>
-    isSelected
-      ? prev.filter((id) => id !== doc.id)
-      : [...prev, doc.id],
-  );
-};
-              
+                setSelectedDocs((prev) =>
+                  isSelected
+                    ? prev.filter((id) => id !== doc.id)
+                    : [...prev, doc.id],
+                );
+              };
+
               const extension = doc.name?.split('.').pop()?.toLowerCase();
               return (
                 <CustomCard
@@ -1064,6 +1074,7 @@ const ViewProcess = () => {
                       title="View Document"
                       text={<IconEye size={18} className="text-white" />}
                     />
+
                     <CustomButton
                       variant="info"
                       className="px-2"
@@ -1096,6 +1107,12 @@ const ViewProcess = () => {
                       }
                       title="Delete"
                       text={<IconTrash size={18} className="text-white" />}
+                    />
+                    <CustomButton
+                      className="px-2"
+                      click={() => handleDownload(doc.path, doc.name)}
+                      title="Download Document"
+                      text={<IconDownload size={18} className="text-white" />}
                     />
                   </div>
                 </CustomCard>
@@ -1278,7 +1295,7 @@ const ViewProcess = () => {
 
       {/* Queries Section */}
       {/* Queries Section */}
-     {/* Queries Section */}
+      {/* Queries Section */}
       {process?.queryDetails?.length > 0 && (
         <div id="queries-section" className="mt-12">
           <div className="flex items-center mb-6">
@@ -1293,13 +1310,15 @@ const ViewProcess = () => {
           <div className="space-y-6">
             {process?.queryDetails?.map((query, index) => {
               const isResolved = !!query.answerText;
-              const assigneeName = query.assigneeDetails?.assignedAssigneeName || 'Unknown User';
-              const assigneeStep = query.assigneeDetails?.assignedStepName || 'Unknown Step';
-              
+              const assigneeName =
+                query.assigneeDetails?.assignedAssigneeName || 'Unknown User';
+              const assigneeStep =
+                query.assigneeDetails?.assignedStepName || 'Unknown Step';
+
               // Helper to safely get document name when the nested relation is null
               const getDocumentName = (id, fallbackObj) => {
                 if (fallbackObj?.name) return fallbackObj.name;
-                const found = process.documents?.find(d => d.id === id);
+                const found = process.documents?.find((d) => d.id === id);
                 return found?.name || `Document ID: ${id}`;
               };
 
@@ -1315,7 +1334,9 @@ const ViewProcess = () => {
                     <div>
                       <div className="flex items-center gap-3 mb-1">
                         <h3 className="font-semibold text-lg text-slate-800">
-                          {query.stepName ? `Query at ${query.stepName}` : 'Process Query'}
+                          {query.stepName
+                            ? `Query at ${query.stepName}`
+                            : 'Process Query'}
                         </h3>
                         <span
                           className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
@@ -1327,24 +1348,36 @@ const ViewProcess = () => {
                           {isResolved ? 'Resolved' : 'Pending Resolution'}
                         </span>
                       </div>
-                      
+
                       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-500 mt-2">
                         <div className="flex items-center gap-1.5">
                           <IconAt size={14} className="text-slate-400" />
                           <span>
-                            <strong className="text-slate-700 font-medium">Raised by:</strong> {query.initiatorName || 'Process Reviewer'}
+                            <strong className="text-slate-700 font-medium">
+                              Raised by:
+                            </strong>{' '}
+                            {query.initiatorName || 'Process Reviewer'}
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <IconUser size={14} className="text-blue-400" />
                           <span>
-                            <strong className="text-slate-700 font-medium">Assigned to:</strong> {assigneeName} <span className="text-slate-400">({assigneeStep})</span>
+                            <strong className="text-slate-700 font-medium">
+                              Assigned to:
+                            </strong>{' '}
+                            {assigneeName}{' '}
+                            <span className="text-slate-400">
+                              ({assigneeStep})
+                            </span>
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <IconClock size={14} className="text-slate-400" />
                           <span>
-                            <strong className="text-slate-700 font-medium">Created:</strong> {new Date(query.createdAt).toLocaleString()}
+                            <strong className="text-slate-700 font-medium">
+                              Created:
+                            </strong>{' '}
+                            {new Date(query.createdAt).toLocaleString()}
                           </span>
                         </div>
                       </div>
@@ -1354,11 +1387,18 @@ const ViewProcess = () => {
                   {/* --- Query Description (What was asked) --- */}
                   <div className="bg-slate-50/50 p-4 rounded-md border border-slate-200 mb-5">
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                      <IconAlertSquareRoundedFilled size={14} className="text-yellow-500" />
+                      <IconAlertSquareRoundedFilled
+                        size={14}
+                        className="text-yellow-500"
+                      />
                       Query Description
                     </p>
                     <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">
-                      {query.queryText || <span className="text-slate-400 italic">No description provided.</span>}
+                      {query.queryText || (
+                        <span className="text-slate-400 italic">
+                          No description provided.
+                        </span>
+                      )}
                     </p>
                   </div>
 
@@ -1372,15 +1412,23 @@ const ViewProcess = () => {
                         <table className="w-full text-sm text-left">
                           <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
                             <tr>
-                              <th className="p-3 font-semibold w-1/3">Document</th>
+                              <th className="p-3 font-semibold w-1/3">
+                                Document
+                              </th>
                               <th className="p-3 font-semibold">Feedback</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {query.documentSummaries.map((ds) => (
-                              <tr key={ds.documentId} className="hover:bg-slate-50 transition-colors">
+                              <tr
+                                key={ds.documentId}
+                                className="hover:bg-slate-50 transition-colors"
+                              >
                                 <td className="p-3 font-medium text-slate-800 align-top break-words">
-                                  {getDocumentName(ds.documentId, ds.documentDetails)}
+                                  {getDocumentName(
+                                    ds.documentId,
+                                    ds.documentDetails,
+                                  )}
                                 </td>
                                 <td className="p-3 text-slate-600 align-top whitespace-pre-wrap">
                                   {ds.feedbackText}
@@ -1405,12 +1453,15 @@ const ViewProcess = () => {
                         {/* Stylish Label for Resolution Text */}
                         <div className="flex items-center gap-3 mb-3">
                           <div className="bg-emerald-100 text-emerald-800 text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded flex items-center gap-1.5 border border-emerald-200 shadow-sm">
-                            <IconMessageCircle size={16} className="text-emerald-600" />
+                            <IconMessageCircle
+                              size={16}
+                              className="text-emerald-600"
+                            />
                             Resolution Provided
                           </div>
                           <div className="flex-grow border-t border-dashed border-emerald-300"></div>
                         </div>
-                        
+
                         {/* Resolution Text Box */}
                         <div className="bg-white/80 p-4 rounded-md border border-emerald-100 shadow-sm">
                           <p className="text-emerald-950 whitespace-pre-wrap text-sm leading-relaxed">
@@ -1422,7 +1473,8 @@ const ViewProcess = () => {
                           <div className="flex justify-end mt-2">
                             <span className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
                               <IconClock size={12} />
-                              Resolved on {new Date(query.answeredAt).toLocaleString()}
+                              Resolved on{' '}
+                              {new Date(query.answeredAt).toLocaleString()}
                             </span>
                           </div>
                         )}
@@ -1437,7 +1489,10 @@ const ViewProcess = () => {
                           </p>
                           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             {query.documentChanges.map((dc, idx) => {
-                              const docName = getDocumentName(dc.documentId, dc.document);
+                              const docName = getDocumentName(
+                                dc.documentId,
+                                dc.document,
+                              );
                               const replacedDocName = dc.replacedDocument?.name;
 
                               return (
@@ -1451,14 +1506,19 @@ const ViewProcess = () => {
                                   />
                                   <div className="flex flex-col">
                                     <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-0.5">
-                                      {dc.isReplacement ? 'Replaced Document' : 'New Document Uploaded'}
+                                      {dc.isReplacement
+                                        ? 'Replaced Document'
+                                        : 'New Document Uploaded'}
                                     </span>
                                     <span className="text-slate-800 font-medium break-words">
                                       {docName}
                                     </span>
                                     {dc.isReplacement && replacedDocName && (
                                       <span className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                                        Replaced: <span className="line-through">{replacedDocName}</span>
+                                        Replaced:{' '}
+                                        <span className="line-through">
+                                          {replacedDocName}
+                                        </span>
                                       </span>
                                     )}
                                   </div>
@@ -1480,7 +1540,10 @@ const ViewProcess = () => {
                       </p>
                       <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {query.documentChanges.map((dc, idx) => {
-                          const docName = getDocumentName(dc.documentId, dc.document);
+                          const docName = getDocumentName(
+                            dc.documentId,
+                            dc.document,
+                          );
                           const replacedDocName = dc.replacedDocument?.name;
 
                           return (
@@ -1494,7 +1557,9 @@ const ViewProcess = () => {
                               />
                               <div className="flex flex-col">
                                 <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-0.5">
-                                  {dc.isReplacement ? 'Replacement Required' : 'Action Required'}
+                                  {dc.isReplacement
+                                    ? 'Replacement Required'
+                                    : 'Action Required'}
                                 </span>
                                 <span className="text-slate-800 font-medium break-words">
                                   {docName}
@@ -1516,7 +1581,9 @@ const ViewProcess = () => {
                   {!isResolved && (
                     <div className="mt-4 flex justify-end pt-4 border-t border-slate-100">
                       <CustomButton
-                        disabled={actionsLoading || isCompleted || disableActions}
+                        disabled={
+                          actionsLoading || isCompleted || disableActions
+                        }
                         text="Solve Query"
                         variant="primary"
                         click={() => handleSolveQuery(query)}
@@ -1941,59 +2008,64 @@ const ViewProcess = () => {
           <p className="mb-4">
             Are you sure you want to approve all documents?
           </p>
-          <div className="mb-4">
-            <label className="inline-flex items-center">
-              <input
-                type="checkbox"
-                name="signWithRemarks"
-                checked={signAllModalOpen.withRemarks}
-                onChange={() => {
-                  setSignAllModalOpen({
-                    ...signAllModalOpen,
-                    withRemarks: !signAllModalOpen.withRemarks,
-                  });
-                }}
-              />
-              <span className="ml-2">With Remarks</span>
-            </label>
-          </div>
-          {signAllModalOpen.withRemarks && (
-            <div className="mb-4">
-              <table className="w-full border">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="border px-3 py-2 text-left">
-                      Document Name
-                    </th>
-                    <th className="border px-3 py-2 text-left">Remarks</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {signAllModalOpen.listOfDocuments.map((doc, index) => (
-                    <tr key={index}>
-                      <td className="border px-3 py-2">{doc.name}</td>
-                      <td className="border px-3 py-2">
-                        <input
-                          type="text"
-                          value={doc.remarks || ''}
-                          onChange={(e) => {
-                            const updatedDocuments = [
-                              ...signAllModalOpen.listOfDocuments,
-                            ];
-                            updatedDocuments[index].remarks = e.target.value;
-                            setSignAllModalOpen({
-                              ...signAllModalOpen,
-                              listOfDocuments: updatedDocuments,
-                            });
-                          }}
-                          className="w-full p-1 border rounded"
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {signAllModalOpen.listOfDocuments.length > 0 && (
+            <>
+              <div className="mb-4">
+                <label className="inline-flex items-center">
+                  <input
+                    type="checkbox"
+                    name="signWithRemarks"
+                    checked={signAllModalOpen.withRemarks}
+                    onChange={() => {
+                      setSignAllModalOpen({
+                        ...signAllModalOpen,
+                        withRemarks: !signAllModalOpen.withRemarks,
+                      });
+                    }}
+                  />
+                  <span className="ml-2">With Remarks</span>
+                </label>
+              </div>
+              {signAllModalOpen.withRemarks && (
+                <div className="mb-4">
+                  <table className="w-full border">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="border px-3 py-2 text-left">
+                          Document Name
+                        </th>
+                        <th className="border px-3 py-2 text-left">Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {signAllModalOpen.listOfDocuments.map((doc, index) => (
+                        <tr key={index}>
+                          <td className="border px-3 py-2">{doc.name}</td>
+                          <td className="border px-3 py-2 w-72">
+                            <textarea
+                              type="text"
+                              value={doc.remarks || ''}
+                              onChange={(e) => {
+                                const updatedDocuments = [
+                                  ...signAllModalOpen.listOfDocuments,
+                                ];
+                                updatedDocuments[index].remarks =
+                                  e.target.value;
+                                setSignAllModalOpen({
+                                  ...signAllModalOpen,
+                                  listOfDocuments: updatedDocuments,
+                                });
+                              }}
+                              className="w-full p-1 border rounded max-h-20 min-h-12"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
           <div className="flex justify-end space-x-2">
             <CustomButton
