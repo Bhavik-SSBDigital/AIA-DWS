@@ -1948,7 +1948,7 @@ export default function InitiateProcess() {
             <h3 className="text-xl font-semibold text-gray-800 mb-4">
               Upload Documents
               <span className="text-sm font-normal text-gray-500 ml-3">
-                (multiple files • .eml/.msg auto-extract attachments)
+                (multiple files • .eml auto-extract attachments)
               </span>
             </h3>
 

@@ -2001,7 +2001,7 @@ const ViewProcess = () => {
             listOfDocuments: [],
           });
         }}
-        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+        className={'max-h-[95vh] overflow-auto max-w-xl w-full'}
       >
         <div>
           <h2 className="text-lg font-semibold mb-4">Approve All Documents</h2>
@@ -2028,22 +2028,28 @@ const ViewProcess = () => {
               </div>
               {signAllModalOpen.withRemarks && (
                 <div className="mb-4">
-                  <table className="w-full border">
+                  <table className="w-full border table-fixed">
                     <thead>
                       <tr className="bg-gray-100">
-                        <th className="border px-3 py-2 text-left">
+                        <th className="border px-3 py-2 text-left w-1/2">
                           Document Name
                         </th>
-                        <th className="border px-3 py-2 text-left">Remarks</th>
+                        <th className="border px-3 py-2 text-left w-1/2">
+                          Remarks
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {signAllModalOpen.listOfDocuments.map((doc, index) => (
                         <tr key={index}>
-                          <td className="border px-3 py-2">{doc.name}</td>
-                          <td className="border px-3 py-2 w-72">
+                          <td className="border px-3 py-2 w-1/2 overflow-x-auto">
+                            <div className="truncate" title={doc.name}>
+                              {doc.name}
+                            </div>
+                          </td>
+                          <td className="border px-3 py-2 w-1/2">
                             <textarea
-                              type="text"
+                              placeholder="Remarks...."
                               value={doc.remarks || ''}
                               onChange={(e) => {
                                 const updatedDocuments = [
@@ -2056,7 +2062,7 @@ const ViewProcess = () => {
                                   listOfDocuments: updatedDocuments,
                                 });
                               }}
-                              className="w-full p-1 border rounded max-h-20 min-h-12"
+                              className="w-full p-1 border rounded resize-y min-h-[60px]"
                             />
                           </td>
                         </tr>
