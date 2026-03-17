@@ -1487,7 +1487,7 @@ export default function InitiateProcess() {
     const fetchTags = async () => {
       try {
         const { data } = await apiClient.get('/tags');
-        setAllTags(data.map((t) => t.name.toLowerCase()));
+        setAllTags(data.map((t) => t.name));
       } catch (e) {
         console.error(e);
       }
