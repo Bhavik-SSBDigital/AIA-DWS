@@ -51,11 +51,11 @@ function PdfContainer({
   const [remark, setRemark] = useState('');
   const [actionsLoading, setActionsLoading] = useState(false);
   const [highlights, setHighlights] = useState([]);
-  const [signAreas, setSignAreas] = useState([]); // NEW STATE
+  const [signAreas, setSignAreas] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState(''); // NEW STATE
-  const [drawing, setDrawing] = useState(false); // For sign area drawing
-  const [currentSignArea, setCurrentSignArea] = useState(null); // For active rectangle
+  const [mode, setMode] = useState('');
+  const [drawing, setDrawing] = useState(false);
+  const [currentSignArea, setCurrentSignArea] = useState(null);
   const pageRefs = useRef([]);
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
   const token = sessionStorage.getItem('accessToken');
@@ -82,7 +82,7 @@ function PdfContainer({
 
   useEffect(() => {
     const handleTextSelection = () => {
-      if (mode !== 'textSelection') return; // Only handle text selection in text mode
+      if (mode !== 'textSelection') return;
       const selection = window.getSelection();
       const selectedText = selection.toString()?.trim() || '';
       if (selectedText.length > 0 && selectedText) {
@@ -145,7 +145,6 @@ function PdfContainer({
   const handleMouseDown = (e) => {
     if (userSignDialogOpen) return;
     if (mode === 'signSelection') {
-      // Start drawing rectangle
       setDrawing(true);
       const container = pageRefs.current.find((ref) => ref.contains(e.target));
       if (container) {
@@ -192,7 +191,7 @@ function PdfContainer({
       }
     }
   };
-  // dialog inputs for user sign area
+
   const [userSelected, setUserSelected] = useState(null);
   const submitSignArea = async () => {
     setActionsLoading(true);
@@ -215,6 +214,7 @@ function PdfContainer({
       setActionsLoading(false);
     }
   };
+
   const onSignAreaDialogClose = () => {
     setCurrentSignArea(null);
     setUserSignDialogOpen(false);
@@ -379,15 +379,16 @@ function PdfContainer({
     return pages;
   };
 
-  function generateLightColor(num) {
+  function generateColor(num) {
     const hash = num * 123456789;
-    const r = 200 + (((hash & 0xff0000) >> 16) % 56); // 200–255
-    const g = 200 + (((hash & 0x00ff00) >> 8) % 56); // 200–255
-    const b = 200 + ((hash & 0x0000ff) % 56); // 200–255
+    const r = 200 + (((hash & 0xff0000) >> 16) % 56);
+    const g = 200 + (((hash & 0x00ff00) >> 8) % 56);
+    const b = 200 + ((hash & 0x0000ff) % 56);
     return `rgba(${r}, ${g}, ${b}, 0.3)`;
   }
 
   const [remarkError, setRemarkError] = useState('');
+  
   const getFileHighlights = async () => {
     try {
       const res = await getHighlightsInFile(documentId);
@@ -396,6 +397,7 @@ function PdfContainer({
       console.log(error.message);
     }
   };
+
   const getSignCoordinates = async () => {
     try {
       const res = await getSignCoordinatesForCurrentStep({
@@ -414,6 +416,7 @@ function PdfContainer({
     getFileHighlights();
     getSignCoordinates();
   }, []);
+
   const submitRemarks = async () => {
     if (!remark) {
       setRemarkError('Enter Remarks');
@@ -459,8 +462,6 @@ function PdfContainer({
                 >
                   Text Selection Mode
                 </button>
-
-                {/* {initiator && documentId ? ( */}
                 <button
                   className={`${
                     mode === 'signSelection'
@@ -471,7 +472,6 @@ function PdfContainer({
                 >
                   Sign Selection Mode
                 </button>
-                {/* ) : null} */}
               </>
             ) : null}
           </div>
@@ -479,6 +479,9 @@ function PdfContainer({
       ) : null}
 
       <Document
+        // ✅ CORS FIX: Simply pass the URL string. 
+        // Because the URL already has `?token=...`, the backend will authorize it natively.
+        // This stops react-pdf from injecting custom headers, allowing the browser to skip the strict OPTIONS preflight entirely.
         file={url}
         onLoadSuccess={onDocumentLoadSuccess}
         onLoadError={(error) => {
@@ -523,12 +526,10 @@ function PdfContainer({
           onClose={onSignAreaDialogClose}
         >
           <form className="bg-white rounded-lg max-w-md mx-auto space-y-4">
-            {/* Modal Title */}
             <div className="text-lg font-semibold rounded-md">
               Select user you want sign of here
             </div>
 
-            {/* Dropdown */}
             <div>
               <select
                 id="userSelect"
@@ -552,7 +553,6 @@ function PdfContainer({
               </select>
             </div>
 
-            {/* Action Buttons */}
             <div className="flex w-full">
               <CustomButton
                 className="w-full"

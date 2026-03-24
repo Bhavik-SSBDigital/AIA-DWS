@@ -1,150 +1,110 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import {
-  Box,
-  Button,
-  TextField,
-  Typography,
-  Paper,
-  InputLabel,
-  Stack,
-  CircularProgress,
-} from '@mui/material';
-import { toast } from 'react-toastify';
-import { forgotPassword } from '../../common/Apis'; // adjust path
 
-const ForgotPassword: React.FC = () => {
+import { Stack, TextField, Button, CircularProgress } from '@mui/material';
+import axios from 'axios';
+import { toast } from 'react-toastify';
+
+const ForgotPass: React.FC = () => {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({ username: '', email: '' });
-  const [errors, setErrors] = useState({ username: '', email: '' });
+  const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
+  const [data, setData] = useState({
+    username: '',
+    email: '',
+  });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-    // Clear error for this field
-    setErrors({ ...errors, [e.target.name]: '' });
+    setData({ ...data, [e.target.name]: e.target.value });
   };
-
-  const validate = () => {
-    let valid = true;
-    const newErrors = { username: '', email: '' };
-    if (!formData.username.trim()) {
-      newErrors.username = 'Username is required';
-      valid = false;
-    }
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
-      valid = false;
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Invalid email format';
-      valid = false;
-    }
-    setErrors(newErrors);
-    return valid;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const [loading, setLoading] = useState(false);
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!validate()) return;
-
     setLoading(true);
     try {
-      const response = await forgotPassword(formData);
-      toast.success(response?.data?.message || 'Password sent successfully!');
-      setTimeout(() => navigate('/auth/signin'), 1500);
+      const url = `${backendUrl}/forgetPassword`;
+      const res = await axios.post(url, data);
+      if (res.status === 200) {
+        toast.success(res?.data?.message || 'Email Sent');
+        navigate('/auth/signin');
+      }
     } catch (error: any) {
-      const msg = error?.response?.data?.message || 'Something went wrong';
-      toast.error(msg);
+      toast.error(error?.response?.data?.message || "An error occurred");
+      // VAPT FIX #18: Removed console.log(error.message) to prevent info leakage
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        bgcolor: '#f1f5f9',
-        p: 2,
-      }}
+    <Stack
+      alignItems="center"
+      justifyContent="center"
+      height="100vh"
+      width="100vw"
     >
-      <Paper
-        elevation={3}
-        sx={{
-          p: { xs: 3, sm: 5 },
-          borderRadius: 3,
-          width: '100%',
-          maxWidth: 500,
-        }}
+      <div
+        style={{ padding: '20px', width: '80vw', maxWidth: '500px' }}
+        className="rounded-sm border border-stroke bg-white shadow-default dark:border-strokedark dark:bg-boxdark"
       >
-        <Typography variant="h4" gutterBottom fontWeight="bold">
+        <h2 className="mb-9 text-2xl font-bold text-black dark:text-white sm:text-title-xl2">
           Forgot Password
-        </Typography>
-        <Typography color="textSecondary" sx={{ mb: 3 }}>
-          Enter your username and registered email to reset your password.
-        </Typography>
-
-        <Box component="form" onSubmit={handleSubmit} noValidate>
-          <InputLabel sx={{ fontWeight: 500, mb: 0.5 }}>Username</InputLabel>
-          <TextField
-            fullWidth
-            required
-            name="username"
-            placeholder="Enter your username"
-            value={formData.username}
-            onChange={handleChange}
-            error={!!errors.username}
-            helperText={errors.username}
-            sx={{ mb: 2 }}
-          />
-
-          <InputLabel sx={{ fontWeight: 500, mb: 0.5 }}>Email</InputLabel>
-          <TextField
-            fullWidth
-            required
-            name="email"
-            type="email"
-            placeholder="Enter your email"
-            value={formData.email}
-            onChange={handleChange}
-            error={!!errors.email}
-            helperText={errors.email}
-            sx={{ mb: 3 }}
-          />
-
-          <Button
-            fullWidth
-            type="submit"
-            variant="contained"
-            color="primary"
-            disabled={loading}
-            sx={{ py: 1.5, fontWeight: 600 }}
-          >
-            {loading ? <CircularProgress size={24} color="inherit" /> : 'Submit'}
-          </Button>
-        </Box>
-
-        <Stack direction="row" justifyContent="flex-end" sx={{ mt: 2 }}>
-          <Typography variant="body2">Remembered your password?</Typography>
-          <Typography
-            component={Link}
-            to="/auth/signin"
-            sx={{
-              ml: 1,
-              textDecoration: 'none',
-              color: 'primary.main',
-              fontWeight: 600,
-            }}
-          >
-            Sign In
-          </Typography>
-        </Stack>
-      </Paper>
-    </Box>
+        </h2>
+        <form onSubmit={handleSubmit}>
+          <Stack spacing={2}>
+            <TextField
+              label="Username"
+              name="username"
+              value={data.username}
+              onChange={handleChange}
+              fullWidth
+              required
+              autoComplete="username" // VAPT FIX #18
+            />
+            <TextField
+              label="Email"
+              name="email"
+              value={data.email}
+              onChange={handleChange}
+              fullWidth
+              required
+              autoComplete="email" // VAPT FIX #18
+              error={
+                !!data.email &&
+                !/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(data.email)
+              }
+              helperText={
+                !!data.email &&
+                !/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(data.email)
+                  ? 'Invalid email address'
+                  : ''
+              }
+            />
+            <Stack
+              direction="row"
+              spacing={2}
+              justifyContent="space-between"
+              alignItems="center"
+            >
+              <Link
+                to="/auth/signin"
+                className="text-sm text-indigo-600 hover:text-indigo-500"
+              >
+                Back to sign in
+              </Link>
+              <Button type="submit" variant="contained" color="primary">
+                {loading ? (
+                  <CircularProgress sx={{ color: 'white' }} size={24} />
+                ) : (
+                  'Submit'
+                )}
+              </Button>
+            </Stack>
+          </Stack>
+        </form>
+      </div>
+    </Stack>
   );
 };
 
-export default ForgotPassword;
+export default ForgotPass;

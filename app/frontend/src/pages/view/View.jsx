@@ -65,7 +65,7 @@ const PdfViewer = ({
   currentStep,
   controls,
   setFileView,
-  signedDocument, // Added missing prop
+  signedDocument, 
 }) => {
   const [excelData, setExcelData] = useState([]);
   const [activeDocument, setActiveDocument] = useState(null);
@@ -151,6 +151,17 @@ const PdfViewer = ({
     );
   };
 
+  // ✅ CORS FIX: Fallback URL Appender
+  // Injects the token directly into the URL to bypass strict CORS OPTIONS preflight failures
+  const getAuthenticatedUrl = (url) => {
+    if (!url) return url;
+    // Prevent appending multiple times on re-renders
+    if (url.includes('token=')) return url;
+    
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}token=${accessToken}`;
+  };
+
   return (
     <CustomModal
       isOpen={!!docu}
@@ -198,17 +209,6 @@ const PdfViewer = ({
               ({currentIndex + 1} of {documents.length})
             </span>
           )}
-          {/* {EDITABLE_TYPES.includes(currentDoc?.type) && (
-            <button
-              onClick={toggleEditMode}
-              className={`p-1 rounded-full transition ${
-                isEditing ? 'bg-blue-100' : 'hover:bg-gray-200'
-              }`}
-              title={isEditing ? 'Switch to View' : 'Edit Document'}
-            >
-              <IconPencil size={22} />
-            </button>
-          )} */}
         </div>
         <button
           onClick={handleViewClose}
@@ -232,7 +232,8 @@ const PdfViewer = ({
           />
         ) : currentDoc.type === 'pdf' ? (
           <PdfContainer
-            url={currentDoc.url}
+            // ✅ Fix: Pass authenticated URL
+            url={getAuthenticatedUrl(currentDoc.url)}
             documentId={currentDoc.fileId}
             workflow={workflow}
             maxReceiverStepNumber={maxReceiverStepNumber}
@@ -243,11 +244,13 @@ const PdfViewer = ({
           />
         ) : (
           <DocViewer
-            documents={[{ uri: currentDoc.url }]}
+            // ✅ Fix: Pass authenticated URL to DocViewer components to fix Images/Videos
+            documents={[{ uri: getAuthenticatedUrl(currentDoc.url) }]}
             activeDocument={activeDocument}
             className="my-doc-viewer-style"
             pluginRenderers={DocViewerRenderers}
             onDocumentChange={handleDocumentChange}
+            prefetchMethod="GET"
             style={{
               display: 'flex',
               height: '100%',

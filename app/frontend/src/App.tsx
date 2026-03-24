@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Route, Routes, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import Loader from './common/Loader';
 import PageTitle from './components/PageTitle';
 import Profile from './pages/Profile';
@@ -26,7 +26,7 @@ import ForgotPass from './pages/Authentication/ForgotPass';
 import PhysicalDocuments from './pages/PhysicalDocuments/PhysicalDocuments';
 import SearchDocument from './pages/SearchDocuments/SearchDocument';
 import MeetingManager from './pages/Meeting';
-import ForgotPassword from './pages/Authentication/ForgotPassword';
+// import ForgotPassword from './pages/Authentication/ForgotPassword';
 import ChangePassword from './pages/Authentication/ChangePassword';
 import MetaData from './pages/MetaData';
 import Workflows from './pages/workflows';
@@ -44,6 +44,19 @@ import Bookmark from './pages/Bookmark';
 import AdminReportsPage from './pages/Reports';
 import AutoLoginHandler from './components/AutoLoginHandler';
 
+// ✅ VAPT FIX #20: Route Guard to prevent Client-Side Auth Bypass
+const AdminRoute = ({ children }: { children: JSX.Element }) => {
+  const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
+  const isRootUser = sessionStorage.getItem('specialUser') === 'true';
+
+  if (!isAdmin && !isRootUser) {
+    // If they aren't admin, kick them back to the dashboard immediately
+    return <Navigate to="/" replace />;
+  }
+
+  return children;
+};
+
 function App() {
   const dispatch = useDispatch();
   const [loading, setLoading] = useState<boolean>(true);
@@ -54,7 +67,7 @@ function App() {
     if (!pathname.includes('files')) {
       dispatch(onReload('..'));
     }
-  }, [pathname]);
+  }, [pathname, dispatch]);
 
   useEffect(() => {
     setTimeout(() => setLoading(false), 1000);
@@ -62,21 +75,21 @@ function App() {
 
   const navigate = useNavigate();
   useEffect(() => {
-     const isAutoLogin = pathname === '/auth/auto-login';
-  if (isAutoLogin) return;
+    const isAutoLogin = pathname === '/auth/auto-login';
+    if (isAutoLogin) return;
 
-  const token = sessionStorage.getItem('accessToken');
-  if (!token) {
-    navigate('/auth/signin');
-  }
+    const token = sessionStorage.getItem('accessToken');
+    if (!token && !pathname.includes('/auth/')) {
+      navigate('/auth/signin');
+    }
 
     // Block right-click context menu
-    const preventContextMenu = (e) => {
+    const preventContextMenu = (e: MouseEvent) => {
       e.preventDefault();
     };
 
     // Block PrintScreen and Ctrl/Cmd + P
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key;
 
       // Block PrintScreen key
@@ -105,14 +118,18 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('contextmenu', preventContextMenu);
     };
-  }, []);
+  }, [navigate, pathname]);
 
   return loading ? (
     <Loader />
   ) : (
     <>
       <Routes>
-          <Route path="/auth/auto-login" element={<AutoLoginHandler />} />
+        <Route path="/auth/auto-login" element={<AutoLoginHandler />} />
+        
+        {/* ======================================= */}
+        {/* PUBLIC / STANDARD AUTHENTICATED ROUTES  */}
+        {/* ======================================= */}
         <Route
           index
           element={
@@ -131,7 +148,6 @@ function App() {
             </DefaultLayout>
           }
         />
-
         <Route
           path="/files"
           element={
@@ -141,7 +157,6 @@ function App() {
             </DefaultLayout>
           }
         />
-      
         <Route
           path="/bin"
           element={
@@ -160,15 +175,6 @@ function App() {
             </DefaultLayout>
           }
         />
-        {/* <Route
-          path="/auth/forgot"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Forgot Password" />
-              <ForgotPassword />
-            </DefaultLayout>
-          }
-        /> */}
         <Route
           path="/change-password"
           element={
@@ -197,137 +203,11 @@ function App() {
           }
         />
         <Route
-          path="/reports"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Reports" />
-              <AdminReportsPage />
-            </DefaultLayout>
-          }
-        />
-        <Route
           path="/physical-document"
           element={
             <DefaultLayout>
               <PageTitle title="Physical Documents" />
               <PhysicalDocuments />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/branches/list"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Branches List" />
-              <BranchList />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/branches/createNew"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Create Branch" />
-              <NewBranch />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/master/tags"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Tags" />
-              <TagsMasterPage />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/branches/edit/:id"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Edit Branch" />
-              <NewBranch />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/users/list"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Users List" />
-              <UserList />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/users/edit/:id"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Edit User" />
-              <NewUser />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/users/createNew"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Create User" />
-              <NewUser />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/roles/list"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Roles List" />
-              <RolesList />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/roles/createNew"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Create role" />
-              <NewRole />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/roles/edit/:id"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Edit Role" />
-              <NewRole />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/departments/list"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Department List" />
-              <DepartmentList />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/departments/createNew"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Create Department" />
-              <NewDepartment />
-            </DefaultLayout>
-          }
-        />
-        <Route
-          path="/departments/edit/:id"
-          element={
-            <DefaultLayout>
-              <PageTitle title="Edit Role" />
-              <NewDepartment />
             </DefaultLayout>
           }
         />
@@ -349,8 +229,6 @@ function App() {
             </DefaultLayout>
           }
         />
-
-        {/* logs */}
         <Route
           path="/logs"
           element={
@@ -369,7 +247,6 @@ function App() {
             </DefaultLayout>
           }
         />
-
         <Route
           path="/recommendations"
           element={
@@ -407,33 +284,6 @@ function App() {
           }
         />
         <Route
-          path="/auth/signin"
-          element={
-            <>
-              <PageTitle title="Signin" />
-              <SignIn />
-            </>
-          }
-        />
-        <Route
-          path="/auth/signup"
-          element={
-            <>
-              <PageTitle title="Signup" />
-              <SignUp />
-            </>
-          }
-        />
-        <Route
-          path="/auth/forgot"
-          element={
-            <>
-              <PageTitle title="Forgot Password" />
-              <ForgotPass />
-            </>
-          }
-        />
-        <Route
           path="/profile"
           element={
             <DefaultLayout>
@@ -460,7 +310,6 @@ function App() {
             </DefaultLayout>
           }
         />
-
         <Route
           path="/workflows"
           element={
@@ -480,9 +329,201 @@ function App() {
           }
         />
 
+        {/* ======================================= */}
+        {/* SECURE ADMIN ROUTES (VAPT FIX #20)      */}
+        {/* ======================================= */}
+
+        <Route
+          path="/reports"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Reports" />
+                <AdminReportsPage />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/branches/list"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Branches List" />
+                <BranchList />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/branches/createNew"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Create Branch" />
+                <NewBranch />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/master/tags"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Tags" />
+                <TagsMasterPage />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/branches/edit/:id"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Edit Branch" />
+                <NewBranch />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/users/list"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Users List" />
+                <UserList />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/users/edit/:id"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Edit User" />
+                <NewUser />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/users/createNew"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Create User" />
+                <NewUser />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/roles/list"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Roles List" />
+                <RolesList />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/roles/createNew"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Create role" />
+                <NewRole />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/roles/edit/:id"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Edit Role" />
+                <NewRole />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/departments/list"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Department List" />
+                <DepartmentList />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/departments/createNew"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Create Department" />
+                <NewDepartment />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/departments/edit/:id"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Edit Role" />
+                <NewDepartment />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+
+        {/* ======================================= */}
+        {/* UNAUTHENTICATED ROUTES                  */}
+        {/* ======================================= */}
+
+        <Route
+          path="/auth/signin"
+          element={
+            <>
+              <PageTitle title="Signin" />
+              <SignIn />
+            </>
+          }
+        />
+        <Route
+          path="/auth/signup"
+          element={
+            <>
+              <PageTitle title="Signup" />
+              <SignUp />
+            </>
+          }
+        />
+        <Route
+          path="/auth/forgot"
+          element={
+            <>
+              <PageTitle title="Forgot Password" />
+              <ForgotPass />
+            </>
+          }
+        />
+        
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </>
   );
 }
+
 export default App;

@@ -103,6 +103,7 @@ model User {
   email                 String?
   password              String
   name                  String?
+  passwordChangedAt      DateTime?
   loginLogs             LoginLog[]               @relation()
   status                String?
   specialUser           Boolean                  @default(false)
@@ -300,6 +301,7 @@ model ProcessInstance {
   name             String
   workflowId       String
   description      String?
+  tags             String[]  @default([])
   issueNo          String?
   initiatorId      Int
   emailThreads  EmailThread[] 

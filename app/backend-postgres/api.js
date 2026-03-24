@@ -1,6 +1,7 @@
 import express from "express";
 import http from "http";
 import cors from "cors";
+import helmet from "helmet"; // ✅ VAPT FIX #21: Missing HTTP Headers
 import router from "./routes/routes.js";
 import db from "./db.js";
 import path from "path";
@@ -16,6 +17,17 @@ dotenv.config();
 const PORT = process.env.PORT;
 
 const app = express();
+
+// ✅ VAPT FIX #22: Server Version Disclosure
+app.disable("x-powered-by");
+
+// ✅ VAPT FIX #21 & #13: Applies critical security headers (X-Frame-Options, X-Content-Type-Options, HSTS)
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // Disabled to prevent blocking existing React inline scripts
+    crossOriginEmbedderPolicy: false,
+  }),
+);
 
 // Middleware to log incoming request URLs
 // app.use((req, res, next) => {

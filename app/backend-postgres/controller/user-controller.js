@@ -1,5 +1,4 @@
 import { verifyUser } from "../utility/verifyUser.js";
-
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -173,7 +172,6 @@ export const get_user_profile_data = async (req, res) => {
         email: true,
         signaturePicFileName: true,
         dscFileName: true,
-        dscFileName: true,
         branches: true,
         roles: {
           select: {
@@ -212,7 +210,26 @@ export const get_user_profile_data = async (req, res) => {
 
 export const get_user = async (req, res) => {
   try {
+    // ✅ VAPT #9 FIX: IDOR in GetUsers
+    // Ensure the requesting user is authenticated and authorized to view this profile
+    const accessToken = req.headers["authorization"]?.substring(7);
+    const requestingUser = await verifyUser(accessToken);
+    if (requestingUser === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
     const { userId } = req.params; // Assuming userId is passed as a URL parameter
+
+    // A user can only fetch themselves, UNLESS they are an Admin or Root
+    if (
+      requestingUser.id !== parseInt(userId) &&
+      !requestingUser.isAdmin &&
+      !requestingUser.isRootLevel
+    ) {
+      return res.status(403).json({
+        message: "Forbidden: You don't have permission to view this profile.",
+      });
+    }
 
     // Fetch the user with related data
     const user = await prisma.user.findUnique({
@@ -315,7 +332,26 @@ export const get_user = async (req, res) => {
 
 export const edit_user = async (req, res) => {
   try {
+    // ✅ VAPT #1 FIX & #9 FIX: Broken Access Control & IDOR
+    const accessToken = req.headers["authorization"]?.substring(7);
+    const requestingUser = await verifyUser(accessToken);
+    if (requestingUser === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
     const { userId } = req.params; // Assuming userId is passed as a URL parameter
+
+    // A user can only edit themselves, UNLESS they are an Admin
+    if (
+      requestingUser.id !== parseInt(userId) &&
+      !requestingUser.isAdmin &&
+      !requestingUser.isRootLevel
+    ) {
+      return res.status(403).json({
+        message: "Forbidden: You don't have permission to edit this profile.",
+      });
+    }
+
     const {
       username,
       email,
@@ -372,15 +408,17 @@ export const edit_user = async (req, res) => {
       }
     }
 
-    // Prepare update data
+    // Prepare update data (Prevent standard users from escalating themselves to Admin/Root)
     const updateData = {
       ...(username && { username }),
       ...(email && { email }),
       ...(name && { name }),
       ...(status && { status }),
       ...(typeof specialUser === "boolean" && { specialUser }),
-      ...(typeof isRootLevel === "boolean" && { isRootLevel }),
-      ...(typeof isAdmin === "boolean" && { isAdmin }),
+      ...(typeof isRootLevel === "boolean" &&
+        requestingUser.isRootLevel && { isRootLevel }), // Security fix
+      ...(typeof isAdmin === "boolean" &&
+        requestingUser.isAdmin && { isAdmin }), // Security fix
       ...(permissions?.writable && { writable: permissions.writable }),
       ...(permissions?.readable && { readable: permissions.readable }),
       ...(permissions?.downloadable && {
@@ -427,9 +465,30 @@ export const edit_user = async (req, res) => {
 
 export const get_user_signature_id = async (req, res) => {
   try {
+    // ✅ VAPT #8 FIX: IDOR in Users Signature
+    const accessToken = req.headers["authorization"]?.substring(7);
+    const requestingUser = await verifyUser(accessToken);
+
+    if (requestingUser === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
     let userId = parseInt(req.params.userId);
 
     console.log("user id", userId);
+
+    // Authorization Check
+    if (
+      userId &&
+      requestingUser.id !== userId &&
+      !requestingUser.isAdmin &&
+      !requestingUser.isRootLevel
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Forbidden: You cannot access this signature." });
+    }
+
     const userData = await prisma.user.findFirst({
       where: {
         id: parseInt(userId),
@@ -471,6 +530,7 @@ export const get_user_signature = async (req, res) => {
   try {
     console.log("reached in signature");
 
+    // ✅ VAPT #8 FIX: IDOR in Users Signature
     const accessToken = req.headers["authorization"]?.substring(7);
     const requestingUser = await verifyUser(accessToken);
 
@@ -479,9 +539,21 @@ export const get_user_signature = async (req, res) => {
     }
 
     console.log("req params", req.params);
-    let { userId } = parseInt(req.params.userId);
+    let userId = parseInt(req.params.userId); // Fixed destructive destructuring from original
 
     let userData;
+
+    // Authorization Check
+    if (
+      userId &&
+      requestingUser.id !== userId &&
+      !requestingUser.isAdmin &&
+      !requestingUser.isRootLevel
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Forbidden: You cannot access this signature." });
+    }
 
     if (userId) {
       userData = await prisma.user.findFirst({
@@ -608,6 +680,14 @@ export const deactivate_user = async (req, res) => {
 
     if (userData === "Unauthorized") {
       return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    // ✅ VAPT #1 FIX: Broken Access Control (Privilege escalation)
+    // Only Admin or Root can deactivate users
+    if (!userData.isAdmin && !userData.isRootLevel) {
+      return res.status(403).json({
+        message: "Forbidden: Admin privileges required to deactivate a user.",
+      });
     }
 
     const { id } = req.params;

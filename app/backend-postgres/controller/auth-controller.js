@@ -39,6 +39,16 @@ export const sign_up = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
+    // ✅ VAPT #1 FIX: Broken Access Control (Privilege escalation)
+    // Only Root or Admin users can create new users.
+    if (!userData.isAdmin && !userData.isRootLevel) {
+      return res
+        .status(403)
+        .json({
+          message: "Forbidden: Admin privileges required to create users.",
+        });
+    }
+
     const {
       username,
       email,
@@ -140,8 +150,10 @@ export const login = async (req, res) => {
       },
     });
 
+    // ✅ VAPT #4 FIX: Username Enumeration
+    // Standardize the error message so attackers cannot guess valid usernames
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(401).json({ message: "Invalid username or password" });
     }
 
     const match = await bcrypt.compare(password, user.password);
@@ -156,10 +168,11 @@ export const login = async (req, res) => {
           ipAddress: req.ip || req.connection.remoteAddress,
           userAgent: req.get("User-Agent"),
           success: false,
-          error: "Password does not match",
+          error: "Invalid credentials", // Obfuscated in DB as well to prevent info disclosure
         },
       });
-      return res.status(400).json({ message: "Password does not match" });
+      // ✅ VAPT #4 FIX: Username Enumeration
+      return res.status(401).json({ message: "Invalid username or password" });
     }
 
     // Check if the user already has a refresh token
@@ -177,7 +190,6 @@ export const login = async (req, res) => {
     }
 
     // Generate an access token with all required user properties
-
     let roles = await prisma.role.findMany({
       where: { id: { in: user.roles.map((role) => role.roleId) } },
     });
@@ -197,7 +209,7 @@ export const login = async (req, res) => {
       },
       process.env.SECRET_ACCESS_KEY,
       {
-        expiresIn: "365d",
+        expiresIn: "1h", // ✅ VAPT #17 FIX: Reduced excessive expiration time from 365d to 1h
       },
     );
 
@@ -228,12 +240,12 @@ export const login = async (req, res) => {
     console.error("Error during login", error);
     await prisma.loginLog.create({
       data: {
-        username: req.body.username,
+        username: req.body.username || "Unknown",
         action: "LOGIN",
         ipAddress: req.ip || req.connection.remoteAddress,
         userAgent: req.get("User-Agent"),
         success: false,
-        error: error.message,
+        error: "System Error", // ✅ VAPT #19 FIX: Prevent stack trace info disclosure in DB
       },
     });
     return res.status(500).json({ message: "Error during login" });
@@ -281,7 +293,7 @@ export const logout = async (req, res) => {
     console.error("Error during logout", error);
 
     // Log failed logout attempt if user info is available
-    if (req.user) {
+    if (userData) {
       await prisma.loginLog.create({
         data: {
           userId: userData.id,
@@ -291,7 +303,7 @@ export const logout = async (req, res) => {
           ipAddress: req.ip || req.connection.remoteAddress,
           userAgent: req.get("User-Agent"),
           success: false,
-          error: error.message,
+          error: "System Error",
         },
       });
     }
@@ -324,8 +336,7 @@ export const create_admin = async (req, res) => {
     console.error("Error creating admin user:", error);
     res.status(500).json({
       message: "Failed to create admin user",
-      error: error.message,
-    });
+    }); // Removed error.message for VAPT #19 (Info Disclosure)
   }
 };
 
@@ -391,6 +402,7 @@ export const autoLogin = async (req, res) => {
         source: "auto-login", // Mark as from auto-login
       },
       process.env.SECRET_ACCESS_KEY,
+      { expiresIn: "1h" }, // Added expiration matching main login
     );
 
     // Generate refresh token
@@ -459,7 +471,7 @@ export const autoLogin = async (req, res) => {
         ipAddress: req.ip || req.connection.remoteAddress,
         userAgent: req.get("User-Agent"),
         success: false,
-        error: error.message,
+        error: "System Error",
       },
     });
 
@@ -544,9 +556,12 @@ export const forget_password = async (req, res) => {
       where: { username },
     });
 
+    // ✅ VAPT #4 FIX: Username Enumeration
+    // Always return the exact same success message regardless of outcome
     if (!user || user.email !== email) {
-      return res.status(400).json({
-        message: "Username does not exist or email does not match",
+      return res.status(200).json({
+        message:
+          "If the details are correct, a new password has been sent to your registered email",
       });
     }
 
@@ -554,17 +569,27 @@ export const forget_password = async (req, res) => {
     const newPlainPassword = generateRandomPassword(12);
     const hashedPassword = await bcrypt.hash(newPlainPassword, 10);
 
-    // Update password in database
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { password: hashedPassword },
+    // ✅ VAPT #11 FIX: Session Not Invalidated After Password Change
+    // Update password in database AND delete all existing sessions
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          password: hashedPassword,
+          passwordChangedAt: new Date(), // Store last change time
+        },
+      });
+
+      // Delete all active refresh tokens for this user
+      await tx.token.deleteMany({
+        where: { userId: user.id },
+      });
     });
 
     // Send email with new password
     try {
       await sendUserEmail("passwordReset", user, newPlainPassword);
     } catch (emailError) {
-      // Rollback password change? (Optional, but you could revert)
       console.error("Password reset email failed:", emailError);
       return res.status(500).json({
         message: "Error sending password reset email, please try again later",
@@ -572,7 +597,8 @@ export const forget_password = async (req, res) => {
     }
 
     return res.status(200).json({
-      message: "New password has been sent to your registered email",
+      message:
+        "If the details are correct, a new password has been sent to your registered email",
     });
   } catch (error) {
     console.error("Forget password error:", error);
@@ -619,13 +645,29 @@ export const change_password = async (req, res) => {
     // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Update password in database
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { password: hashedPassword },
+    // ✅ VAPT #11 FIX: Session Not Invalidated After Password Change
+    // Use transaction to update password AND delete tokens
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          password: hashedPassword,
+          passwordChangedAt: new Date(),
+        },
+      });
+
+      // Invalidate all existing sessions
+      await tx.token.deleteMany({
+        where: { userId: user.id },
+      });
     });
 
-    res.status(200).json({ message: "Password changed successfully" });
+    res
+      .status(200)
+      .json({
+        message:
+          "Password changed successfully. You have been logged out of all other sessions.",
+      });
   } catch (error) {
     console.error("Error changing password:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -634,6 +676,21 @@ export const change_password = async (req, res) => {
 
 export const download_login_logs = async (req, res) => {
   try {
+    // ✅ VAPT #1 FIX: Broken Access Control (Privilege escalation)
+    // Secure the download_login_logs endpoint to only allow Admin/Root
+    const accessToken = req.headers["authorization"]?.substring(7);
+    const requestingUser = await verifyUser(accessToken);
+    if (
+      requestingUser === "Unauthorized" ||
+      (!requestingUser.isAdmin && !requestingUser.isRootLevel)
+    ) {
+      return res
+        .status(403)
+        .json({
+          message: "Forbidden: Admin privileges required to download logs.",
+        });
+    }
+
     const { fromDate, toDate, action } = req.query;
 
     // Build where clause

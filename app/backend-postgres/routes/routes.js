@@ -4,6 +4,10 @@ import upload_, {
   uploadMemory,
 } from "../config/multer-config.js";
 import multer from "multer";
+import rateLimit from "express-rate-limit";
+
+// ✅ Imported Admin Middleware to secure logs
+import { requireAdmin } from "../utility/verifyUser.js";
 
 import { extractEMLDetails } from "../controller/eml-extract-controller.js";
 
@@ -118,6 +122,7 @@ import {
   bookmark_document,
   get_bookmarked_documents,
   remove_bookmark_document,
+  download_converted_signed_pdf,
 } from "../controller/file-controller.js";
 
 import {
@@ -196,8 +201,17 @@ import {
 
 const router = express.Router();
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 login requests per `window`
+  message: {
+    message:
+      "Too many login attempts from this IP, please try again after 15 minutes",
+  },
+});
+
 router.post("/signup", sign_up);
-router.post("/login", login);
+router.post("/login", loginLimiter, login);
 router.get("/auto-login", autoLogin);
 router.post("/validate-auto-login", validateAutoLogin);
 router.post("/tags", add_tags);
@@ -220,6 +234,10 @@ router.post("/getAllBranches", get_departments);
 
 router.post("/upload", file_upload);
 router.post("/download", file_download);
+router.get(
+  "/downloadConvertedSignedPdf/:processId/:documentId",
+  download_converted_signed_pdf,
+);
 router.post("/copyFile", file_copy);
 router.post("/cutFile", file_cut);
 router.post("/createFolder", create_folder);
@@ -298,7 +316,7 @@ router.get("/getUserProcesses", get_user_processes);
 
 router.post("/changePassword", change_password);
 
-router.post("/forgetPassword", forget_password);
+router.post("/forgetPassword", loginLimiter, forget_password);
 
 router.post("/signDocument", sign_document);
 
@@ -444,9 +462,9 @@ router.delete("/deleteDepartment/:id", deactivate_department);
 
 router.post("/logout", logout);
 
-router.get("/downloadLoginLogs", download_login_logs);
-
-router.get("/exportFileLogs", export_file_logs);
+// ✅ VAPT FIX #5: Secure critical log export routes with Admin Middleware
+router.get("/downloadLoginLogs", requireAdmin, download_login_logs);
+router.get("/exportFileLogs", requireAdmin, export_file_logs);
 
 router.post("/uploadDocumentsInProcess", upload_documents_in_process);
 

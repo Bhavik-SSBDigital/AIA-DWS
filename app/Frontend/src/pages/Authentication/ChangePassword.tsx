@@ -90,7 +90,7 @@ const ChangePassword: React.FC = () => {
       // Optionally logout or stay logged in
       setTimeout(() => navigate('/profile'), 1500);
     } catch (error: any) {
-      console.log("error changing password", error)
+      // VAPT FIX #18: Removed console.log("error changing password", error)
       const msg = error?.response?.data?.message || 'Something went wrong';
       toast.error(msg);
     } finally {
@@ -132,6 +132,7 @@ const ChangePassword: React.FC = () => {
             required
             name="currentPassword"
             type={showPasswords.current ? 'text' : 'password'}
+            autoComplete="current-password" // VAPT FIX #18
             placeholder="Enter current password"
             value={formData.currentPassword}
             onChange={handleChange}
@@ -153,6 +154,7 @@ const ChangePassword: React.FC = () => {
             required
             name="newPassword"
             type={showPasswords.new ? 'text' : 'password'}
+            autoComplete="new-password" // VAPT FIX #18
             placeholder="Enter new password"
             value={formData.newPassword}
             onChange={handleChange}
@@ -174,6 +176,7 @@ const ChangePassword: React.FC = () => {
             required
             name="confirmPassword"
             type={showPasswords.confirm ? 'text' : 'password'}
+            autoComplete="new-password" // VAPT FIX #18
             placeholder="Confirm new password"
             value={formData.confirmPassword}
             onChange={handleChange}

@@ -441,79 +441,88 @@ export const sign_documents = async (req, res, next) => {
           continue;
         }
 
-        // Read the PDF document
+        const extension = document.name?.split(".").pop()?.toLowerCase();
         const documentPath = document.path;
-        const existingPdfBytes = await fs.readFile(
-          path.join(__dirname, "../../../../", "storage", documentPath),
-        );
-        const pdfDoc = await PDFDocument.load(existingPdfBytes, {
-          ignoreEncryption: true,
-        });
-        const pages = pdfDoc.getPages();
-        const lastPageIndex = pages.length - 1;
-        const lastPage = pages[lastPageIndex];
-        const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-        // Get coordinates for signing
-        const coordinates =
-          await get_sign_coordinates_for_specific_step_in_process(
-            documentId,
-            currentStep?.id,
-          );
-
-        if (coordinates.length > 0) {
-          // Sign at predefined coordinates
-          await print_signature_at_coordinates(
-            pdfDoc,
-            coordinates,
-            jpegImagePath,
-            userData.username,
-            remarks,
-            formatDate(Date.now()),
-            helveticaFont,
+        // ==========================================
+        // ONLY MANIPULATE THE PHYSICAL FILE IF IT IS A PDF
+        // ==========================================
+        if (extension === "pdf") {
+          const existingPdfBytes = await fs.readFile(
             path.join(__dirname, "../../../../", "storage", documentPath),
-            documentId,
-            userData,
-            dscPath,
-            p12password,
           );
-        } else {
-          // Sign at default position (end of document)
-          const signatureCoordinates =
-            await print_signature_after_content_on_the_last_page(
+          const pdfDoc = await PDFDocument.load(existingPdfBytes, {
+            ignoreEncryption: true,
+          });
+          const pages = pdfDoc.getPages();
+          const lastPageIndex = pages.length - 1;
+          const lastPage = pages[lastPageIndex];
+          const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+          // Get coordinates for signing
+          const coordinates =
+            await get_sign_coordinates_for_specific_step_in_process(
+              documentId,
+              currentStep?.id,
+            );
+
+          if (coordinates.length > 0) {
+            // Sign at predefined coordinates
+            await print_signature_at_coordinates(
               pdfDoc,
-              lastPage,
-              documentPath,
+              coordinates,
               jpegImagePath,
               userData.username,
-              formatDate(Date.now()),
               remarks,
+              formatDate(Date.now()),
               helveticaFont,
-              pythonEnvPath,
-              pythonScriptPath,
+              path.join(__dirname, "../../../../", "storage", documentPath),
+              documentId,
+              userData,
               dscPath,
               p12password,
             );
+          } else {
+            // Sign at default position (end of document)
+            const signatureCoordinates =
+              await print_signature_after_content_on_the_last_page(
+                pdfDoc,
+                lastPage,
+                documentPath,
+                jpegImagePath,
+                userData.username,
+                formatDate(Date.now()),
+                remarks,
+                helveticaFont,
+                pythonEnvPath,
+                pythonScriptPath,
+                dscPath,
+                p12password,
+              );
 
-          // Save the coordinates for future reference
-          await prisma.signCoordinate.create({
-            data: {
-              processDocumentId: processDocument.id,
-              page: signatureCoordinates.newlyAdded
-                ? lastPageIndex + 2
-                : lastPageIndex + 1,
-              x: signatureCoordinates.x,
-              y: signatureCoordinates.y,
-              width: signatureCoordinates.width,
-              height: signatureCoordinates.height,
-              stepId: currentStep?.id,
-              isSigned: true,
-              signedById: userData.id,
-            },
-          });
+            // Save the coordinates for future reference
+            await prisma.signCoordinate.create({
+              data: {
+                processDocumentId: processDocument.id,
+                page: signatureCoordinates.newlyAdded
+                  ? lastPageIndex + 2
+                  : lastPageIndex + 1,
+                x: signatureCoordinates.x,
+                y: signatureCoordinates.y,
+                width: signatureCoordinates.width,
+                height: signatureCoordinates.height,
+                stepId: currentStep?.id,
+                isSigned: true,
+                signedById: userData.id,
+              },
+            });
+          }
         }
+        // ==========================================
+        // END OF PDF-ONLY LOGIC
+        // ==========================================
 
-        // Create signature record
+        // Create signature record in the DB for ALL file types (Excel, Word, Image, PDF)
         const signDetails = await prisma.documentSignature.create({
           data: {
             processDocumentId: processDocument.id,

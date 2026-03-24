@@ -15,6 +15,8 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Request Interceptor: Attaches the token to outgoing requests
 apiClient.interceptors.request.use((config) => {
   const token = getAccessToken();
   if (token) {
@@ -22,6 +24,31 @@ apiClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// ✅ VAPT UX FIX: Global Response Interceptor
+// If the backend forces a session termination (401 Unauthorized), catch it globally, clear data, and redirect.
+apiClient.interceptors.response.use(
+  (response) => {
+    return response; // If the request is successful, just pass it through
+  },
+  (error) => {
+    // Check if the error is a 401 Unauthorized (Invalid/Expired Token)
+    if (error.response && error.response.status === 401) {
+      // 1. Clear all session data to securely log the user out
+      sessionStorage.clear();
+
+      // 2. Show a graceful message to the user
+      toast.error('Session expired or unauthorized. Please log in again.');
+
+      // 3. Force redirect to the sign-in page
+      // We use window.location.href here because we are outside a React component router
+      if (window.location.pathname !== '/auth/signin') {
+        window.location.href = '/auth/signin';
+      }
+    }
+    return Promise.reject(error); // Propagate the error so specific components can still handle it if needed
+  },
+);
 
 // general
 export const LogOut = async () => {
@@ -33,8 +60,8 @@ export const downloadLoginLogoutReport = async (fromDate, toDate) => {
   return apiClient.get('/downloadLoginLogs', {
     responseType: 'blob',
     params: {
-      fromDate, // optional, only sent if provided
-      toDate, // optional, only sent if provided
+      fromDate,
+      toDate,
     },
   });
 };
@@ -52,7 +79,6 @@ export const extractEMLDetails = async (documentId, workflowId) => {
 };
 
 export const exportFileLogs = async (fromDate, toDate) => {
-  console.log(fromDate);
   return apiClient.get('/exportFileLogs', {
     responseType: 'blob',
     params: {
@@ -263,7 +289,6 @@ export const RevokeRejection = async (processId, documentId) => {
 };
 export const DownloadFolder = (path, name) => {
   return apiClient.post(
-    // <-- Uses interceptor to attach token
     '/downloadFolder',
     {
       folderPath: path,
@@ -278,7 +303,47 @@ export const DownloadFile = async (name, path) => {
   try {
     await download(name, path);
   } catch (error) {
-    toast.error(error?.response?.data?.message || error?.messsage);
+    toast.error(error?.response?.data?.message || error?.message);
+  }
+};
+export const DownloadConvertedSignedPdf = async (
+  documentId,
+  processId,
+  fileName,
+) => {
+  try {
+    const response = await apiClient.get(
+      `/downloadConvertedSignedPdf/${processId}/${documentId}`,
+      {
+        responseType: 'blob',
+      },
+    );
+
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute(
+      'download',
+      `${fileName.replace(/\.[^/.]+$/, '')}_signed.pdf`,
+    );
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    // Clean up the object URL to avoid memory leaks
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    // If the backend sent a JSON error but it's formatted as a Blob, we extract the text
+    if (error.response && error.response.data instanceof Blob) {
+      try {
+        const errorText = await error.response.data.text();
+        const errorJson = JSON.parse(errorText);
+        throw new Error(errorJson.message || 'Failed to convert document');
+      } catch (parseError) {
+        throw new Error('Server error during conversion');
+      }
+    }
+    throw error;
   }
 };
 export const DownloadFileWithWaterMark = async (
@@ -426,11 +491,11 @@ export const storeSignCoordinates = async (data) => {
 };
 
 export const forgotPassword = (data) => {
-  return apiClient.post('/forgetPassword', data); // adjust endpoint as needed
+  return apiClient.post('/forgetPassword', data);
 };
 
 export const changePassword = (data) => {
-  return apiClient.post('/changePassword', data); // adjust endpoint as needed
+  return apiClient.post('/changePassword', data);
 };
 
 export const removeCoordinates = async (data) => {
