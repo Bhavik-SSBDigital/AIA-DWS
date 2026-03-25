@@ -245,7 +245,19 @@ export const create_admin = async (req, res) => {
       isAdmin: true,
     };
 
-    const admin = await prisma.user.create({ data: adminData });
+    const admin = await prisma.user.create({
+      data: adminData,
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        isRootLevel: true,
+        isAdmin: true,
+        status: true,
+        createdAt: true,
+        // We strictly leave 'password' out of this list
+      },
+    });
 
     // ✅ VAPT FIX: Login Credentials rendering in Plaintext
     delete admin.password;

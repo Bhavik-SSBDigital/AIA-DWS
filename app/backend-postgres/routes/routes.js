@@ -213,27 +213,29 @@ router.use((req, res, next) => {
 router.use(requireAuth);
 
 // ==========================================
-// 👑 ADMIN-ONLY ROUTES (Add, Edit, Delete Fixes)
+// 👑 ADMIN-ONLY ROUTES
 // ==========================================
 // Users
-router.post("/signup", requireAdmin, sign_up); // Add User
+router.post("/signup", requireAdmin, sign_up);
 router.post("/createAdmin", requireAdmin, create_admin);
-router.post("/deleteUser/:id", requireAdmin, deactivate_user); // Delete User
+router.post("/deleteUser/:id", requireAdmin, deactivate_user);
 
 // Departments
-router.post("/addDepartment", requireAdmin, add_department); // Add Dept
-router.delete("/deleteDepartment/:id", requireAdmin, deactivate_department); // Delete Dept
+router.post("/addDepartment", requireAdmin, add_department);
+router.delete("/deleteDepartment/:id", requireAdmin, deactivate_department);
 
 // Roles
-router.post("/addRole", requireAdmin, add_role); // Add Role
-router.put("/editRole/:id", requireAdmin, edit_role); // Edit Role
-router.delete("/deleteRole/:id", requireAdmin, deactivate_role); // Delete Role
+router.post("/addRole", requireAdmin, add_role);
+router.put("/editRole/:id", requireAdmin, edit_role);
+router.delete("/deleteRole/:id", requireAdmin, deactivate_role);
 
 // Admin Logs & Permissions
 router.get("/downloadLoginLogs", requireAdmin, download_login_logs);
 router.get("/exportFileLogs", requireAdmin, export_file_logs);
 router.post("/createPermissions", requireAdmin, create_permissions);
-router.post("/getAllDocuments", getDocumentDetailsForAdmin);
+
+// ✅ FIXED: Missing requireAdmin on global document fetch
+router.post("/getAllDocuments", requireAdmin, getDocumentDetailsForAdmin);
 
 // ==========================================
 // 🛡️ AUTHENTICATED USER ROUTES
@@ -242,28 +244,31 @@ router.post("/logout", logout);
 router.post("/changePassword", change_password);
 
 // Tags
-router.post("/tags", add_tags);
-router.get("/tags", get_tags);
-router.put("/tags/:id", update_tag);
-router.delete("/tags/:id", delete_tag);
+router.post("/tags", requireAdmin, add_tags);
+router.get("/tags", requireAdmin, get_tags);
+router.put("/tags/:id", requireAdmin, update_tag);
+router.delete("/tags/:id", requireAdmin, delete_tag);
 
-// Departments & Roles (Read-Only for standard users)
-router.get("/getDepartments", get_departments);
-router.post("/getAllBranches", get_departments);
-router.get("/getDepartment/:id", get_department);
-router.get("/getDepartmentsHierarchy", getDepartmentsHierarchy);
-router.get("/getRoles", get_roles);
-router.get("/getRole/:id", get_role);
+// ✅ FIXED: Added requireAdmin to global Department & Role read routes
+router.get("/getDepartments", requireAdmin, get_departments);
+router.post("/getAllBranches", requireAdmin, get_departments);
+router.get("/getDepartment/:id", requireAdmin, get_department);
+router.get("/getDepartmentsHierarchy", requireAdmin, getDepartmentsHierarchy);
+router.get("/getRoles", requireAdmin, get_roles);
+router.get("/getRole/:id", requireAdmin, get_role);
 router.get(
   "/getRolesHierarchyInDepartment/:departmentId",
+  requireAdmin,
   getRolesHierarchyInDepartment,
 );
 
-// Users
-router.get("/getUsers", get_users);
-router.get("/getUser/:userId", get_user);
+// ✅ FIXED: Added requireAdmin to global User read routes
+router.get("/getUsers", requireAdmin, get_users);
+router.get("/getUsersWithDetails", requireAdmin, get_users_with_details);
+
+// (Allowed for standard users to fetch specific context/own data)
+router.get("/getUser/:userId", requireAdmin, get_user);
 router.put("/editUser/:userId", requireAdmin, edit_user); // Handled internally for self-edit vs admin-edit
-router.get("/getUsersWithDetails", get_users_with_details);
 router.get("/api/users/signature/:userId", get_user_signature_id);
 router.get("/getUserSignature/:userId", get_user_signature);
 router.post("/getUserProfilePic", get_user_profile_pic);
@@ -306,21 +311,32 @@ router.post("/extract-eml", extractEMLDetails);
 router.post("/generateDocumentName", generateDocumentNameController);
 
 // Workflows
-router.post("/workflows/addWorkflow", add_workflow);
+
+router.post("/workflows/addWorkflow", requireAdmin, add_workflow);
 router.put("/workflows/editWorkflow/:workflowId", requireAdmin, edit_workflow);
 router.get("/workflows/viewWorkflow/:workflowId", view_workflow);
-router.delete("/workflows/deleteWorkflow/:workflowId", delete_workflow);
-router.get("/workflows/getWorkflows", get_workflows);
-router.get("/workflows/getWorkflowsList", get_all_workflows_with_basics);
+router.delete(
+  "/workflows/deleteWorkflow/:workflowId",
+  requireAdmin,
+  delete_workflow,
+);
+router.get("/workflows/getWorkflows", requireAdmin, get_workflows);
+router.get(
+  "/workflows/getWorkflowsList",
+  requireAdmin,
+  get_all_workflows_with_basics,
+);
 router.get(
   "/workflows/:workflowId/getSteps",
   get_workflow_steps_with_assignments,
 );
 router.post(
   "/workflows/checkIfDuplicateWorkflow",
+  requireAdmin,
   check_if_workflow_is_duplicate,
 );
-router.post("/createTemplateDocument", create_template_document);
+
+router.post("/createTemplateDocument", requireAdmin, create_template_document);
 router.get("/getWorkflowTemplates/:workflowId", get_workflow_templates);
 router.post(
   "/upload-template",

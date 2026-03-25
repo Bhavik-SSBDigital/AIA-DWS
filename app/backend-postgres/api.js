@@ -64,6 +64,16 @@ app.get("*", (req, res) => {
   res.sendFile(path.resolve(__dirname, "build", "index.html"));
 });
 
+app.use((req, res, next) => {
+  res.status(404).json({ message: "Resource not found" });
+});
+
+// Catch 500s (Internal Server Errors) so Express doesn't leak stack traces or its name
+app.use((err, req, res, next) => {
+  console.error("System error encountered"); // Safely logged internally
+  res.status(500).json({ message: "Internal server error" });
+});
+
 app.listen(PORT, () => {
   console.log("listening on", `${PORT}`);
 });
