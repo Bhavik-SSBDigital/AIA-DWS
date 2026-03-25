@@ -36,16 +36,7 @@ export const sign_up = async (req, res) => {
         .json({ message: "Forbidden: Admin privileges required." });
     }
 
-    const {
-      username,
-      email,
-      roles,
-      writable,
-      readable,
-      downloadable,
-      uploadable,
-      status,
-    } = req.body;
+    const { username, email, roles, status } = req.body;
 
     // ✅ VAPT FIX: Improper Serverside Validation
     if (!username || !isValidUsername(username)) {
@@ -83,12 +74,8 @@ export const sign_up = async (req, res) => {
         username,
         email,
         password: hashedPassword,
-        writable: Array.isArray(writable) ? writable : [],
-        readable: Array.isArray(readable) ? readable : [],
-        downloadable: Array.isArray(downloadable) ? downloadable : [],
-        uploadable: Array.isArray(uploadable) ? uploadable : [],
         status:
-          status === "Active" || status === "Inactive" ? status : "Inactive", // Strict enum check
+          status === "Active" || status === "Inactive" ? status : "Inactive",
         createdById: userData.id,
       },
     });
@@ -109,7 +96,7 @@ export const sign_up = async (req, res) => {
 
     res.status(200).json({ message: "User created successfully" });
   } catch (error) {
-    console.error("Signup Error");
+    console.error("Signup Error", error); // Safely logged internally
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -224,10 +211,7 @@ export const logout = async (req, res) => {
     const userId = userData.id;
 
     // ✅ VAPT FIX: Improper Session Termination
-    // 1. Delete ALL refresh tokens for the user to force complete termination
     await prisma.token.deleteMany({ where: { userId: userId } });
-
-    // 2. Instruct the browser to kill any remaining auth cookies (if you use them as fallback)
     res.clearCookie("accessToken");
     res.clearCookie("refreshToken");
 
@@ -264,7 +248,6 @@ export const create_admin = async (req, res) => {
     const admin = await prisma.user.create({ data: adminData });
 
     // ✅ VAPT FIX: Login Credentials rendering in Plaintext
-    // The previous code returned the entire 'admin' object, which included the hashed password
     delete admin.password;
 
     res.status(200).json({ message: "Admin created successfully", admin });
