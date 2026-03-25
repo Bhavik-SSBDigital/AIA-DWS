@@ -174,13 +174,12 @@ const loginLimiter = rateLimit({
 // ==========================================
 // 🔓 PUBLIC ROUTES (No Token Required)
 // ==========================================
-router.post("/signup", sign_up);
 router.post("/login", loginLimiter, login);
 router.get("/auto-login", autoLogin);
 router.post("/validate-auto-login", validateAutoLogin);
 router.post("/forgetPassword", loginLimiter, forget_password);
 
-// WOPI endpoints usually rely on their own token mechanism (access_token query param)
+// WOPI endpoints
 router.get("/wopi/discovery", wopiDiscovery);
 router.get("/hosting/discovery", checkHostingDiscovery);
 router.get("/collabora/capabilities", checkCollaboraCapabilities);
@@ -197,10 +196,10 @@ router.post("/wopi/token/:fileId", getWopiToken);
 // 🛡️ SECURITY HEADERS MIDDLEWARE
 // ==========================================
 router.use((req, res, next) => {
-  res.removeHeader("X-Powered-By"); // Hides Express server version
-  res.setHeader("X-Content-Type-Options", "nosniff"); // Prevents MIME sniffing
-  res.setHeader("X-Frame-Options", "DENY"); // Prevents Clickjacking
-  res.setHeader("X-XSS-Protection", "1; mode=block"); // Basic XSS protection
+  res.removeHeader("X-Powered-By");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
   res.setHeader(
     "Strict-Transport-Security",
     "max-age=31536000; includeSubDomains",
@@ -210,22 +209,31 @@ router.use((req, res, next) => {
 
 // ==========================================
 // 🔒 GLOBAL AUTHENTICATION GATEWAY
-// EVERY ROUTE BELOW THIS LINE REQUIRES A VALID TOKEN
 // ==========================================
 router.use(requireAuth);
 
 // ==========================================
-// 👑 ADMIN-ONLY ROUTES (Privilege Escalation Fix)
+// 👑 ADMIN-ONLY ROUTES (Add, Edit, Delete Fixes)
 // ==========================================
+// Users
+router.post("/signup", requireAdmin, sign_up); // Add User
 router.post("/createAdmin", requireAdmin, create_admin);
-router.post("/addDepartment", requireAdmin, add_department);
-router.delete("/deleteDepartment/:id", requireAdmin, deactivate_department);
-router.post("/deleteUser/:id", requireAdmin, deactivate_user);
-router.delete("/deleteRole/:id", requireAdmin, deactivate_role);
+router.post("/deleteUser/:id", requireAdmin, deactivate_user); // Delete User
+
+// Departments
+router.post("/addDepartment", requireAdmin, add_department); // Add Dept
+router.delete("/deleteDepartment/:id", requireAdmin, deactivate_department); // Delete Dept
+
+// Roles
+router.post("/addRole", requireAdmin, add_role); // Add Role
+router.put("/editRole/:id", requireAdmin, edit_role); // Edit Role
+router.delete("/deleteRole/:id", requireAdmin, deactivate_role); // Delete Role
+
+// Admin Logs & Permissions
 router.get("/downloadLoginLogs", requireAdmin, download_login_logs);
 router.get("/exportFileLogs", requireAdmin, export_file_logs);
 router.post("/createPermissions", requireAdmin, create_permissions);
-router.post("/getAllDocuments", requireAdmin, getDocumentDetailsForAdmin);
+router.post("/getAllDocuments", getDocumentDetailsForAdmin);
 
 // ==========================================
 // 🛡️ AUTHENTICATED USER ROUTES
@@ -239,15 +247,13 @@ router.get("/tags", get_tags);
 router.put("/tags/:id", update_tag);
 router.delete("/tags/:id", delete_tag);
 
-// Departments & Roles
+// Departments & Roles (Read-Only for standard users)
 router.get("/getDepartments", get_departments);
 router.post("/getAllBranches", get_departments);
 router.get("/getDepartment/:id", get_department);
 router.get("/getDepartmentsHierarchy", getDepartmentsHierarchy);
-router.post("/addRole", add_role);
 router.get("/getRoles", get_roles);
 router.get("/getRole/:id", get_role);
-router.put("/editRole/:id", edit_role);
 router.get(
   "/getRolesHierarchyInDepartment/:departmentId",
   getRolesHierarchyInDepartment,
@@ -256,7 +262,7 @@ router.get(
 // Users
 router.get("/getUsers", get_users);
 router.get("/getUser/:userId", get_user);
-router.put("/editUser/:userId", edit_user);
+router.put("/editUser/:userId", requireAdmin, edit_user); // Handled internally for self-edit vs admin-edit
 router.get("/getUsersWithDetails", get_users_with_details);
 router.get("/api/users/signature/:userId", get_user_signature_id);
 router.get("/getUserSignature/:userId", get_user_signature);
@@ -276,6 +282,7 @@ router.get("/getFileData", get_file_data);
 router.post("/accessFolder", getDocumentDetailsOnTheBasisOfPath);
 router.post(
   "/getDocumentDetailsOnTheBasisOfPathForEdit",
+  requireAdmin,
   getDocumentDetailsOnTheBasisOfPathForEdit,
 );
 router.post("/getDocumentChildren", getDocumentChildren);
@@ -300,7 +307,7 @@ router.post("/generateDocumentName", generateDocumentNameController);
 
 // Workflows
 router.post("/workflows/addWorkflow", add_workflow);
-router.put("/workflows/editWorkflow/:workflowId", edit_workflow);
+router.put("/workflows/editWorkflow/:workflowId", requireAdmin, edit_workflow);
 router.get("/workflows/viewWorkflow/:workflowId", view_workflow);
 router.delete("/workflows/deleteWorkflow/:workflowId", delete_workflow);
 router.get("/workflows/getWorkflows", get_workflows);
@@ -365,7 +372,7 @@ router.post("/addRequestMessage/:id", add_request_message);
 
 // Projects
 router.post("/getProjects", getRootDocumentsWithAccess);
-router.post("/getRootDocumentsForEdit", getRootDocumentsForEdit);
+router.post("/getRootDocumentsForEdit", requireAdmin, getRootDocumentsForEdit);
 
 // Dashboards & Logs
 router.get("/getNumbers", getNumbers);
