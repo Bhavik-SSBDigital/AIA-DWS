@@ -1890,7 +1890,7 @@ export const get_all_workflows_with_basics = async (req, res) => {
     console.error("Error fetching workflows:", error);
     return res.status(500).json({
       error: "Failed to fetch workflows",
-      details: error.message,
+      details: "Failed to retrieve workflows from the database",
     });
   }
 };

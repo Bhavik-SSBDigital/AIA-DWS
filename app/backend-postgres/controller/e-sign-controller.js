@@ -585,7 +585,7 @@ export const sign_documents = async (req, res, next) => {
     console.error("Batch signing error:", error);
     res.status(500).json({
       message: "Internal Server Error",
-      error: error.message,
+      error: "An error occurred during batch signing",
     });
   }
 };

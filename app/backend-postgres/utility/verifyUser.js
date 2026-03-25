@@ -57,10 +57,14 @@ export const verifyUser = async (accessToken) => {
 };
 
 // ✅ VAPT FIX #2: Middleware for Unauthorized API Endpoints Access
+// ✅ VAPT FIX #2: Middleware for Unauthorized API Endpoints Access
 export const requireAuth = async (req, res, next) => {
+  // Look for the token in headers FIRST, then fallback to the query string
   const token =
     req.headers["authorization"]?.substring(7) ||
-    req.headers["x-authorization"]?.substring(7);
+    req.headers["x-authorization"]?.substring(7) ||
+    req.query.token; // <-- THIS IS THE PIECE THAT WAS MISSING
+
   const userData = await verifyUser(token);
 
   if (userData === "Unauthorized") {
@@ -78,10 +82,7 @@ export const requireAdmin = async (req, res, next) => {
     req.headers["x-authorization"]?.substring(7);
   const userData = await verifyUser(token);
 
-  if (
-    userData === "Unauthorized" ||
-    (!userData.isAdmin && !userData.isRootLevel)
-  ) {
+  if (userData === "Unauthorized" || !userData.isAdmin) {
     return res
       .status(403)
       .json({ message: "Forbidden: Admin access required" });

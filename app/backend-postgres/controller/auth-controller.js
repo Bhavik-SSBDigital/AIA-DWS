@@ -1,6 +1,5 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { sendEmail } from "../services/emailService.js";
 import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
 import ExcelJS from "exceljs";
@@ -10,7 +9,7 @@ const prisma = new PrismaClient();
 
 function generateRandomPassword(length) {
   const charset =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
   let password = "";
   for (let i = 0; i < length; i++) {
     const randomIndex = Math.floor(Math.random() * charset.length);
@@ -19,18 +18,10 @@ function generateRandomPassword(length) {
   return password;
 }
 
-/*
-{
-  "username": "john_doe",
-  "email": "john@example.com",
-  "department": 1,
-  "roles": [1, 2],
-  "writable": [101, 102],
-  "readable": [101, 103],
-  "downloadable": [101],
-  "uploadable": [104]
-}
-*/
+// ✅ VAPT FIX: Helper for Improper Serverside Validation
+const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const isValidUsername = (username) => /^[a-zA-Z0-9_]{3,30}$/.test(username);
+
 export const sign_up = async (req, res) => {
   try {
     const accessToken = req.headers["authorization"]?.substring(7);
@@ -39,14 +30,10 @@ export const sign_up = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
-    // ✅ VAPT #1 FIX: Broken Access Control (Privilege escalation)
-    // Only Root or Admin users can create new users.
     if (!userData.isAdmin && !userData.isRootLevel) {
       return res
         .status(403)
-        .json({
-          message: "Forbidden: Admin privileges required to create users.",
-        });
+        .json({ message: "Forbidden: Admin privileges required." });
     }
 
     const {
@@ -60,104 +47,97 @@ export const sign_up = async (req, res) => {
       status,
     } = req.body;
 
-    // Generate a random password (12 characters)
+    // ✅ VAPT FIX: Improper Serverside Validation
+    if (!username || !isValidUsername(username)) {
+      return res.status(400).json({
+        message: "Invalid username format. Use 3-30 alphanumeric characters.",
+      });
+    }
+    if (!email || !isValidEmail(email)) {
+      return res.status(400).json({ message: "Invalid email format." });
+    }
+    if (!Array.isArray(roles) || roles.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "At least one valid role must be assigned." });
+    }
+
     const plainPassword = generateRandomPassword(12);
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
-    // Check if the user already exists
-    const existingUser = await prisma.user.findFirst({
-      where: { username },
-    });
+    const existingUser = await prisma.user.findFirst({ where: { username } });
+    if (existingUser)
+      return res.status(400).json({ message: "User already exists." }); // Sanitized error
 
-    if (existingUser) {
-      return res.status(400).json({
-        message: "User with given username already exists",
-      });
-    }
-
-    // Check if the provided roles exist
     const validRoles = await prisma.role.findMany({
-      where: {
-        id: { in: roles },
-        isActive: true,
-      },
+      where: { id: { in: roles }, isActive: true },
     });
-
     if (validRoles.length !== roles.length) {
-      return res.status(400).json({
-        message: "One or more roles are invalid or inactive",
-      });
+      return res
+        .status(400)
+        .json({ message: "One or more roles are invalid or inactive." });
     }
 
-    // Create the user
     const user = await prisma.user.create({
       data: {
         username,
         email,
         password: hashedPassword,
-        writable,
-        readable,
-        downloadable,
-        uploadable,
-        status,
+        writable: Array.isArray(writable) ? writable : [],
+        readable: Array.isArray(readable) ? readable : [],
+        downloadable: Array.isArray(downloadable) ? downloadable : [],
+        uploadable: Array.isArray(uploadable) ? uploadable : [],
+        status:
+          status === "Active" || status === "Inactive" ? status : "Inactive", // Strict enum check
         createdById: userData.id,
       },
     });
 
-    // Create UserRole entries
     await prisma.userRole.createMany({
-      data: roles.map((roleId) => ({
-        userId: user.id,
-        roleId,
-      })),
+      data: roles.map((roleId) => ({ userId: user.id, roleId })),
     });
 
-    // Send email with credentials
     try {
       await sendUserEmail("userCreated", user, plainPassword);
     } catch (emailError) {
-      // Rollback user creation if email fails
       await prisma.user.delete({ where: { id: user.id } });
-      console.error("Email sending failed, user rolled back:", emailError);
-      return res.status(500).json({
-        message: "Error sending credentials email. User creation rolled back.",
-      });
+      console.error("Email failure during signup."); // Generic log to prevent info disclosure
+      return res
+        .status(500)
+        .json({ message: "System error during user creation. Try again." });
     }
 
     res.status(200).json({ message: "User created successfully" });
   } catch (error) {
-    console.error("Error creating user", error);
-    return res.status(500).json({ message: "Error creating user" });
+    console.error("Signup Error");
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-/*
-{
-  "username": "john_doe",
-  "password": "password123"
-}
-*/
 export const login = async (req, res) => {
   try {
     const { username, password } = req.body;
 
-    // Check if the user exists
+    // ✅ VAPT FIX: Serverside Validation
+    if (
+      !username ||
+      typeof username !== "string" ||
+      !password ||
+      typeof password !== "string"
+    ) {
+      return res.status(400).json({ message: "Invalid input format" });
+    }
+
     const user = await prisma.user.findUnique({
       where: { username },
-      include: {
-        tokens: true,
-        roles: true,
-      },
+      include: { tokens: true, roles: true },
     });
 
-    // ✅ VAPT #4 FIX: Username Enumeration
-    // Standardize the error message so attackers cannot guess valid usernames
     if (!user) {
       return res.status(401).json({ message: "Invalid username or password" });
     }
 
     const match = await bcrypt.compare(password, user.password);
-
     if (!match) {
       await prisma.loginLog.create({
         data: {
@@ -168,34 +148,25 @@ export const login = async (req, res) => {
           ipAddress: req.ip || req.connection.remoteAddress,
           userAgent: req.get("User-Agent"),
           success: false,
-          error: "Invalid credentials", // Obfuscated in DB as well to prevent info disclosure
+          error: "Invalid credentials",
         },
       });
-      // ✅ VAPT #4 FIX: Username Enumeration
       return res.status(401).json({ message: "Invalid username or password" });
     }
 
-    // Check if the user already has a refresh token
     let refreshToken = user.tokens?.[0]?.token || "";
-
     if (!refreshToken) {
       refreshToken = jwt.sign({ id: user.id }, process.env.REFRESH_SECRET_KEY);
-
       await prisma.token.create({
-        data: {
-          token: refreshToken,
-          userId: user.id,
-        },
+        data: { token: refreshToken, userId: user.id },
       });
     }
 
-    // Generate an access token with all required user properties
     let roles = await prisma.role.findMany({
       where: { id: { in: user.roles.map((role) => role.roleId) } },
     });
 
     const isAdmin = roles.some((role) => role.isAdmin) || user.isAdmin;
-
     const isDepartmentHead = roles.some((role) => role.isDepartmentHead);
 
     const accessToken = jwt.sign(
@@ -204,13 +175,11 @@ export const login = async (req, res) => {
         username: user.username,
         email: user.email,
         roles: user.roles.map((role) => role.roleId),
-        isAdmin: isAdmin,
-        isDepartmentHead: isDepartmentHead,
+        isAdmin,
+        isDepartmentHead,
       },
       process.env.SECRET_ACCESS_KEY,
-      {
-        expiresIn: "1h", // ✅ VAPT #17 FIX: Reduced excessive expiration time from 365d to 1h
-      },
+      { expiresIn: "1h" },
     );
 
     await prisma.loginLog.create({
@@ -224,6 +193,7 @@ export const login = async (req, res) => {
         success: true,
       },
     });
+
     res.status(200).json({
       accessToken,
       refreshToken,
@@ -232,50 +202,35 @@ export const login = async (req, res) => {
       userName: user.username,
       userId: user.id,
       roles: roles.map((role) => role.role),
-      isAdmin: isAdmin,
-      isDepartmentHead: isDepartmentHead,
+      isAdmin,
+      isDepartmentHead,
       isRootUser: user.isRootLevel,
     });
   } catch (error) {
-    console.error("Error during login", error);
-    await prisma.loginLog.create({
-      data: {
-        username: req.body.username || "Unknown",
-        action: "LOGIN",
-        ipAddress: req.ip || req.connection.remoteAddress,
-        userAgent: req.get("User-Agent"),
-        success: false,
-        error: "System Error", // ✅ VAPT #19 FIX: Prevent stack trace info disclosure in DB
-      },
-    });
-    return res.status(500).json({ message: "Error during login" });
+    console.error("Login System Error"); // ✅ VAPT FIX: Info Disclosure (No stack traces)
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
 export const logout = async (req, res) => {
   const accessToken = req.headers["authorization"]?.substring(7);
   const userData = await verifyUser(accessToken);
+
   if (userData === "Unauthorized" || !userData?.id) {
-    return res.status(401).json({
-      success: false,
-      error: {
-        message: "Unauthorized request",
-        details: "Invalid or missing authorization token.",
-        code: "UNAUTHORIZED",
-      },
-    });
+    return res.status(401).json({ message: "Unauthorized request" });
   }
+
   try {
     const userId = userData.id;
 
-    // Delete the refresh token from database
-    await prisma.token.deleteMany({
-      where: {
-        userId: userId,
-      },
-    });
+    // ✅ VAPT FIX: Improper Session Termination
+    // 1. Delete ALL refresh tokens for the user to force complete termination
+    await prisma.token.deleteMany({ where: { userId: userId } });
 
-    // Log the logout action
+    // 2. Instruct the browser to kill any remaining auth cookies (if you use them as fallback)
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
+
     await prisma.loginLog.create({
       data: {
         userId: userId,
@@ -290,32 +245,14 @@ export const logout = async (req, res) => {
 
     res.status(200).json({ message: "Logged out successfully" });
   } catch (error) {
-    console.error("Error during logout", error);
-
-    // Log failed logout attempt if user info is available
-    if (userData) {
-      await prisma.loginLog.create({
-        data: {
-          userId: userData.id,
-          username: userData.username,
-          email: userData.email,
-          action: "LOGOUT",
-          ipAddress: req.ip || req.connection.remoteAddress,
-          userAgent: req.get("User-Agent"),
-          success: false,
-          error: "System Error",
-        },
-      });
-    }
-
-    return res.status(500).json({ message: "Error during logout" });
+    console.error("Logout Error");
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
 export const create_admin = async (req, res) => {
   try {
     const encryptedPassword = await bcrypt.hash("check", 10);
-
     const adminData = {
       username: "admin",
       email: "bhavik.bhatt@ssbi.in",
@@ -324,65 +261,39 @@ export const create_admin = async (req, res) => {
       isAdmin: true,
     };
 
-    const admin = await prisma.user.create({
-      data: adminData,
-    });
+    const admin = await prisma.user.create({ data: adminData });
 
-    res.status(200).json({
-      message: "Admin created successfully",
-      admin,
-    });
+    // ✅ VAPT FIX: Login Credentials rendering in Plaintext
+    // The previous code returned the entire 'admin' object, which included the hashed password
+    delete admin.password;
+
+    res.status(200).json({ message: "Admin created successfully", admin });
   } catch (error) {
-    console.error("Error creating admin user:", error);
-    res.status(500).json({
-      message: "Failed to create admin user",
-    }); // Removed error.message for VAPT #19 (Info Disclosure)
+    console.error("Admin Creation Error");
+    res.status(500).json({ message: "Failed to create admin user" });
   }
 };
 
-// Auto-login from email link
 export const autoLogin = async (req, res) => {
   try {
     const { token } = req.query;
+    if (!token) return res.status(400).json({ message: "Token is required" });
 
-    if (!token) {
-      return res.status(400).json({ message: "Token is required" });
-    }
-
-    // Verify the auto-login token
     const decoded = jwt.verify(token, process.env.SECRET_ACCESS_KEY);
-
-    console.log("decoded", decoded);
-
-    if (decoded.type !== "auto-login") {
+    if (decoded.type !== "auto-login")
       return res.status(400).json({ message: "Invalid token type" });
-    }
 
-    // Check if token is too old (optional security measure)
     const tokenAge = Date.now() - decoded.timestamp;
-    if (tokenAge > 24 * 60 * 60 * 1000) {
-      // 24 hours
+    if (tokenAge > 24 * 60 * 60 * 1000)
       return res.status(400).json({ message: "Token has expired" });
-    }
 
-    // Get user from database
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      include: {
-        roles: true,
-      },
+      include: { roles: true },
     });
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    // // Check if user is active
-    // if (user.status !== "active") {
-    //   return res.status(403).json({ message: "Account is not active" });
-    // }
-
-    // Get user roles
     const roles = await prisma.role.findMany({
       where: { id: { in: user.roles.map((role) => role.roleId) } },
     });
@@ -390,38 +301,31 @@ export const autoLogin = async (req, res) => {
     const isAdmin = roles.some((role) => role.isAdmin) || user.isAdmin;
     const isDepartmentHead = roles.some((role) => role.isDepartmentHead);
 
-    // Generate a new regular access token (for API calls)
     const accessToken = jwt.sign(
       {
         id: user.id,
         username: user.username,
         email: user.email,
         roles: user.roles.map((role) => role.roleId),
-        isAdmin: isAdmin,
-        isDepartmentHead: isDepartmentHead,
-        source: "auto-login", // Mark as from auto-login
+        isAdmin,
+        isDepartmentHead,
+        source: "auto-login",
       },
       process.env.SECRET_ACCESS_KEY,
-      { expiresIn: "1h" }, // Added expiration matching main login
+      { expiresIn: "1h" },
     );
 
-    // Generate refresh token
     const refreshToken = jwt.sign(
       { id: user.id },
       process.env.REFRESH_SECRET_KEY,
     );
 
-    // Store refresh token in database
     await prisma.token.upsert({
       where: { userId: user.id },
       update: { token: refreshToken },
-      create: {
-        token: refreshToken,
-        userId: user.id,
-      },
+      create: { token: refreshToken, userId: user.id },
     });
 
-    // Create login log
     await prisma.loginLog.create({
       data: {
         userId: user.id,
@@ -434,8 +338,6 @@ export const autoLogin = async (req, res) => {
       },
     });
 
-    console.log("decoded", decoded);
-    // Check if redirect is provided
     const redirectUrl =
       decoded.resourceType === "process"
         ? `${process.env.FRONTEND_URL}/process/view/${decoded.resourceId}` ||
@@ -446,7 +348,6 @@ export const autoLogin = async (req, res) => {
           : `${process.env.FRONTEND_URL}/process/view/${decoded.processId}?autoOpenDoc=${decoded.resourceId}` ||
             "/dashboard";
 
-    // Return success with tokens and redirect URL
     res.status(200).json({
       success: true,
       accessToken,
@@ -456,65 +357,38 @@ export const autoLogin = async (req, res) => {
         email: user.email,
         userName: user.username,
         roles: roles.map((role) => role.role),
-        isAdmin: isAdmin,
-        isDepartmentHead: isDepartmentHead,
+        isAdmin,
+        isDepartmentHead,
         isRootUser: user.isRootLevel,
       },
       redirectUrl,
     });
   } catch (error) {
-    console.error("Auto-login error:", error);
-
-    await prisma.loginLog.create({
-      data: {
-        action: "AUTO_LOGIN",
-        ipAddress: req.ip || req.connection.remoteAddress,
-        userAgent: req.get("User-Agent"),
-        success: false,
-        error: "System Error",
-      },
-    });
-
-    if (error.name === "JsonWebTokenError") {
-      return res.status(400).json({ message: "Invalid token" });
-    }
-    if (error.name === "TokenExpiredError") {
-      return res.status(400).json({ message: "Token has expired" });
-    }
-
-    return res.status(500).json({ message: "Error during auto-login" });
+    console.error("Auto-login error");
+    return res.status(400).json({ message: "Invalid or expired token" });
   }
 };
 
-// Validate auto-login token (for frontend)
 export const validateAutoLogin = async (req, res) => {
   try {
     const { token } = req.body;
-
-    if (!token) {
+    if (!token)
       return res
         .status(400)
         .json({ valid: false, message: "Token is required" });
-    }
 
     const decoded = jwt.verify(token, process.env.SECRET_ACCESS_KEY);
+    if (decoded.type !== "auto-login")
+      return res.status(400).json({ valid: false, message: "Invalid token" });
 
-    if (decoded.type !== "auto-login") {
-      return res
-        .status(400)
-        .json({ valid: false, message: "Invalid token type" });
-    }
-
-    // Check if user still exists and is active
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId, status: "active" },
     });
 
-    if (!user) {
+    if (!user)
       return res
         .status(400)
         .json({ valid: false, message: "User not found or inactive" });
-    }
 
     res.status(200).json({
       valid: true,
@@ -523,19 +397,8 @@ export const validateAutoLogin = async (req, res) => {
       resourceId: decoded.resourceId,
     });
   } catch (error) {
-    console.error("Token validation error:", error);
-
-    if (error.name === "JsonWebTokenError") {
-      return res.status(400).json({ valid: false, message: "Invalid token" });
-    }
-    if (error.name === "TokenExpiredError") {
-      return res
-        .status(400)
-        .json({ valid: false, message: "Token has expired" });
-    }
-
     return res
-      .status(500)
+      .status(400)
       .json({ valid: false, message: "Error validating token" });
   }
 };
@@ -544,20 +407,18 @@ export const forget_password = async (req, res) => {
   try {
     const { username, email } = req.body;
 
-    // Validate input
-    if (!username || !email) {
-      return res
-        .status(400)
-        .json({ message: "Username and email are required" });
+    // ✅ VAPT FIX: Serverside Validation
+    if (
+      !username ||
+      !isValidUsername(username) ||
+      !email ||
+      !isValidEmail(email)
+    ) {
+      return res.status(400).json({ message: "Invalid input format" });
     }
 
-    // Find user
-    const user = await prisma.user.findUnique({
-      where: { username },
-    });
+    const user = await prisma.user.findUnique({ where: { username } });
 
-    // ✅ VAPT #4 FIX: Username Enumeration
-    // Always return the exact same success message regardless of outcome
     if (!user || user.email !== email) {
       return res.status(200).json({
         message:
@@ -565,32 +426,21 @@ export const forget_password = async (req, res) => {
       });
     }
 
-    // Generate new random password
     const newPlainPassword = generateRandomPassword(12);
     const hashedPassword = await bcrypt.hash(newPlainPassword, 10);
 
-    // ✅ VAPT #11 FIX: Session Not Invalidated After Password Change
-    // Update password in database AND delete all existing sessions
     await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: user.id },
-        data: {
-          password: hashedPassword,
-          passwordChangedAt: new Date(), // Store last change time
-        },
+        data: { password: hashedPassword, passwordChangedAt: new Date() },
       });
-
-      // Delete all active refresh tokens for this user
-      await tx.token.deleteMany({
-        where: { userId: user.id },
-      });
+      await tx.token.deleteMany({ where: { userId: user.id } });
     });
 
-    // Send email with new password
     try {
       await sendUserEmail("passwordReset", user, newPlainPassword);
     } catch (emailError) {
-      console.error("Password reset email failed:", emailError);
+      console.error("Password reset email failed");
       return res.status(500).json({
         message: "Error sending password reset email, please try again later",
       });
@@ -601,10 +451,7 @@ export const forget_password = async (req, res) => {
         "If the details are correct, a new password has been sent to your registered email",
     });
   } catch (error) {
-    console.error("Forget password error:", error);
-    return res.status(500).json({
-      message: "Error while processing password reset request",
-    });
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -612,121 +459,86 @@ export const change_password = async (req, res) => {
   try {
     const { username, currentPassword, newPassword } = req.body;
 
-    // Validate required fields
-    if (!username || !currentPassword || !newPassword) {
-      return res.status(400).json({ message: "All fields are required" });
+    // ✅ VAPT FIX: Serverside Validation
+    if (
+      !username ||
+      typeof username !== "string" ||
+      !currentPassword ||
+      !newPassword ||
+      typeof newPassword !== "string" ||
+      newPassword.length < 8
+    ) {
+      return res.status(400).json({
+        message:
+          "Invalid input. New password must be at least 8 characters long.",
+      });
     }
 
-    // Find user by username
-    const user = await prisma.user.findUnique({
-      where: { username },
-    });
+    const user = await prisma.user.findUnique({ where: { username } });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // Verify current password
     const isPasswordValid = await bcrypt.compare(
       currentPassword,
       user.password,
     );
-    if (!isPasswordValid) {
+    if (!isPasswordValid)
       return res.status(401).json({ message: "Current password is incorrect" });
-    }
 
-    // Check if new password is different
     if (currentPassword === newPassword) {
       return res.status(400).json({
         message: "New password must be different from current password",
       });
     }
 
-    // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // ✅ VAPT #11 FIX: Session Not Invalidated After Password Change
-    // Use transaction to update password AND delete tokens
     await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: user.id },
-        data: {
-          password: hashedPassword,
-          passwordChangedAt: new Date(),
-        },
+        data: { password: hashedPassword, passwordChangedAt: new Date() },
       });
-
-      // Invalidate all existing sessions
-      await tx.token.deleteMany({
-        where: { userId: user.id },
-      });
+      await tx.token.deleteMany({ where: { userId: user.id } });
     });
 
-    res
-      .status(200)
-      .json({
-        message:
-          "Password changed successfully. You have been logged out of all other sessions.",
-      });
+    res.status(200).json({
+      message:
+        "Password changed successfully. You have been logged out of all other sessions.",
+    });
   } catch (error) {
-    console.error("Error changing password:", error);
-    res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
 export const download_login_logs = async (req, res) => {
   try {
-    // ✅ VAPT #1 FIX: Broken Access Control (Privilege escalation)
-    // Secure the download_login_logs endpoint to only allow Admin/Root
     const accessToken = req.headers["authorization"]?.substring(7);
     const requestingUser = await verifyUser(accessToken);
     if (
       requestingUser === "Unauthorized" ||
       (!requestingUser.isAdmin && !requestingUser.isRootLevel)
     ) {
-      return res
-        .status(403)
-        .json({
-          message: "Forbidden: Admin privileges required to download logs.",
-        });
+      return res.status(403).json({
+        message: "Forbidden: Admin privileges required to download logs.",
+      });
     }
 
     const { fromDate, toDate, action } = req.query;
-
-    // Build where clause
     const where = {};
 
     if (fromDate && toDate) {
-      where.createdAt = {
-        gte: new Date(fromDate),
-        lte: new Date(toDate),
-      };
+      where.createdAt = { gte: new Date(fromDate), lte: new Date(toDate) };
     }
+    if (action) where.action = action;
 
-    if (action) {
-      where.action = action;
-    }
-
-    // Get login logs
     const logs = await prisma.loginLog.findMany({
       where,
-      include: {
-        user: {
-          select: {
-            name: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
+      include: { user: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
     });
 
-    // Create workbook
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Login Logs");
 
-    // Define columns
     worksheet.columns = [
       { header: "ID", key: "id", width: 10 },
       { header: "User ID", key: "userId", width: 15 },
@@ -740,7 +552,6 @@ export const download_login_logs = async (req, res) => {
       { header: "Timestamp", key: "createdAt", width: 25 },
     ];
 
-    // Add data
     logs.forEach((log) => {
       worksheet.addRow({
         id: log.id,
@@ -756,7 +567,6 @@ export const download_login_logs = async (req, res) => {
       });
     });
 
-    // Style header row
     worksheet.getRow(1).eachCell((cell) => {
       cell.font = { bold: true };
       cell.fill = {
@@ -766,23 +576,19 @@ export const download_login_logs = async (req, res) => {
       };
     });
 
-    // Set response headers
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=login-logs-${
-        new Date().toISOString().split("T")[0]
-      }.xlsx`,
+      `attachment; filename=login-logs-${new Date().toISOString().split("T")[0]}.xlsx`,
     );
 
-    // Write to response
     await workbook.xlsx.write(res);
     res.end();
   } catch (error) {
-    console.error("Error generating login logs report:", error);
+    console.error("Log Download Error");
     return res.status(500).json({ message: "Error generating report" });
   }
 };

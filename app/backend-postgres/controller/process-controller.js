@@ -601,7 +601,7 @@ export const initiate_process = async (req, res, next) => {
     console.error("Error initiating the process", error);
     return res.status(500).json({
       message: "Error initiating the process",
-      error: error.message,
+      error: "Error initiating the process",
     });
   }
 };
@@ -2388,7 +2388,7 @@ export const view_process = async (req, res) => {
       success: false,
       error: {
         message: "Failed to view process",
-        details: error.message,
+        details: "Error viewing the process",
         code: "PROCESS_VIEW_ERROR",
       },
     });
@@ -3370,7 +3370,7 @@ export const complete_process_step = async (req, res) => {
     console.error("Error completing step:", error);
     return res.status(500).json({
       message: "Error completing step",
-      error: error.message,
+      error: "Error completing step",
     });
   }
 };
@@ -4134,7 +4134,7 @@ export const createRecommendation = async (req, res) => {
     console.error("Error creating recommendation:", error);
     return res.status(500).json({
       message: "Error creating recommendation",
-      error: error.message,
+      error: "Error creating recommendation",
     });
   }
 };
@@ -4244,7 +4244,7 @@ export const signAsRecommender = async (req, res) => {
     console.error("Error signing as recommender:", error);
     return res.status(500).json({
       message: "Error signing document",
-      error: error.message,
+      error: "Error signing document",
     });
   }
 };
@@ -4421,7 +4421,7 @@ export const submitRecommendationResponse = async (req, res) => {
     console.error("Error submitting recommendation response:", error);
     return res.status(500).json({
       message: "Error submitting recommendation response",
-      error: error.message,
+      error: "Error submitting recommendation response",
     });
   }
 };
@@ -4476,7 +4476,7 @@ export const get_recommendations = async (req, res) => {
       success: false,
       error: {
         message: "Failed to fetch recommendations",
-        details: error.message,
+        details: "Error fetching recommendations",
         code: "RECOMMENDATIONS_FETCH_ERROR",
       },
     });
@@ -4585,7 +4585,7 @@ export const get_recommendation = async (req, res) => {
       success: false,
       error: {
         message: "Failed to fetch recommendation",
-        details: error.message,
+        details: "Error fetching recommendations",
         code: "RECOMMENDATION_FETCH_ERROR",
       },
     });
@@ -4883,7 +4883,7 @@ export const reopen_process = async (req, res) => {
     console.error("Error reopening process:", error);
     return res.status(500).json({
       message: "Error reopening process",
-      error: error.message,
+      error: "Error reopening process",
     });
   }
 };
@@ -5444,7 +5444,7 @@ export const get_completed_initiator_processes = async (req, res) => {
       success: false,
       error: {
         message: "Failed to retrieve completed initiator processes",
-        details: error.message,
+        details: "Error getting completed processes for initiator",
         code: "PROCESS_RETRIEVAL_ERROR",
       },
     });
@@ -5747,7 +5747,7 @@ export const upload_documents_in_process = async (req, res) => {
     console.error("Error uploading documents to process:", error);
     return res.status(500).json({
       message: "Error uploading documents to process",
-      error: error.message,
+      error: "Error uploading documents to process",
     });
   }
 };
@@ -5914,7 +5914,7 @@ export const delete_document_in_process = async (req, res) => {
     console.error("Error deleting document from process:", error);
     return res.status(500).json({
       message: "Error deleting document from process",
-      error: error.message,
+      error: "Error deleting document from process",
     });
   }
 };

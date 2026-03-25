@@ -86,7 +86,7 @@ export const extractEMLDetails = async (req, res) => {
         if (!output.trim()) {
           return res.status(500).json({
             message: "Error extracting EML details",
-            error: errorOutput.substring(0, 500),
+            error: "Error extracting EML details",
           });
         }
         // Continue if there's output despite warnings
@@ -100,7 +100,7 @@ export const extractEMLDetails = async (req, res) => {
           console.error("Failed to parse Python output:", output);
           return res.status(500).json({
             message: "Failed to parse extraction results",
-            error: parseError.message,
+            error: "Error extracting EML details",
           });
         }
 
@@ -344,8 +344,8 @@ export const extractEMLDetails = async (req, res) => {
         console.error("Parse error:", parseError);
         res.status(500).json({
           message: "Error parsing extraction results",
-          error: parseError.message,
-          rawOutput: output.substring(0, 1000), // For debugging
+          error: "Error extracting EML details",
+          rawOutput: "Error extracting EML details", // For debugging
         });
       }
     });
@@ -353,7 +353,7 @@ export const extractEMLDetails = async (req, res) => {
     console.error("EML extraction error:", error);
     res.status(500).json({
       message: "Internal server error during EML extraction",
-      error: error.message,
+      error: "Error extracting EML details",
     });
   }
 };

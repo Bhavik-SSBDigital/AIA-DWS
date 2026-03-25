@@ -54,7 +54,7 @@ const isUserAdmin = async (userId) => {
   }
   // Check if user has at least one role with isAdmin AND isRootLevel true
   return userWithRoles.roles.some(
-    (userRole) => userRole.role.isAdmin || userRole.role.isRootLevel
+    (userRole) => userRole.role.isAdmin || userRole.role.isRootLevel,
   );
 };
 
@@ -123,7 +123,7 @@ const getAllowedDocumentIds = async (userId, userRoles) => {
       const hasFullAccessParent = userDocumentAccesses.some(
         (parentAccess) =>
           parentAccess.accessLevel === "FULL" &&
-          parents.includes(parentAccess.documentId)
+          parents.includes(parentAccess.documentId),
       );
 
       if (hasFullAccessParent) {
@@ -147,7 +147,7 @@ const getAllowedDocumentIds = async (userId, userRoles) => {
 const getAllowedWorkflowIds = async (
   userId,
   userRoleIds,
-  userDepartmentIds
+  userDepartmentIds,
 ) => {
   // Get workflow assignments where user is directly assigned
   const userAssignments = await prisma.workflowAssignment.findMany({
@@ -183,7 +183,7 @@ const getAllowedProcessIds = async (
   userId,
   userRoleIds,
   userDepartmentIds,
-  allowedWorkflowIds
+  allowedWorkflowIds,
 ) => {
   // Get processes where user is initiator
   const initiatedProcesses = await prisma.processInstance.findMany({
@@ -375,7 +375,7 @@ export const getNumbers = async (req, res) => {
       success: false,
       error: {
         message: "Failed to retrieve numeric data",
-        details: error.message,
+        details: "Failed to retrieve numeric data",
         code: "NUMERIC_DATA_ERROR",
       },
     });
@@ -409,13 +409,13 @@ export const getDetails = async (req, res) => {
       allowedWorkflowIds = await getAllowedWorkflowIds(
         userData.id,
         userRoleIds,
-        userDepartmentIds
+        userDepartmentIds,
       );
       allowedProcessIds = await getAllowedProcessIds(
         userData.id,
         userRoleIds,
         userDepartmentIds,
-        allowedWorkflowIds
+        allowedWorkflowIds,
       );
     }
 
@@ -453,7 +453,7 @@ export const getDetails = async (req, res) => {
             version: w.version,
             description: w.description,
             createdAt: w.createdAt.toISOString(),
-          }))
+          })),
         ),
       // Active workflows (only accessible ones unless admin)
       prisma.workflow
@@ -482,7 +482,7 @@ export const getDetails = async (req, res) => {
             version: w.version,
             description: w.description,
             createdAt: w.createdAt.toISOString(),
-          }))
+          })),
         ),
       // Completed processes (only accessible ones unless admin)
       prisma.processInstance
@@ -507,7 +507,7 @@ export const getDetails = async (req, res) => {
             processName: p.name,
             createdAt: p.createdAt.toISOString(),
             initiatorUsername: p.initiator.username,
-          }))
+          })),
         ),
       // Pending processes (only accessible ones unless admin)
       prisma.processInstance
@@ -532,7 +532,7 @@ export const getDetails = async (req, res) => {
             processName: p.name,
             createdAt: p.createdAt.toISOString(),
             initiatorUsername: p.initiator.username,
-          }))
+          })),
         ),
       // Queries (only from accessible processes unless admin)
       prisma.processQA
@@ -559,7 +559,7 @@ export const getDetails = async (req, res) => {
             processId: q.process.id,
             processName: q.process.name,
             status: q.answer ? "RESOLVED" : "OPEN",
-          }))
+          })),
         ),
       // Signed documents (only accessible ones unless admin)
       prisma.documentSignature
@@ -692,7 +692,7 @@ export const getDetails = async (req, res) => {
               replacesDocumentName: h.replacedDocument?.name || null,
               replacesDocumentType: getDocType(h.replacedDocument?.path || ""),
               replacesDocumentPath: formatDocumentPath(
-                h.replacedDocument?.path || ""
+                h.replacedDocument?.path || "",
               ),
               replacedBy: h.user.username,
               replacedAt: h.createdAt.toISOString(),
@@ -731,7 +731,7 @@ export const getDetails = async (req, res) => {
       success: false,
       error: {
         message: "Failed to retrieve detailed data",
-        details: error.message,
+        details: "Failed to retrieve detailed data",
         code: "DETAILED_DATA_ERROR",
       },
     });
@@ -765,7 +765,7 @@ export const getWorkflowAnalysis = async (req, res) => {
       allowedWorkflowIds = await getAllowedWorkflowIds(
         userData.id,
         userRoleIds,
-        userDepartmentIds
+        userDepartmentIds,
       );
 
       // Check if user has access to this workflow
@@ -785,7 +785,7 @@ export const getWorkflowAnalysis = async (req, res) => {
         userData.id,
         userRoleIds,
         userDepartmentIds,
-        [workflowId]
+        [workflowId],
       );
     }
 
@@ -870,7 +870,7 @@ export const getWorkflowAnalysis = async (req, res) => {
               ? avgTimeHours.toFixed(2)
               : null,
           };
-        })
+        }),
       ),
       // Pending processes by step (only accessible ones unless admin)
       Promise.all(
@@ -910,7 +910,7 @@ export const getWorkflowAnalysis = async (req, res) => {
               createdBy: p.process.initiator.username,
             })),
           };
-        })
+        }),
       ),
       // Assignee completion times (only from accessible processes unless admin)
       prisma.processStepInstance
@@ -974,7 +974,7 @@ export const getWorkflowAnalysis = async (req, res) => {
                   : null,
                 totalTasks: instances.length,
               };
-            }
+            },
           );
         }),
       // Pending processes (only accessible ones unless admin)
@@ -1001,7 +1001,7 @@ export const getWorkflowAnalysis = async (req, res) => {
             processName: p.name,
             createdAt: p.createdAt.toISOString(),
             initiatorUsername: p.initiator.username,
-          }))
+          })),
         ),
       // Queries (only from accessible processes unless admin)
       prisma.processQA
@@ -1074,7 +1074,7 @@ export const getWorkflowAnalysis = async (req, res) => {
             processId: s.processDocument.process.id,
             processName: s.processDocument.process.name,
             signedAt: s.signedAt.toISOString(),
-          }))
+          })),
         ),
       // Rejected documents (only accessible ones unless admin)
       prisma.documentRejection
@@ -1111,7 +1111,7 @@ export const getWorkflowAnalysis = async (req, res) => {
             processId: r.processDocument.process.id,
             processName: r.processDocument.process.name,
             rejectedAt: r.rejectedAt.toISOString(),
-          }))
+          })),
         ),
       // Replaced documents (only accessible ones unless admin)
       prisma.documentHistory
@@ -1147,7 +1147,7 @@ export const getWorkflowAnalysis = async (req, res) => {
               ? formatDocumentPath(h.replacedDocument.path)
               : null,
             replacedBy: h.user.username,
-          }))
+          })),
         ),
     ]);
 
@@ -1181,7 +1181,7 @@ export const getWorkflowAnalysis = async (req, res) => {
       success: false,
       error: {
         message: "Failed to analyze workflow",
-        details: error.message,
+        details: "Failed to analyze workflow",
         code: "WORKFLOW_ANALYSIS_ERROR",
       },
     });

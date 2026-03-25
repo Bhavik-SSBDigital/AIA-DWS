@@ -116,7 +116,7 @@ export const add_role = async (req, res) => {
             ...access,
             roleId: undefined, // Placeholder for the role ID
           },
-        })
+        }),
       ),
     ]);
 
@@ -137,7 +137,7 @@ export const add_role = async (req, res) => {
     console.error("Error adding role:", error);
     res.status(500).json({
       message: "Error adding role.",
-      error: error.message,
+      error: "failed to create role",
     });
   }
 };
@@ -206,7 +206,7 @@ export const get_roles = async (req, res) => {
     console.error("Error fetching roles:", error);
     res.status(500).json({
       message: "Error fetching roles.",
-      error: error.message,
+      error: "failed to fetch roles",
     });
   }
 };
@@ -309,7 +309,7 @@ export const get_role = async (req, res) => {
     console.error("Error fetching role:", error);
     res.status(500).json({
       message: "Error fetching role.",
-      error: error.message,
+      error: "failed to fetch role",
     });
   }
 };
@@ -426,7 +426,7 @@ export const edit_role = async (req, res) => {
             ...access,
             roleId: parseInt(id),
           },
-        })
+        }),
       ),
     ]);
 
@@ -437,7 +437,7 @@ export const edit_role = async (req, res) => {
     console.error("Error editing role:", error);
     res.status(500).json({
       message: "Error editing role.",
-      error: error.message,
+      error: "failed to edit role",
     });
   }
 };
@@ -537,7 +537,7 @@ export const getRolesHierarchyInDepartment = async (req, res) => {
       (role) =>
         !role.parentRoleId ||
         (role.parentRole &&
-          role.parentRole.departmentId !== Number(departmentId))
+          role.parentRole.departmentId !== Number(departmentId)),
     );
 
     // Modified buildHierarchy to include IDs

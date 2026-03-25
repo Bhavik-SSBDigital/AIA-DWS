@@ -829,7 +829,7 @@ export const file_copy = async (req, res) => {
         logger.error({
           action: "FILE_COPY_DB_ERROR",
           userId: userData.id,
-          details: { error: error.message, sourcePath, destinationPath },
+          details: { error: "error copying file", sourcePath, destinationPath },
         });
         res.status(500).json({ message: "Error storing document details" });
       }
@@ -840,7 +840,7 @@ export const file_copy = async (req, res) => {
     logger.error({
       action: "FILE_COPY_ERROR",
       userId: userData?.id,
-      details: { error: error.message },
+      details: { error: "error copying file" },
     });
     res.status(500).json({ message: "Error copying file" });
   }
@@ -993,7 +993,11 @@ export const file_cut = async (req, res) => {
         logger.error({
           action: "FILE_CUT_DB_ERROR",
           userId: userData.id,
-          details: { error: error.message, sourcePath, destinationPath },
+          details: {
+            error: "error during file cut operation",
+            sourcePath,
+            destinationPath,
+          },
         });
         res.status(500).json({ message: "Error during file cut operation" });
       }
@@ -1004,7 +1008,7 @@ export const file_cut = async (req, res) => {
     logger.error({
       action: "FILE_CUT_ERROR",
       userId: userData?.id,
-      details: { error: error.message },
+      details: { error: "error cutting file" },
     });
     res.status(500).json({ message: "Error cutting file" });
   }
@@ -1913,7 +1917,7 @@ export const protected_file_download = async (req, res) => {
   } catch (error) {
     logger.error({
       action: "PROTECTED_FILE_DOWNLOAD_ERROR",
-      details: { error: error.message },
+      details: { error: "error downloading protected file" },
     });
     return res.status(500).json({ message: "Error downloading file" });
   }
@@ -2273,7 +2277,7 @@ export const getWopiToken = async (req, res) => {
 
     res.json({ access_token: token, lock });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: "error generating WOPI token" });
   }
 };
 
@@ -2346,7 +2350,7 @@ export const wopiFileContents = async (req, res) => {
     await getFileDataByDocumentId(req, res);
   } catch (err) {
     console.error("Error in getting file content:", err);
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: "Error fetching file content" });
   }
 };
 
@@ -2398,7 +2402,7 @@ export const wopiFiles = async (req, res) => {
       UserFriendlyName: user.username,
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: "Error fetching file content" });
   }
 };
 
@@ -2409,7 +2413,7 @@ export const wopiFileGet = async (req, res) => {
     req.params.documentId = fileId;
     await getFileDataByDocumentId(req, res);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: "Error fetching file content" });
   }
 };
 
@@ -2473,7 +2477,7 @@ export const wopiFilePost = async (req, res) => {
       return res.status(500).json({ message: "Stream error" });
     });
   } catch (err) {
-    return res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: "Error saving file" });
   }
 };
 
@@ -3612,7 +3616,7 @@ export const download_converted_signed_pdf = async (req, res) => {
       } catch (excelError) {
         return res.status(500).json({
           message: "Spreadsheet conversion failed",
-          error: excelError.message,
+          error: "error processing Excel file",
         });
       }
     } else if (["doc", "docx"].includes(ext)) {
@@ -3628,7 +3632,7 @@ export const download_converted_signed_pdf = async (req, res) => {
       } catch (execError) {
         return res.status(500).json({
           message: "LibreOffice conversion failed",
-          error: execError.message,
+          error: "conversion failed",
         });
       }
 
@@ -3643,7 +3647,7 @@ export const download_converted_signed_pdf = async (req, res) => {
       } catch (readError) {
         return res.status(500).json({
           message: "Converted PDF not found",
-          error: readError.message,
+          error: "converted file missing",
         });
       }
     } else {

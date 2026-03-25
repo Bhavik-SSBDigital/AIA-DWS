@@ -6,11 +6,10 @@ import upload_, {
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 
-// ✅ Imported Admin Middleware to secure logs
-import { requireAdmin } from "../utility/verifyUser.js";
+// ✅ IMPORT BOTH AUTH AND ADMIN MIDDLEWARE
+import { requireAuth, requireAdmin } from "../utility/verifyUser.js";
 
 import { extractEMLDetails } from "../controller/eml-extract-controller.js";
-
 import {
   sign_up,
   login,
@@ -22,7 +21,6 @@ import {
   validateAutoLogin,
   forget_password,
 } from "../controller/auth-controller.js";
-
 import {
   add_department,
   deactivate_department,
@@ -30,7 +28,6 @@ import {
   get_departments,
   getDepartmentsHierarchy,
 } from "../controller/department-controller.js";
-
 import {
   add_workflow,
   edit_workflow,
@@ -45,33 +42,6 @@ import {
   get_workflow_steps_with_assignments,
   get_all_workflows_with_basics,
 } from "../controller/workflow-controller.js";
-
-// import {
-//   createQuery,
-//   getProcessQueries,
-//   respondToQuery,
-//   approveQueryDocument,
-//   approveRecirculation,
-//   createQueryDoubt,
-//   respondToQueryDoubt,
-// } from "../controller/query-controller.js";
-
-// import {
-//   requestRecommendation,
-//   submitRecommendation,
-//   getRecommendations,
-//   getRecommendationDetails,
-//   requestRecommendationClarification,
-//   respondToRecommendationClarification,
-//   createRecommendationDoubt,
-//   respondToRecommendationDoubt,
-// } from "../controller/recommendation-controller.js";
-
-// import {
-// postHighlight,
-//   getHighlights,
-// } from "../controller/highlight-controller.js";
-
 import {
   getDocumentDetailsOnTheBasisOfPath,
   create_permissions,
@@ -82,7 +52,6 @@ import {
   get_searches,
   delete_search,
 } from "../controller/file-details-controller.js";
-
 import {
   sign_document,
   revoke_sign,
@@ -90,7 +59,6 @@ import {
   revoke_rejection,
   sign_documents,
 } from "../controller/e-sign-controller.js";
-
 import {
   file_upload,
   file_download,
@@ -111,7 +79,6 @@ import {
   checkCollaboraCapabilities,
   wopiFiles,
   getWopiToken,
-  wopiFileGet,
   wopiFileContents,
   wopiFilePost,
   checkHostingDiscovery,
@@ -124,12 +91,10 @@ import {
   remove_bookmark_document,
   download_converted_signed_pdf,
 } from "../controller/file-controller.js";
-
 import {
   getRootDocumentsWithAccess,
   getRootDocumentsForEdit,
 } from "../controller/project-controller.js";
-
 import {
   add_role,
   get_role,
@@ -138,7 +103,6 @@ import {
   getRolesHierarchyInDepartment,
   deactivate_role,
 } from "../controller/role-controller.js";
-
 import {
   deactivate_user,
   edit_user,
@@ -170,14 +134,12 @@ import {
   delete_document_in_process,
 } from "../controller/process-controller.js";
 import { pick_process_step } from "../controller/process-step-claim.js";
-
 import { upload_signature } from "../controller/image-controller.js";
 import {
   get_user_activity_logs,
   get_user_activity_log,
   get_process_activity_logs,
 } from "../controller/log-controller.js";
-
 import {
   getNumbers,
   getDetails,
@@ -191,7 +153,6 @@ import {
   update_physical_request,
 } from "../controller/doc-tracking-controller.js";
 import { export_file_logs } from "../controller/file-operation-handler.js";
-
 import {
   add_tags,
   get_tags,
@@ -202,75 +163,89 @@ import {
 const router = express.Router();
 
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // Limit each IP to 10 login requests per `window`
+  windowMs: 15 * 60 * 1000,
+  max: 10,
   message: {
     message:
       "Too many login attempts from this IP, please try again after 15 minutes",
   },
 });
 
+// ==========================================
+// 🔓 PUBLIC ROUTES (No Token Required)
+// ==========================================
 router.post("/signup", sign_up);
 router.post("/login", loginLimiter, login);
 router.get("/auto-login", autoLogin);
 router.post("/validate-auto-login", validateAutoLogin);
+router.post("/forgetPassword", loginLimiter, forget_password);
+
+// WOPI endpoints usually rely on their own token mechanism (access_token query param)
+router.get("/wopi/discovery", wopiDiscovery);
+router.get("/hosting/discovery", checkHostingDiscovery);
+router.get("/collabora/capabilities", checkCollaboraCapabilities);
+router.get("/wopi/files/:fileId", wopiFiles);
+router.post("/wopi/files/:fileId", (req, res) => res.status(200).send());
+router.get("/wopi/files/:id/contents", wopiFileContents);
+router.post("/wopi/files/:fileId/contents", wopiFilePost);
+router.post("/wopi/files/:fileId/lock", wopiLock);
+router.post("/wopi/files/:fileId/unlock", wopiUnlock);
+router.post("/wopi/files/:fileId/refreshlock", wopiRefreshLock);
+router.post("/wopi/token/:fileId", getWopiToken);
+
+// ==========================================
+// 🛡️ SECURITY HEADERS MIDDLEWARE
+// ==========================================
+router.use((req, res, next) => {
+  res.removeHeader("X-Powered-By"); // Hides Express server version
+  res.setHeader("X-Content-Type-Options", "nosniff"); // Prevents MIME sniffing
+  res.setHeader("X-Frame-Options", "DENY"); // Prevents Clickjacking
+  res.setHeader("X-XSS-Protection", "1; mode=block"); // Basic XSS protection
+  res.setHeader(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains",
+  );
+  next();
+});
+
+// ==========================================
+// 🔒 GLOBAL AUTHENTICATION GATEWAY
+// EVERY ROUTE BELOW THIS LINE REQUIRES A VALID TOKEN
+// ==========================================
+router.use(requireAuth);
+
+// ==========================================
+// 👑 ADMIN-ONLY ROUTES (Privilege Escalation Fix)
+// ==========================================
+router.post("/createAdmin", requireAdmin, create_admin);
+router.post("/addDepartment", requireAdmin, add_department);
+router.delete("/deleteDepartment/:id", requireAdmin, deactivate_department);
+router.post("/deleteUser/:id", requireAdmin, deactivate_user);
+router.delete("/deleteRole/:id", requireAdmin, deactivate_role);
+router.get("/downloadLoginLogs", requireAdmin, download_login_logs);
+router.get("/exportFileLogs", requireAdmin, export_file_logs);
+router.post("/createPermissions", requireAdmin, create_permissions);
+router.post("/getAllDocuments", requireAdmin, getDocumentDetailsForAdmin);
+
+// ==========================================
+// 🛡️ AUTHENTICATED USER ROUTES
+// ==========================================
+router.post("/logout", logout);
+router.post("/changePassword", change_password);
+
+// Tags
 router.post("/tags", add_tags);
 router.get("/tags", get_tags);
 router.put("/tags/:id", update_tag);
 router.delete("/tags/:id", delete_tag);
 
-// backend/routes/auth.js
-
-router.post("/createAdmin", create_admin);
-
-router.post("/addDepartment", add_department);
-
-// change POST to GET
+// Departments & Roles
 router.get("/getDepartments", get_departments);
-
 router.post("/getAllBranches", get_departments);
-
-// all file related routes
-
-router.post("/upload", file_upload);
-router.post("/download", file_download);
-router.get(
-  "/downloadConvertedSignedPdf/:processId/:documentId",
-  download_converted_signed_pdf,
-);
-router.post("/copyFile", file_copy);
-router.post("/cutFile", file_cut);
-router.post("/createFolder", create_folder);
-router.post("/downloadFolder", folder_download);
-router.get("/files/:filePath(*)", file_though_url);
-router.get("/getFileData", get_file_data);
-
-// file details related routes
-
-router.post("/accessFolder", getDocumentDetailsOnTheBasisOfPath);
-
 router.get("/getDepartment/:id", get_department);
-
-router.get("/api/users/signature/:userId", get_user_signature_id);
 router.get("/getDepartmentsHierarchy", getDepartmentsHierarchy);
-router.post("/createPermissions", create_permissions);
-router.post("/getAllDocuments", getDocumentDetailsForAdmin);
-router.post(
-  "/getDocumentDetailsOnTheBasisOfPathForEdit",
-  getDocumentDetailsOnTheBasisOfPathForEdit,
-);
-router.post("/getDocumentChildren", getDocumentChildren);
-
-// project-controller related routes
-
-router.post("/getProjects", getRootDocumentsWithAccess);
-router.post("/getRootDocumentsForEdit", getRootDocumentsForEdit);
-
-// role-controller related routes
-
 router.post("/addRole", add_role);
 router.get("/getRoles", get_roles);
-
 router.get("/getRole/:id", get_role);
 router.put("/editRole/:id", edit_role);
 router.get(
@@ -278,10 +253,58 @@ router.get(
   getRolesHierarchyInDepartment,
 );
 
-// user-controller related routes
+// Users
 router.get("/getUsers", get_users);
 router.get("/getUser/:userId", get_user);
 router.put("/editUser/:userId", edit_user);
+router.get("/getUsersWithDetails", get_users_with_details);
+router.get("/api/users/signature/:userId", get_user_signature_id);
+router.get("/getUserSignature/:userId", get_user_signature);
+router.post("/getUserProfilePic", get_user_profile_pic);
+router.get("/getUserProfileData", get_user_profile_data);
+router.get("/getUserDSC", get_user_dsc);
+
+// Files & Folders
+router.post("/upload", file_upload);
+router.post("/download", file_download);
+router.post("/copyFile", file_copy);
+router.post("/cutFile", file_cut);
+router.post("/createFolder", create_folder);
+router.post("/downloadFolder", folder_download);
+router.get("/files/:filePath(*)", file_though_url);
+router.get("/getFileData", get_file_data);
+router.post("/accessFolder", getDocumentDetailsOnTheBasisOfPath);
+router.post(
+  "/getDocumentDetailsOnTheBasisOfPathForEdit",
+  getDocumentDetailsOnTheBasisOfPathForEdit,
+);
+router.post("/getDocumentChildren", getDocumentChildren);
+router.post("/deleteFile", delete_file);
+router.post("/recoverDeletedFile", recover_from_recycle_bin);
+router.post("/archiveFile", archive_file);
+router.post("/unarchiveFile", unarchive_file);
+router.get("/searchDocuments", search_documents);
+router.get("/get_searches", get_searches);
+router.delete("/delete_search/:id", delete_search);
+
+// PDF & Document Operations
+router.post("/merge-pdf", mergePdfUpload, mergeFilesToPdf);
+router.post("/merge-and-save", mergePdfUpload, mergeAndSavePdf);
+router.post("/downloadWatermarkedFile/:documentId", downloadWatermarkedFile);
+router.get(
+  "/downloadConvertedSignedPdf/:processId/:documentId",
+  download_converted_signed_pdf,
+);
+router.post("/extract-eml", extractEMLDetails);
+router.post("/generateDocumentName", generateDocumentNameController);
+
+// Workflows
+router.post("/workflows/addWorkflow", add_workflow);
+router.put("/workflows/editWorkflow/:workflowId", edit_workflow);
+router.get("/workflows/viewWorkflow/:workflowId", view_workflow);
+router.delete("/workflows/deleteWorkflow/:workflowId", delete_workflow);
+router.get("/workflows/getWorkflows", get_workflows);
+router.get("/workflows/getWorkflowsList", get_all_workflows_with_basics);
 router.get(
   "/workflows/:workflowId/getSteps",
   get_workflow_steps_with_assignments,
@@ -290,184 +313,71 @@ router.post(
   "/workflows/checkIfDuplicateWorkflow",
   check_if_workflow_is_duplicate,
 );
-router.post("/workflows/addWorkflow", add_workflow); // Create a new workflow
-router.put("/workflows/editWorkflow/:workflowId", edit_workflow); // Edit workflow (new version)
-router.get("/workflows/viewWorkflow/:workflowId", view_workflow); // View workflow details
-router.delete("/workflows/deleteWorkflow/:workflowId", delete_workflow); // Delete workflow
-router.get("/workflows/getWorkflows", get_workflows); // Get all workflows
-router.get("/workflows/getWorkflowsList", get_all_workflows_with_basics);
+router.post("/createTemplateDocument", create_template_document);
+router.get("/getWorkflowTemplates/:workflowId", get_workflow_templates);
+router.post(
+  "/upload-template",
+  upload_.single("file"),
+  upload_template_document,
+);
+router.post("/useTemplateDocument", use_template_document);
+
+// Processes
 router.post("/initiateProcess", initiate_process);
-
-router.post("/merge-pdf", mergePdfUpload, mergeFilesToPdf);
-// OR alternatively:
-// router.post('/merge-pdf', uploadMemory.array('files', 10), mergeFilesToPdf);
-
-router.post("/merge-and-save", mergePdfUpload, mergeAndSavePdf);
-
 router.get("/viewProcess/:processId", view_process);
-
 router.post("/claimProcessStep", pick_process_step);
-
 router.post("/completeStep", complete_process_step);
-
-router.get("/getUsersWithDetails", get_users_with_details);
-
 router.get("/getUserProcesses", get_user_processes);
+router.get("/getCompletedProcesses", get_completed_initiator_processes);
+router.post("/reopenProcess", reopen_process);
+router.get(
+  "/processDocuments/:processId/:versionNumber",
+  get_process_documents,
+);
+router.post("/uploadDocumentsInProcess", upload_documents_in_process);
+router.post("/deleteDocumentInProcess", delete_document_in_process);
 
-router.post("/changePassword", change_password);
-
-router.post("/forgetPassword", loginLimiter, forget_password);
-
+// Signatures & Actions
 router.post("/signDocument", sign_document);
-
 router.post("/signDocuments", sign_documents);
-
 router.post("/revokeSign", revoke_sign);
 router.post("/rejectDocument", reject_document);
 router.post("/revokeRejection", revoke_rejection);
+router.post("/uploadSignature", upload_.single("file"), upload_signature);
+router.post("/bookmarkDocument", bookmark_document);
+router.get("/getBookmarkedDocuments", get_bookmarked_documents);
+router.delete("/removeBookmark", remove_bookmark_document);
 
-router.get("/getUserSignature/:userId", get_user_signature);
-router.post("/getUserProfilePic", get_user_profile_pic);
-
-router.get("/getUserProfileData", get_user_profile_data);
-
-router.get("/getUserProfilePic", get_user_profile_pic);
-router.get("/getUserDSC", get_user_dsc);
-
+// Queries & Recommendations
 router.post("/queries/createQuery", createQuery);
-
 router.post("/recommendations/createRecommendation", createRecommendation);
 router.post("/recommendations/signDocument", signAsRecommender);
 router.post("/recommendations/respond", submitRecommendationResponse);
 router.get("/recommendations/getRecommendations", get_recommendations);
 router.get("/recommendations/:recommendationId", get_recommendation);
 
-router.post("/bookmarkDocument", bookmark_document);
-router.get("/getBookmarkedDocuments", get_bookmarked_documents);
-router.delete("/removeBookmark", remove_bookmark_document);
+// Physical Requests
+router.post("/createPhysicalRequest", create_physical_request);
+router.get("/getPhysicalRequests", get_physical_requests);
+router.post("/updatePhysicalRequest/:id", update_physical_request);
+router.get("/getPhysicalRequestMessages/:id", get_physical_request_messages);
+router.post("/addRequestMessage/:id", add_request_message);
 
-router.get("/get_searches", get_searches);
-router.delete("/delete_search/:id", delete_search);
-// router.get("/queries/process/:processId", getProcessQueries);
-// router.post("/queries/respond/:queryId", respondToQuery);
-// router.post("/queries/documents/approve/:documentId", approveQueryDocument);
-// router.post("/queries/approve-recirculation/:queryId", approveRecirculation);
-// router.post("/queries/doubts/:queryId", createQueryDoubt);
-// router.post("/doubts/respond/:doubtId", respondToQueryDoubt);
+// Projects
+router.post("/getProjects", getRootDocumentsWithAccess);
+router.post("/getRootDocumentsForEdit", getRootDocumentsForEdit);
 
-// // Recommendation routes
-// router.post("/recommendations", requestRecommendation);
-// router.post("/recommendations/submit/:recommendationId", submitRecommendation);
-// router.get("/recommendations", getRecommendations);
-// router.get("/recommendations/:id", getRecommendationDetails);
-// router.post(
-//   "/recommendations/request-clarification/:recommendationId",
-//   createRecommendationDoubt
-// );
-// router.post(
-//   "/recommendations/respond-clarification/:recommendationId",
-//   respondToRecommendationDoubt
-// );
-
-// // Highlight routes
-// router.post("/highlights", postHighlight);
-router.get("/getHighlightsInFile/:documentId", (req, res, next) => {
-  return res.status(200).json({
-    highlights: [],
-  });
-});
-
+// Dashboards & Logs
+router.get("/getNumbers", getNumbers);
+router.get("/getDetails", getDetails);
+router.get("/workflowAnalysis/:workflowId", getWorkflowAnalysis);
 router.get("/logs/getUserLogs", get_user_activity_logs);
 router.get("/logs/:processId/:stepInstanceId?", get_user_activity_log);
 router.get("/getProcessActivityLogs/:processId", get_process_activity_logs);
 
-router.get("/getNumbers", getNumbers);
-router.get("/getDetails", getDetails);
-router.get("/workflowAnalysis/:workflowId", getWorkflowAnalysis);
-
-router.post("/deleteFile", delete_file);
-router.post("/recoverDeletedFile", recover_from_recycle_bin);
-router.post("/archiveFile", archive_file);
-router.post("/unarchiveFile", unarchive_file);
-
-router.get("/wopi/discovery", wopiDiscovery);
-
-router.get("/collabora/capabilities", checkCollaboraCapabilities);
-router.post("/wopi/token/:fileId", getWopiToken);
-router.get("/wopi/files/:fileId", wopiFiles);
-router.post("/wopi/files/:fileId", (req, res) => {
-  // Optional: log if needed
-  console.log(`POST /wopi/files/${req.params.fileId} received`);
-  res.status(200).send(); // Just return success
-});
-// router.get("/wopi/files/:fileId/contents", wopiFileGet);
-router.get("/wopi/files/:id/contents", wopiFileContents);
-router.post("/wopi/files/:fileId/contents", wopiFilePost);
-router.get("/hosting/discovery", checkHostingDiscovery);
-router.post("/wopi/files/:fileId/lock", wopiLock);
-router.post("/wopi/files/:fileId/unlock", wopiUnlock);
-router.post("/wopi/files/:fileId/refreshlock", wopiRefreshLock);
-
-router.post("/createTemplateDocument", create_template_document);
-router.get("/getWorkflowTemplates/:workflowId", get_workflow_templates);
-
-router.post("/uploadSignature", upload_.single("file"), upload_signature);
-// Middleware to parse form fields
-
-// Route for file upload
-// Route for file upload
-// Then your route should work as is:
-
-// First parse the form fields
-router.post(
-  "/upload-template",
-  upload_.single("file"),
-  upload_template_document,
+// Misc
+router.get("/getHighlightsInFile/:documentId", (req, res) =>
+  res.status(200).json({ highlights: [] }),
 );
-
-router.post("/useTemplateDocument", use_template_document);
-
-router.get("/getCompletedProcesses", get_completed_initiator_processes);
-
-router.post("/generateDocumentName", generateDocumentNameController);
-
-router.post("/extract-eml", extractEMLDetails);
-
-router.get(
-  "/processDocuments/:processId/:versionNumber",
-  get_process_documents,
-);
-
-router.get("/searchDocuments", search_documents);
-
-router.post("/reopenProcess", reopen_process);
-
-router.post("/downloadWatermarkedFile/:documentId", downloadWatermarkedFile);
-
-router.post("/createPhysicalRequest", create_physical_request);
-
-router.get("/getPhysicalRequests", get_physical_requests);
-
-router.post("/updatePhysicalRequest/:id", update_physical_request);
-
-router.get("/getPhysicalRequestMessages/:id", get_physical_request_messages);
-
-router.post("/addRequestMessage/:id", add_request_message);
-
-router.post("/deleteUser/:id", deactivate_user);
-
-router.delete("/deleteRole/:id", deactivate_role);
-
-router.delete("/deleteDepartment/:id", deactivate_department);
-
-router.post("/logout", logout);
-
-// ✅ VAPT FIX #5: Secure critical log export routes with Admin Middleware
-router.get("/downloadLoginLogs", requireAdmin, download_login_logs);
-router.get("/exportFileLogs", requireAdmin, export_file_logs);
-
-router.post("/uploadDocumentsInProcess", upload_documents_in_process);
-
-router.post("/deleteDocumentInProcess", delete_document_in_process);
 
 export default router;
