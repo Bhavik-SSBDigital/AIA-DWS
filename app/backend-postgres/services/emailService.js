@@ -34,8 +34,9 @@ const transporter = nodemailer.createTransport({
 });
 
 const formatTags = (tags) => {
-  if (!tags || tags.length === 0) return "<p>No tags</p>";
-  return `<ul style="list-style-type: none; padding-left: 0; margin: 10px 0;">${tags.map((tag) => `<li style="display: inline-block; background-color: #e9ecef; border-radius: 16px; padding: 4px 12px; margin: 4px; font-size: 13px;">${tag}</li>`).join("")}</ul>`;
+  console.log("tags", tags);
+  if (!tags || tags.length === 0) return "<span>None</span>";
+  return `<div style="margin: 4px 0;">${tags.map((tag) => `<span style="display: inline-block; background-color: #e9ecef; border-radius: 16px; padding: 4px 12px; margin-right: 4px; font-size: 13px; font-weight: 600; color: #495057;">${tag}</span>`).join("")}</div>`;
 };
 
 // Generate auto-login token with short expiration
@@ -492,7 +493,7 @@ ${process.env.EMAIL_COMPANY_NAME || "AIA DWS Team"}`,
           </li>
           <li style="margin-bottom: 8px; padding-left: 20px; position: relative;">
             <span style="position: absolute; left: 0;">•</span>
-            <strong>Tags:</strong> ${formatTags(tags)}
+            <strong>Process Tag:</strong> ${formatTags(tags)}
           </li>
         </ul>
       `,
@@ -547,7 +548,7 @@ ${process.initiator.username || "Initiator"}`,
         <p>A query has been raised on a process you initiated.</p>
         <p><strong>Process:</strong> ${process.name}</p>
         <p><strong>Description:</strong> ${processDescription || "N/A"}</p>
-        <p><strong>Tags:</strong> ${formatTags(tags)}</p>
+        <p><strong>Process Tag:</strong> ${formatTags(tags)}</p>
         <p><strong>Query:</strong> ${query.question}</p>
         <p><strong>Raised by:</strong> ${raisedByUser.username}</p>
         <p><strong>Raised at:</strong> ${new Date(query.createdAt).toLocaleString()}</p>
@@ -665,7 +666,7 @@ View process: ${processUrl}`,
       <p>A query you raised has been resolved.</p>
       <p><strong>Process:</strong> ${process.name}</p>
       <p><strong>Description:</strong> ${processDescription || "N/A"}</p>
-      <p><strong>Tags:</strong> ${formatTags(tags)}</p>
+      <p><strong>Process Tag:</strong> ${formatTags(tags)}</p>
       <p><strong>Query:</strong> ${query.question}</p>
       <p><strong>Answer:</strong> ${query.answer}</p>
       <p><strong>Resolved by:</strong> ${resolvedByUser.username}</p>
@@ -713,7 +714,7 @@ View process: ${processUrl}`,
         <p>You have been requested to provide a recommendation for the following process:</p>
         <p><strong>Process:</strong> ${process.name}</p>
         <p><strong>Description:</strong> ${processDescription || "N/A"}</p>
-        <p><strong>Tags:</strong> ${formatTags(tags)}</p>
+        <p><strong>Process Tag:</strong> ${formatTags(tags)}</p>
         <p><strong>Requested by:</strong> ${requesterUser.username}</p>
         <p><strong>Recommendation details:</strong> ${recommendation.recommendationText}</p>
       `,
@@ -753,7 +754,7 @@ View recommendation: ${recommendationUrl}`,
           <p>A recommendation has been responded to.</p>
           <p><strong>Process:</strong> ${process.name}</p>
           <p><strong>Description:</strong> ${processDescription || "N/A"}</p>
-          <p><strong>Tags:</strong> ${formatTags(tags)}</p>
+          <p><strong>Process Tag:</strong> ${formatTags(tags)}</p>
           <p><strong>Recommender:</strong> ${recommenderUser.username}</p>
           <p><strong>Response:</strong> ${recommendation.responseText || "N/A"}</p>
           <p><strong>Status:</strong> ${recommendation.status}</p>
@@ -816,7 +817,7 @@ View recommendation: ${recommendationUrl}`,
         <p>Your process has been completed successfully!</p>
         <p><strong>Process:</strong> ${process.name}</p>
         <p><strong>Description:</strong> ${processDescription || "N/A"}</p>
-        <p><strong>Tags:</strong> ${formatTags(tags)}</p>
+        <p><strong>Process Tag:</strong> ${formatTags(tags)}</p>
         <p><strong>Completed at:</strong> ${new Date().toLocaleString()}</p>
       `,
       quickAccessLinks: `

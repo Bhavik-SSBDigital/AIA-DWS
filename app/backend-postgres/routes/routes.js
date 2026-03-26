@@ -245,7 +245,7 @@ router.post("/changePassword", change_password);
 
 // Tags
 router.post("/tags", requireAdmin, add_tags);
-router.get("/tags", requireAdmin, get_tags);
+router.get("/tags", get_tags);
 router.put("/tags/:id", requireAdmin, update_tag);
 router.delete("/tags/:id", requireAdmin, delete_tag);
 
@@ -264,7 +264,7 @@ router.get(
 
 // ✅ FIXED: Added requireAdmin to global User read routes
 router.get("/getUsers", requireAdmin, get_users);
-router.get("/getUsersWithDetails", requireAdmin, get_users_with_details);
+router.get("/getUsersWithDetails", get_users_with_details);
 
 // (Allowed for standard users to fetch specific context/own data)
 router.get("/getUser/:userId", requireAdmin, get_user);
@@ -320,7 +320,7 @@ router.delete(
   requireAdmin,
   delete_workflow,
 );
-router.get("/workflows/getWorkflows", requireAdmin, get_workflows);
+router.get("/workflows/getWorkflows", get_workflows);
 router.get(
   "/workflows/getWorkflowsList",
   requireAdmin,

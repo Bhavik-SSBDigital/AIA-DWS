@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { DownloadConvertedSignedPdf } from '../../common/Apis';
 import {
   ClaimProcess,
   CompleteProcess,
@@ -41,6 +42,9 @@ import {
   IconClock,
   IconAt,
   IconAlertSquareRoundedFilled,
+  IconActivity,
+  IconUpload,
+  IconTag,
 } from '@tabler/icons-react';
 import CustomCard from '../../CustomComponents/CustomCard';
 import ComponentLoader from '../../common/Loader/ComponentLoader';
@@ -107,7 +111,6 @@ const ViewProcess = () => {
   const [recommendations, setRecommendations] = useState([]);
   const [canEdit, setCanEdit] = useState({});
 
-  // Email thread states
   const [showEmailThreadModal, setShowEmailThreadModal] = useState(false);
   const [autoOpenProcessed, setAutoOpenProcessed] = useState(false);
 
@@ -126,14 +129,23 @@ const ViewProcess = () => {
     { label: 'Process ID', value: process?.processId },
     { label: 'Process Name', value: process?.processName || 'N/A' },
     { label: 'Process Version', value: process?.issueNo || 'N/A' },
+    {
+      label: 'Tag',
+      value: process?.tags && process.tags.length > 0 ? (
+        <span className="flex items-center gap-1 text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs w-max">
+          <IconTag size={12} className="text-slate-500" />
+          {process.tags[0]}
+        </span>
+      ) : 'N/A'
+    },
     { label: 'Description', value: process?.description || 'N/A' },
     { label: 'Initiator Name', value: process?.initiatorName || 'Unknown' },
     {
       label: 'Status',
       value: (
         <span
-          className={`px-3 py-1 rounded-full max-w-[200px] text-white text-sm font-semibold block text-center mt-1 ${
-            process?.status === 'PENDING' ? 'bg-yellow-500' : 'bg-green-500'
+          className={`px-3 py-1 rounded-full text-white text-xs font-bold uppercase tracking-wider inline-block mt-1 ${
+            process?.status === 'PENDING' ? 'bg-amber-500' : 'bg-emerald-500'
           }`}
         >
           {process?.status}
@@ -142,7 +154,7 @@ const ViewProcess = () => {
     },
     {
       label: 'Created At',
-      value: new Date(process?.createdAt).toLocaleString(),
+      value: process?.createdAt ? new Date(process?.createdAt).toLocaleString() : 'N/A',
     },
     {
       label: 'Updated At',
@@ -191,11 +203,23 @@ const ViewProcess = () => {
   };
 
   const DetailItem = ({ label, value }) => (
-    <div>
-      <span className="block text-md text-black font-medium">{label}</span>
-      <span className="text-lg font-normal text-gray-900">{value}</span>
+    <div className="flex flex-col gap-1">
+      <span className="text-sm text-slate-500 font-medium uppercase tracking-wide">{label}</span>
+      <span className="text-base font-semibold text-slate-800 break-words">{value}</span>
     </div>
   );
+
+  const handleDownloadConverted = async (docId, processId, fileName) => {
+  setActionsLoading(true);
+  try {
+    await DownloadConvertedSignedPdf(docId, processId, fileName);
+    toast.success("File converted and downloaded successfully");
+  } catch (error) {
+    toast.error("Failed to download converted file");
+  } finally {
+    setActionsLoading(false);
+  }
+};
 
   const handleCompleteProcess = async (stepId) => {
     setActionsLoading(true);
@@ -252,15 +276,16 @@ const ViewProcess = () => {
     listOfDocuments: [],
   });
 
-  const openModelSignAllDoec = async (stepId) => {
+const openModelSignAllDoec = async (stepId) => {
     setSignAllModalOpen({
       open: true,
       withRemarks: false,
       stepId,
       processStepInstanceId: process?.processStepInstanceId,
       processId: process?.processId,
+      // REMOVED the doc.type === 'pdf' filter below
       listOfDocuments: process.documents
-        .filter((doc) => !doc.rejectionDetails && doc.type === 'pdf')
+        .filter((doc) => !doc.rejectionDetails) 
         .map((doc) => ({
           documentId: doc.id,
           name: doc.name,
@@ -506,116 +531,94 @@ const ViewProcess = () => {
       return {
         reopenCycle: cycle,
         SOPIssueNo: sopMatch?.SOPIssueNo || documents[0]?.SOPIssueNo || '--',
-        documents,
+        documents: documents.filter(Boolean),
       };
     });
   }
 
   const DocumentsCycle = (process) => {
     const cycles = extractDocumentsByReopenCycle(process);
-    const maxDocs = Math.max(...cycles?.map((cycle) => cycle.documents.length));
 
     if (cycles?.length === 0) return null;
 
     return (
-      <CustomCard className={'mt-2'}>
-        <h2 className="text-xl font-semibold mb-4">
-          Documents by Reopen Cycle
-        </h2>
-        <div className="overflow-auto">
-          <table className="min-w-full border border-gray-300">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="py-2 px-4 border">System Process Version</th>
-                {Array.from({ length: maxDocs }).map((_, idx) => (
-                  <th key={idx} className="py-2 px-4 border">
-                    Document {idx + 1}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {cycles.map((cycle, index) => {
-                const isLastRow = index === cycles.length - 1;
-                return (
-                  <tr
-                    key={cycle.reopenCycle}
-                    className={isLastRow ? 'bg-green-100 font-semibold' : ''}
-                  >
-                    <td className="py-2 px-4 border font-medium">
-                      {cycle.reopenCycle}
-                    </td>
-                    {Array.from({ length: maxDocs }).map((_, idx) => {
-                      const doc = cycle.documents[idx];
-                      return (
-                        <td key={idx} className="py-2 px-4 border text-wrap">
-                          {doc ? (
-                            <div className="flex items-center space-x-2 mr-4">
-                              <img
-                                width={28}
-                                src={
-                                  ImageConfig[doc.type] ||
-                                  ImageConfig['default']
-                                }
-                                alt={doc.type}
-                              />
-                              <div className="flex flex-col">
-                                <span
-                                  title={doc.name}
-                                  className={`truncate ${
-                                    doc.active
-                                      ? 'font-semibold'
-                                      : 'text-gray-400'
-                                  }`}
-                                >
-                                  {doc.name}
-                                </span>
-                                <span className="text-sm text-blue-600 font-medium">
-                                  Version No: {doc?.issueNo || '--'}
-                                </span>
-                              </div>
-                              <CustomButton
-                                className="px-2"
-                                click={() =>
-                                  handleViewFile(
-                                    doc.name,
-                                    doc.path,
-                                    doc.id,
-                                    doc.type,
-                                    false,
-                                  )
-                                }
-                                disabled={actionsLoading}
-                                title="View Document"
-                                text={
-                                  <IconEye size={18} className="text-white" />
-                                }
-                              />
-                              <CustomButton
-                                variant="info"
-                                className="px-2"
-                                click={() => setDocumentModalOpen(doc)}
-                                disabled={actionsLoading}
-                                title="Details"
-                                text={
-                                  <IconAlignBoxCenterMiddle
-                                    size={18}
-                                    className="text-white"
-                                  />
-                                }
-                              />
-                            </div>
-                          ) : (
-                            <span className="text-gray-300">-</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      <CustomCard className="mt-8 shadow-sm border border-slate-200 rounded-xl overflow-hidden p-0 bg-white">
+        <div className="bg-slate-50 border-b border-slate-200 px-6 py-4">
+          <h2 className="text-lg font-bold flex items-center gap-2 text-slate-800">
+            <IconArrowForwardUp className="text-blue-500" size={20}/> Documents by Reopen Cycle
+          </h2>
+        </div>
+        <div className="p-6 space-y-6">
+          {cycles.map((cycle, index) => {
+            const isLastCycle = index === cycles.length - 1;
+            return (
+              <div 
+                key={cycle.reopenCycle} 
+                className={`space-y-4 rounded-lg p-5 border transition-colors ${isLastCycle ? 'bg-emerald-50/30 border-emerald-100' : 'bg-white border-slate-100'}`}
+              >
+                <h3 className="font-bold text-slate-800 border-b border-slate-200 pb-2">
+                  System Process Version {cycle.reopenCycle}
+                </h3>
+                <div className="flex flex-col space-y-3 pt-2">
+                  {cycle.documents.map((doc, idx) => (
+                    <div key={idx} className="flex items-center space-x-3 bg-white border border-slate-200 p-3 rounded-lg shadow-sm">
+                      <img
+                        width={28}
+                        src={ImageConfig[doc.type] || ImageConfig['default']}
+                        alt={doc.type}
+                        className="shrink-0"
+                      />
+                      <div className="flex flex-col flex-1 min-w-0 mr-2">
+                        <span
+                          title={doc.name}
+                          className={`truncate text-sm ${
+                            doc.active
+                              ? 'font-bold text-slate-800'
+                              : 'text-slate-500 font-medium'
+                          }`}
+                        >
+                          {doc.name}
+                        </span>
+                        <span className="text-[11px] text-blue-600 font-medium tracking-wide">
+                          Version No: {doc?.issueNo || '--'}
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5 shrink-0">
+                        <CustomButton
+                          className="px-1.5 py-1 min-w-0"
+                          size="xs"
+                          click={() =>
+                            handleViewFile(
+                              doc.name,
+                              doc.path,
+                              doc.id,
+                              doc.type,
+                              false,
+                            )
+                          }
+                          disabled={actionsLoading}
+                          title="View Document"
+                          text={<IconEye size={16} className="text-white" />}
+                        />
+                        <CustomButton
+                          variant="info"
+                          size="xs"
+                          className="px-1.5 py-1 min-w-0"
+                          click={() => setDocumentModalOpen(doc)}
+                          disabled={actionsLoading}
+                          title="Details"
+                          text={<IconAlignBoxCenterMiddle size={16} className="text-white" />}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {cycle.documents.length === 0 && (
+                    <div className="text-sm text-slate-400 italic">No documents in this cycle.</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </CustomCard>
     );
@@ -732,49 +735,68 @@ const ViewProcess = () => {
       console.error('Error downloading file:', error);
       toast.error('An error occurred while downloading the file.');
     }
-    handleClose();
   };
 
   if (loading) return <ComponentLoader />;
   if (error)
     return (
-      <CustomCard>
-        <p className="text-lg font-semibold">Error: {error}</p>
-        <div className="mt-4 flex space-x-4">
+      <div className="w-full max-w-7xl mx-auto p-4 md:p-6 pb-12">
+        <CustomCard className="border border-red-200 bg-red-50 text-center py-12 shadow-sm rounded-xl">
+          <IconAlertSquareRoundedFilled className="mx-auto text-red-500 mb-4" size={48} />
+          <p className="text-xl font-bold text-red-800">Something went wrong</p>
+          <p className="text-red-600 mt-2 mb-6">{error}</p>
           <CustomButton
             click={() => navigate('/processes/work')}
             text={'Go Back'}
+            variant="primary"
           />
-        </div>
-      </CustomCard>
+        </CustomCard>
+      </div>
     );
+
   const isInitiator =
     process?.initiatorName === sessionStorage.getItem('username');
 
   if (!process)
     return (
-      <div className="text-center text-gray-500 py-10">
-        No process data available
+      <div className="text-center text-slate-500 py-20 bg-slate-50 rounded-xl min-h-[50vh] flex items-center justify-center flex-col shadow-sm">
+        <IconFileText size={48} className="text-slate-300 mb-4" />
+        <p className="text-lg font-medium text-slate-600">No process data available</p>
       </div>
     );
 
   return (
-    <div className="mx-auto">
+    <div className="w-full max-w-7xl mx-auto space-y-8 pb-12 p-4 sm:p-6 bg-slate-50 min-h-screen">
       {actionsLoading && <TopLoader />}
-      <CustomCard>
-        <div className="flex justify-end flex-row gap-2 flex-wrap">
+
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <div className="flex items-center gap-4">
+          <div className="bg-blue-100 p-3 rounded-lg text-blue-600">
+            <IconActivity size={32} />
+          </div>
+          <div>
+            {/* <h1 className="text-2xl font-bold text-slate-800 mb-1">
+              Process <span className="text-blue-600">#{process?.processId}</span>
+            </h1> */}
+            <p className="text-l text-slate-500 font-medium">
+              {process?.processName || 'Unnamed Process'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
           {!isInitiator && (
             <CustomButton
               text={'Approve'}
               click={() => openModelSignAllDoec(process?.processStepInstanceId)}
-              className={'min-w-[150px]'}
+              className={'flex-1 lg:flex-none min-w-[140px] shadow-sm'}
             />
           )}
           {!isInitiator && (
             <CustomButton
               variant={'danger'}
               text={'Reject'}
-              className={'min-w-[150px]'}
+              className={'flex-1 lg:flex-none min-w-[140px] shadow-sm'}
               click={() => setOpenModal('query')}
               disabled={actionsLoading || isCompleted || disableActions}
             />
@@ -783,7 +805,7 @@ const ViewProcess = () => {
             <CustomButton
               variant={'primary'}
               text={'Re-Open'}
-              className={'min-w-[150px]'}
+              className={'flex-1 lg:flex-none min-w-[140px] shadow-sm'}
               click={() => setOpenModal('re-open')}
               disabled={actionsLoading}
             />
@@ -791,14 +813,14 @@ const ViewProcess = () => {
           <CustomButton
             variant={'primary'}
             text={'Upload Document'}
-            className={'min-w-[150px] hidden'}
+            className={'flex-1 lg:flex-none min-w-[140px] shadow-sm hidden'}
             click={() => setOpenModal('document-upload')}
             disabled={actionsLoading || !isCompleted || disableActions}
           />
           <CustomButton
             variant={'secondary'}
             text={'Ask Recommendation'}
-            className={'min-w-[150px]'}
+            className={'flex-1 lg:flex-none min-w-[140px] shadow-sm'}
             click={() => setOpenModal('recommend')}
             disabled={actionsLoading || isCompleted || disableActions}
           />
@@ -806,34 +828,54 @@ const ViewProcess = () => {
             variant={'secondary'}
             text={'Activity Logs'}
             click={() => navigate(`/timeline/${process?.processId}`)}
-            className={'min-w-[150px]'}
+            className={'flex-1 lg:flex-none min-w-[140px] shadow-sm'}
             disabled={actionsLoading}
           />
         </div>
-        <hr className="text-slate-200 my-2" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+      </div>
+
+      <CustomCard className="border border-slate-200 shadow-sm rounded-xl overflow-hidden p-0 bg-white">
+        <div className="bg-slate-50/50 px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+            <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                <IconAlignBoxCenterMiddle className="text-slate-400" size={20}/>
+                Process Details
+            </h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-6 gap-x-8 p-6">
           {processDetails.map((detail, index) => (
-            <div
-              key={index}
-              className="p-4 border border-slate-300 bg-zinc-50 rounded-lg shadow-sm"
-            >
-              <p className="font-semibold text-lg">{detail.label}</p>
-              <p>{detail.value}</p>
-            </div>
+            <DetailItem key={index} label={detail.label} value={detail.value} />
           ))}
         </div>
       </CustomCard>
 
-      {/* Email Threads Section */}
+      {process?.queryDetails?.some((query) => !query.answerText) && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm animate-pulse">
+            <div className="flex items-center gap-3">
+                <div className="bg-red-100 p-2 rounded-full text-red-600">
+                    <IconAlertSquareRoundedFilled size={24} />
+                </div>
+                <div>
+                    <h3 className="font-bold text-red-800">Attention Required</h3>
+                    <p className="text-sm text-red-700">A query has been raised on this process. Please review and address it.</p>
+                </div>
+            </div>
+            <CustomButton 
+                variant="danger" 
+                text="View Query" 
+                size="sm"
+                click={() => document.getElementById('queries-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+            />
+        </div>
+      )}
+
       {process?.emailThreads?.length > 0 && (
-        <section className="mt-8">
-          <div className="flex items-center mb-6">
-            <div className="flex-grow border-t border-blue-300"></div>
-            <span className="mx-4 text-sm font-semibold text-blue-700 uppercase tracking-wide flex items-center gap-2 bg-blue-50 px-4 py-2 rounded-full">
-              <IconMail size={16} className="text-blue-600" />
-              Email Conversations ({process.emailThreads.length})
-            </span>
-            <div className="flex-grow border-t border-blue-300"></div>
+        <section className="mt-8 space-y-6">
+          <div className="flex items-center">
+            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 px-4 py-1.5 bg-blue-50 border border-blue-100 rounded-full text-blue-800">
+              <IconMail size={18} /> Email Conversations
+              <span className="bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full ml-1">{process.emailThreads.length}</span>
+            </h2>
+            <div className="flex-grow border-t border-slate-200 ml-4"></div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -863,14 +905,14 @@ const ViewProcess = () => {
               return (
                 <div
                   key={thread.id || index}
-                  className="group relative bg-gradient-to-br from-white to-blue-50 border border-blue-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-lg transition-all duration-300"
+                  className="group relative bg-white border border-slate-200 rounded-xl p-5 hover:border-blue-300 hover:shadow-md transition-all duration-300"
                 >
                   <div className="absolute top-4 right-4">
                     <span
-                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      className={`px-3 py-1 rounded-full text-[11px] font-bold tracking-wider uppercase ${
                         totalAttachments > 0
-                          ? 'bg-green-100 text-green-800 border border-green-200'
-                          : 'bg-blue-100 text-blue-800 border border-blue-200'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
                       }`}
                     >
                       {totalAttachments > 0
@@ -881,55 +923,51 @@ const ViewProcess = () => {
 
                   <div className="flex items-start gap-4">
                     <div className="flex-shrink-0">
-                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md">
-                        <IconMail className="text-white" size={24} />
+                      <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center shadow-sm">
+                        <IconMail className="text-blue-500" size={24} />
                       </div>
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <div className="mb-3">
-                        <h3 className="font-semibold text-gray-900 text-lg mb-2 truncate">
+                      <div className="mb-3 mt-1">
+                        <h3 className="font-bold text-slate-800 text-lg mb-2 pr-20 truncate">
                           {firstEmail?.subject || 'Email Conversation'}
                         </h3>
 
-                        <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-3">
-                          <div className="flex items-center gap-1">
-                            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                            <span className="font-medium">
-                              {totalEmails} messages
-                            </span>
+                        <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-500 mb-4">
+                          <div className="flex items-center gap-1.5">
+                            <IconMessageCircle size={14} className="text-blue-400"/>
+                            <span>{totalEmails} messages</span>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <IconUser size={14} />
-                            <span className="font-medium">
-                              {participants.size} participants
-                            </span>
+                          <div className="flex items-center gap-1.5">
+                            <IconUser size={14} className="text-slate-400"/>
+                            <span>{participants.size} participants</span>
                           </div>
                           {thread.extractedAt && (
-                            <div className="flex items-center gap-1">
-                              <IconClock size={14} />
+                            <div className="flex items-center gap-1.5">
+                              <IconClock size={14} className="text-slate-400"/>
                               <span>{formatDate(thread.extractedAt)}</span>
                             </div>
                           )}
                         </div>
 
                         {participantsList.length > 0 && (
-                          <div className="mb-4">
-                            <div className="flex items-center gap-2 text-sm text-gray-700 mb-2">
+                          <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
                               <IconUsers size={14} />
-                              <span className="font-medium">Participants:</span>
+                              <span>Participants</span>
                             </div>
                             <div className="flex flex-wrap gap-2">
                               {participantsList.map((participant, idx) => (
                                 <span
                                   key={idx}
-                                  className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-blue-50 hover:border-blue-200 transition-colors"
+                                  className="px-2.5 py-1 bg-white border border-slate-200 rounded text-xs font-semibold text-slate-700 shadow-sm"
                                 >
                                   {participant}
                                 </span>
                               ))}
                               {hasMoreParticipants && (
-                                <span className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-sm">
+                                <span className="px-2.5 py-1 bg-slate-200 text-slate-600 rounded text-xs font-semibold">
                                   +{participants.size - 3} more
                                 </span>
                               )}
@@ -937,24 +975,18 @@ const ViewProcess = () => {
                           </div>
                         )}
 
-                        {threadEmails.length > 0 && (
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between mt-4">
-                              <div></div>
-                              <div className="flex items-center gap-2">
-                                <CustomButton
-                                  variant="outline"
-                                  size="sm"
-                                  text="View Thread"
-                                  click={() => handleViewEmailThread(thread)}
-                                  className="px-4"
-                                  disabled={actionsLoading}
-                                  icon={<IconEye size={16} />}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        )}
+{threadEmails.length > 0 && (
+  <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end">
+    <button
+      onClick={() => handleViewEmailThread(thread)}
+      disabled={actionsLoading}
+      className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 hover:border-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      <IconEye size={16} />
+      View Thread
+    </button>
+  </div>
+)}
                       </div>
                     </div>
                   </div>
@@ -965,42 +997,33 @@ const ViewProcess = () => {
         </section>
       )}
 
-      {process?.queryDetails?.some((query) => !query.answerText) && (
-        <div className="flex items-center justify-center m-4">
-          <span className="flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-300 rounded-lg">
-            <IconAlertSquareRoundedFilled size={18} className="text-red-600" />
-            <span className="text-sm font-medium text-red-700">
-              Query raised on this process — please review and address it.
-            </span>
-          </span>
-        </div>
-      )}
-
-      {/* Active Documents Section */}
       {process?.documents?.length > 0 && (
-        <>
-          <div className="flex items-center mt-12 mb-2">
-            <div className="flex-grow border-t border-green-600"></div>
-            <span className="flex items-center gap-2 mx-4 text-sm text-green-700 uppercase tracking-wide font-semibold">
-              <IconFileText size={16} className="text-green-700" />
-              Active Documents ({process.documents.length})
-            </span>
-            <div className="flex-grow border-t border-green-600"></div>
+        <section className="mt-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4 flex-grow">
+                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 px-4 py-1.5 bg-emerald-50 border border-emerald-100 rounded-full text-emerald-800 whitespace-nowrap">
+                <IconFileText size={18} /> Active Documents
+                <span className="bg-emerald-600 text-white text-xs px-2 py-0.5 rounded-full ml-1">{process.documents.length}</span>
+                </h2>
+                <div className="flex-grow border-t border-slate-200 hidden sm:block"></div>
+            </div>
+<div className="pl-4 shrink-0">
+  <button
+    disabled={selectedDocs.length === 0}
+    onClick={handleViewAllSelectedFiles}
+    className="flex items-center gap-2 ml-auto px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg shadow-sm hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+  >
+    <IconEye size={16} />
+    View Selected ({selectedDocs.length})
+  </button>
+</div>
           </div>
 
-          <CustomButton
-            disabled={selectedDocs.length === 0}
-            className="ml-auto mb-4 block"
-            text={`View All Selected (${selectedDocs.length})`}
-            click={handleViewAllSelectedFiles}
-          />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {process.documents.map((doc) => {
               const isSelected = selectedDocs.includes(doc.id);
               const toggleSelect = () => {
                 if (doc.type !== 'pdf') return;
-
                 setSelectedDocs((prev) =>
                   isSelected
                     ? prev.filter((id) => id !== doc.id)
@@ -1012,55 +1035,64 @@ const ViewProcess = () => {
               return (
                 <CustomCard
                   key={doc.id}
-                  className="relative flex flex-col justify-between"
+                  className={`relative flex flex-col justify-between border transition-all duration-200 shadow-sm ${isSelected ? 'border-blue-400 ring-1 ring-blue-100 bg-blue-50/20' : 'border-slate-200 hover:border-blue-300 hover:shadow-md bg-white'}`}
                 >
-                  <div className="absolute top-2 right-2">
+                  <div className="absolute top-3 right-3 z-10">
                     {doc.rejectionDetails ? (
-                      <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded-full shadow-sm">
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-800 px-2.5 py-1 rounded-full border border-red-200 shadow-sm">
                         Rejected
                       </span>
                     ) : (
-                      <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full shadow-sm">
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full border border-emerald-200 shadow-sm">
                         Active
                       </span>
                     )}
                   </div>
 
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                    <div className="flex items-start gap-3 w-full">
-                      <input
-                        type="checkbox"
-                        className="mt-1 shrink-0"
-                        checked={isSelected}
-                        disabled={doc.type !== 'pdf'}
-                        onChange={toggleSelect}
+                  <div className="flex items-start gap-4 mb-6 pt-1">
+                    <div className="mt-1 shrink-0">
+                        <label className="relative flex items-center cursor-pointer p-1">
+                            <input
+                                type="checkbox"
+                                className="peer h-5 w-5 cursor-pointer transition-all appearance-none rounded border border-slate-300 checked:bg-blue-600 checked:border-blue-600 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed shadow-sm"
+                                checked={isSelected}
+                                disabled={doc.type !== 'pdf'}
+                                onChange={toggleSelect}
+                            />
+                            <span className="absolute text-white opacity-0 peer-checked:opacity-100 top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+                                <IconCheck size={14} stroke={3} />
+                            </span>
+                        </label>
+                    </div>
+                    
+                    <div className="w-12 h-12 shrink-0 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center shadow-sm">
+                      <img
+                        width={28}
+                        src={ImageConfig[extension] || ImageConfig['default']}
+                        alt="icon"
                       />
-                      <div className="w-10 h-10 shrink-0 rounded-full bg-gray-100 border flex items-center justify-center">
-                        <img
-                          width={28}
-                          src={ImageConfig[extension] || ImageConfig['default']}
-                          alt="icon"
-                        />
-                      </div>
-                      <div className="flex flex-col min-w-0 mr-9">
-                        <p className="font-semibold text-gray-900 break-words">
-                          {doc.name}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          Type: {extension}
-                        </p>
+                    </div>
+                    
+                    <div className="flex flex-col min-w-0 pr-14">
+                      <p className="font-bold text-slate-800 break-words leading-tight mb-1" title={doc.name}>
+                        {doc.name}
+                      </p>
+                      <div className="flex flex-wrap gap-2 text-xs font-medium mt-1">
+                        <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 uppercase">
+                          {extension || 'Unknown'}
+                        </span>
                         {doc.issueNo && (
-                          <p className="text-xs text-blue-600">
-                            Version: {doc.issueNo}
-                          </p>
+                          <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-200">
+                            v{doc.issueNo}
+                          </span>
                         )}
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  <div className="mt-auto pt-4 border-t border-slate-100 flex flex-wrap justify-end gap-2 bg-slate-50/50 -mx-4 -mb-4 p-4 rounded-b-xl">
                     <CustomButton
-                      className="px-2"
+                      className="px-2 shadow-sm"
                       click={() =>
                         handleViewFile(
                           doc.name,
@@ -1074,23 +1106,17 @@ const ViewProcess = () => {
                       title="View Document"
                       text={<IconEye size={18} className="text-white" />}
                     />
-
                     <CustomButton
                       variant="info"
-                      className="px-2"
+                      className="px-2 shadow-sm"
                       click={() => setDocumentModalOpen(doc)}
                       disabled={actionsLoading}
                       title="Details"
-                      text={
-                        <IconAlignBoxCenterMiddle
-                          size={18}
-                          className="text-white"
-                        />
-                      }
+                      text={<IconAlignBoxCenterMiddle size={18} className="text-white" />}
                     />
                     <CustomButton
                       variant="danger"
-                      className="px-2"
+                      className="px-2 shadow-sm"
                       click={() =>
                         setOpenModal({
                           documentId: doc.id,
@@ -1109,30 +1135,46 @@ const ViewProcess = () => {
                       text={<IconTrash size={18} className="text-white" />}
                     />
                     <CustomButton
-                      className="px-2"
+                      className="px-2 shadow-sm"
                       click={() => handleDownload(doc.path, doc.name)}
-                      title="Download Document"
+                      title="Download Original Document"
                       text={<IconDownload size={18} className="text-white" />}
                     />
+                    
+                    {/* NEW BUTTON: Only shows for non-PDFs to download them as signed PDFs
+                    {extension !== 'pdf' && (
+                      <CustomButton
+                        variant="secondary"
+                        className="px-2 shadow-sm border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
+                        click={() => handleDownloadConverted(doc.id, process.processId, doc.name)}
+                        disabled={actionsLoading}
+                        title="Download as Signed PDF"
+                        text={
+                          <div className="flex items-center gap-1">
+                            <IconDownload size={18} />
+                            <span className="text-xs font-bold">PDF</span>
+                          </div>
+                        }
+                      />
+                    )} */}
                   </div>
                 </CustomCard>
               );
             })}
           </div>
-        </>
+        </section>
       )}
 
       {process && DocumentsCycle(process)}
 
-      {/* Superseded Documents Section */}
       {process?.sededDocuments?.length > 0 && (
-        <div className="mt-12">
-          <div className="flex items-center mb-4">
-            <div className="flex-grow border-t border-rose-400"></div>
-            <span className="mx-4 text-sm text-rose-600 uppercase tracking-wide font-semibold">
-              Superseded Documents ({process.sededDocuments.length})
-            </span>
-            <div className="flex-grow border-t border-rose-400"></div>
+        <section className="mt-12 space-y-6">
+          <div className="flex items-center">
+            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 px-4 py-1.5 bg-rose-50 border border-rose-100 rounded-full text-rose-800">
+              <IconArrowBackUp size={18} /> Superseded Documents
+              <span className="bg-rose-600 text-white text-xs px-2 py-0.5 rounded-full ml-1">{process.sededDocuments.length}</span>
+            </h2>
+            <div className="flex-grow border-t border-slate-200 ml-4"></div>
           </div>
 
           <div className="space-y-6">
@@ -1144,40 +1186,41 @@ const ViewProcess = () => {
               return (
                 <CustomCard
                   key={index}
-                  className="relative border !border-rose-300 !bg-rose-50 shadow-sm p-4"
+                  className="relative border border-rose-200 bg-white shadow-sm rounded-xl p-5"
                 >
-                  <div className="absolute bottom-2 right-2">
-                    <span className="text-xs border bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
+                  <div className="absolute top-4 right-4 z-10">
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-rose-100 text-rose-800 px-2.5 py-1 rounded-full border border-rose-200 shadow-sm">
                       Superseded
                     </span>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
-                    <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 rounded-full bg-white border flex items-center justify-center text-rose-700 text-xl">
+                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6 mb-6">
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-rose-50 border border-rose-100 flex items-center justify-center shadow-sm shrink-0">
                         <img
-                          width={30}
+                          width={28}
                           src={ImageConfig[ext] || ImageConfig['default']}
                           alt="icon"
                         />
                       </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-gray-800 break-words">
+                      <div className="min-w-0 pt-1 pr-16">
+                        <p className="font-bold text-slate-800 break-words mb-1">
                           {docGroup.documentWhichSuperseded.name}
                         </p>
-                        <p className="text-sm text-gray-500 truncate">
-                          {docGroup.documentWhichSuperseded.path}
+                        <p className="text-xs font-medium text-slate-500 truncate mb-2">
+                          Path: {docGroup.documentWhichSuperseded.path}
                         </p>
                         {docGroup.documentWhichSuperseded.issueNo && (
-                          <p className="text-xs text-rose-600">
+                          <span className="inline-block bg-rose-50 text-rose-700 px-2 py-0.5 rounded border border-rose-200 text-xs font-bold">
                             Version: {docGroup.documentWhichSuperseded.issueNo}
-                          </p>
+                          </span>
                         )}
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    
+                    <div className="flex gap-2 shrink-0 md:pt-1">
                       <CustomButton
-                        className="px-2"
+                        className="px-2 shadow-sm"
                         click={() =>
                           handleViewFile(
                             docGroup.documentWhichSuperseded.name,
@@ -1191,7 +1234,7 @@ const ViewProcess = () => {
                       />
                       <CustomButton
                         variant="info"
-                        className="px-2"
+                        className="px-2 shadow-sm"
                         click={() =>
                           setDocumentModalOpen(docGroup.documentWhichSuperseded)
                         }
@@ -1208,25 +1251,29 @@ const ViewProcess = () => {
                   </div>
 
                   {docGroup.versions.length > 0 && (
-                    <div className="mt-4 pl-5 border-l-2 border-dashed border-rose-300">
-                      <p className="text-sm font-medium text-gray-600 mb-2">
-                        Version History ({docGroup.versions.length} versions):
+                    <div className="mt-4 bg-slate-50 rounded-lg p-5 border border-slate-200 relative">
+                      <div className="absolute top-0 bottom-0 left-[2rem] w-px bg-rose-200 hidden sm:block"></div>
+                      
+                      <p className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
+                        <IconActivity size={16} className="text-rose-400"/>
+                        Version History <span className="text-slate-500 font-medium">({docGroup.versions.length} versions)</span>
                       </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 relative z-10 sm:pl-10">
                         {docGroup.versions.map((ver) => {
                           const prevExt = ver.name
                             ?.split('.')
                             .pop()
                             ?.toLowerCase();
                           return (
-                            <CustomCard
+                            <div
                               key={ver.id}
-                              className="flex flex-col justify-between"
+                              className="flex flex-col justify-between bg-white border border-slate-200 rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow"
                             >
                               <div className="flex gap-3 mb-3">
-                                <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
+                                <div className="w-10 h-10 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0">
                                   <img
-                                    width={24}
+                                    width={22}
                                     src={
                                       ImageConfig[prevExt] ||
                                       ImageConfig['default']
@@ -1234,21 +1281,21 @@ const ViewProcess = () => {
                                     alt="icon"
                                   />
                                 </div>
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium text-gray-800 break-words">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-bold text-slate-800 break-words leading-tight mb-1" title={ver.name}>
                                     {ver.name}
                                   </p>
-                                  <p className="text-xs text-gray-500 truncate max-w-full">
+                                  <p className="text-[10px] text-slate-500 truncate mb-1">
                                     {ver.path}
                                   </p>
                                   {ver.issueNo && (
-                                    <p className="text-xs text-blue-600">
-                                      Version: {ver.issueNo}
-                                    </p>
+                                    <span className="inline-block bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                                      v{ver.issueNo}
+                                    </span>
                                   )}
                                 </div>
                               </div>
-                              <div className="flex gap-2 justify-end mt-auto">
+                              <div className="flex gap-2 justify-end pt-3 border-t border-slate-100 mt-auto">
                                 <CustomButton
                                   className="px-2"
                                   variant="info"
@@ -1280,7 +1327,7 @@ const ViewProcess = () => {
                                   }
                                 />
                               </div>
-                            </CustomCard>
+                            </div>
                           );
                         })}
                       </div>
@@ -1290,21 +1337,17 @@ const ViewProcess = () => {
               );
             })}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Queries Section */}
-      {/* Queries Section */}
-      {/* Queries Section */}
       {process?.queryDetails?.length > 0 && (
-        <div id="queries-section" className="mt-12">
-          <div className="flex items-center mb-6">
-            <div className="flex-grow border-t border-slate-300"></div>
-            <span className="mx-4 text-sm text-gray-600 uppercase tracking-wider font-semibold flex items-center gap-2">
-              <IconQuestionMark size={16} />
-              Queries / Clarifications ({process.queryDetails.length})
-            </span>
-            <div className="flex-grow border-t border-slate-300"></div>
+        <section id="queries-section" className="mt-12 space-y-6">
+          <div className="flex items-center">
+            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 px-4 py-1.5 bg-amber-50 border border-amber-200 rounded-full text-amber-800">
+              <IconQuestionMark size={18} /> Queries & Clarifications
+              <span className="bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full ml-1">{process.queryDetails.length}</span>
+            </h2>
+            <div className="flex-grow border-t border-slate-200 ml-4"></div>
           </div>
 
           <div className="space-y-6">
@@ -1315,7 +1358,6 @@ const ViewProcess = () => {
               const assigneeStep =
                 query.assigneeDetails?.assignedStepName || 'Unknown Step';
 
-              // Helper to safely get document name when the nested relation is null
               const getDocumentName = (id, fallbackObj) => {
                 if (fallbackObj?.name) return fallbackObj.name;
                 const found = process.documents?.find((d) => d.id === id);
@@ -1325,169 +1367,201 @@ const ViewProcess = () => {
               return (
                 <CustomCard
                   key={index}
-                  className={`border-l-4 overflow-hidden shadow-sm ${
-                    isResolved ? 'border-l-emerald-500' : 'border-l-yellow-500'
+                  className={`border-l-4 overflow-hidden shadow-sm rounded-xl p-0 ${
+                    isResolved ? 'border-l-emerald-500 border-y-slate-200 border-r-slate-200' : 'border-l-amber-500 border-y-amber-200 border-r-amber-200 bg-amber-50/10'
                   }`}
                 >
-                  {/* --- Header Section --- */}
-                  <div className="flex justify-between items-start mb-5 border-b pb-4 border-slate-100">
-                    <div>
-                      <div className="flex items-center gap-3 mb-1">
-                        <h3 className="font-semibold text-lg text-slate-800">
-                          {query.stepName
-                            ? `Query at ${query.stepName}`
-                            : 'Process Query'}
-                        </h3>
-                        <span
-                          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                            isResolved
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                              : 'bg-yellow-50 text-yellow-700 border-yellow-300'
-                          }`}
-                        >
-                          {isResolved ? 'Resolved' : 'Pending Resolution'}
-                        </span>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-500 mt-2">
-                        <div className="flex items-center gap-1.5">
-                          <IconAt size={14} className="text-slate-400" />
-                          <span>
-                            <strong className="text-slate-700 font-medium">
-                              Raised by:
-                            </strong>{' '}
-                            {query.initiatorName || 'Process Reviewer'}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <IconUser size={14} className="text-blue-400" />
-                          <span>
-                            <strong className="text-slate-700 font-medium">
-                              Assigned to:
-                            </strong>{' '}
-                            {assigneeName}{' '}
-                            <span className="text-slate-400">
-                              ({assigneeStep})
+                  <div className="p-6">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-6 gap-4 border-b pb-6 border-slate-100">
+                        <div>
+                          <div className="flex items-center gap-3 mb-2">
+                            <h3 className="font-bold text-xl text-slate-800">
+                              {query.stepName
+                                ? `Query at ${query.stepName}`
+                                : 'Process Query'}
+                            </h3>
+                            <span
+                              className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border shadow-sm ${
+                                isResolved
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-amber-100 text-amber-800 border-amber-300'
+                              }`}
+                            >
+                              {isResolved ? 'Resolved' : 'Pending Resolution'}
                             </span>
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <IconClock size={14} className="text-slate-400" />
-                          <span>
-                            <strong className="text-slate-700 font-medium">
-                              Created:
-                            </strong>{' '}
-                            {new Date(query.createdAt).toLocaleString()}
-                          </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-xs text-slate-500 mt-3 bg-slate-50 inline-flex p-3 rounded-lg border border-slate-100">
+                            <div className="flex items-center gap-2">
+                              <div className="bg-slate-200 p-1 rounded text-slate-600"><IconAt size={14} /></div>
+                              <span>
+                                <strong className="text-slate-700">Raised by:</strong>{' '}
+                                {query.initiatorName || 'Process Reviewer'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="bg-blue-100 p-1 rounded text-blue-600"><IconUser size={14} /></div>
+                              <span>
+                                <strong className="text-slate-700">Assigned to:</strong>{' '}
+                                {assigneeName}{' '}
+                                <span className="text-slate-400">({assigneeStep})</span>
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="bg-slate-200 p-1 rounded text-slate-600"><IconClock size={14} /></div>
+                              <span>
+                                <strong className="text-slate-700">Created:</strong>{' '}
+                                {new Date(query.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
 
-                  {/* --- Query Description (What was asked) --- */}
-                  <div className="bg-slate-50/50 p-4 rounded-md border border-slate-200 mb-5">
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                      <IconAlertSquareRoundedFilled
-                        size={14}
-                        className="text-yellow-500"
-                      />
-                      Query Description
-                    </p>
-                    <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed">
-                      {query.queryText || (
-                        <span className="text-slate-400 italic">
-                          No description provided.
-                        </span>
+                      <div className="bg-slate-50/80 p-5 rounded-xl border border-slate-200 mb-6 shadow-inner">
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                          <IconAlertSquareRoundedFilled
+                            size={16}
+                            className="text-amber-500"
+                          />
+                          Query Description
+                        </p>
+                        <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed font-medium">
+                          {query.queryText || (
+                            <span className="text-slate-400 italic font-normal">
+                              No description provided.
+                            </span>
+                          )}
+                        </p>
+                      </div>
+
+                      {query.documentSummaries?.length > 0 && (
+                        <div className="mb-6">
+                          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                              <IconFileText size={16} className="text-slate-400"/>
+                            Document Specific Feedback
+                          </p>
+                          <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
+                            <table className="min-w-full text-sm text-left">
+                              <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
+                                <tr>
+                                  <th className="p-4 font-bold uppercase text-xs tracking-wider w-1/3">
+                                    Document
+                                  </th>
+                                  <th className="p-4 font-bold uppercase text-xs tracking-wider">Feedback</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 bg-white">
+                                {query.documentSummaries.map((ds) => (
+                                  <tr
+                                    key={ds.documentId}
+                                    className="hover:bg-slate-50 transition-colors"
+                                  >
+                                    <td className="p-4 font-semibold text-slate-800 align-top break-words border-r border-slate-100">
+                                      {getDocumentName(
+                                        ds.documentId,
+                                        ds.documentDetails,
+                                      )}
+                                    </td>
+                                    <td className="p-4 text-slate-600 align-top whitespace-pre-wrap font-medium">
+                                      {ds.feedbackText}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
                       )}
-                    </p>
-                  </div>
 
-                  {/* --- Document Specific Feedback (What was asked about specific docs) --- */}
-                  {query.documentSummaries?.length > 0 && (
-                    <div className="mb-5">
-                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                        Document Specific Feedback
-                      </p>
-                      <div className="overflow-x-auto rounded-md border border-slate-200">
-                        <table className="w-full text-sm text-left">
-                          <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
-                            <tr>
-                              <th className="p-3 font-semibold w-1/3">
-                                Document
-                              </th>
-                              <th className="p-3 font-semibold">Feedback</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {query.documentSummaries.map((ds) => (
-                              <tr
-                                key={ds.documentId}
-                                className="hover:bg-slate-50 transition-colors"
-                              >
-                                <td className="p-3 font-medium text-slate-800 align-top break-words">
-                                  {getDocumentName(
-                                    ds.documentId,
-                                    ds.documentDetails,
-                                  )}
-                                </td>
-                                <td className="p-3 text-slate-600 align-top whitespace-pre-wrap">
-                                  {ds.feedbackText}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* --- Resolution Section (Shown ONLY if resolved) --- */}
-                  {isResolved && (
-                    <div className="bg-emerald-50/60 p-5 rounded-lg border border-emerald-200 mt-6 relative shadow-sm">
-                      {/* Floating Status Badge */}
-                      <div className="absolute -top-3 left-5 bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded shadow-sm flex items-center gap-1.5">
-                        <IconCheck size={14} stroke={3} /> Query Resolved
-                      </div>
-
-                      <div className="pt-2">
-                        {/* Stylish Label for Resolution Text */}
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className="bg-emerald-100 text-emerald-800 text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded flex items-center gap-1.5 border border-emerald-200 shadow-sm">
-                            <IconMessageCircle
-                              size={16}
-                              className="text-emerald-600"
-                            />
-                            Resolution Provided
+                      {isResolved && (
+                        <div className="bg-emerald-50 p-6 rounded-xl border border-emerald-200 mt-8 relative shadow-sm">
+                          <div className="absolute -top-3 left-6 bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded shadow-md flex items-center gap-1.5">
+                            <IconCheck size={14} stroke={3} /> Query Resolved
                           </div>
-                          <div className="flex-grow border-t border-dashed border-emerald-300"></div>
-                        </div>
 
-                        {/* Resolution Text Box */}
-                        <div className="bg-white/80 p-4 rounded-md border border-emerald-100 shadow-sm">
-                          <p className="text-emerald-950 whitespace-pre-wrap text-sm leading-relaxed">
-                            {query.answerText}
-                          </p>
-                        </div>
+                          <div className="pt-2">
+                            <div className="flex items-center gap-3 mb-4">
+                              <div className="bg-emerald-100 text-emerald-800 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded flex items-center gap-2 border border-emerald-200 shadow-sm">
+                                <IconMessageCircle size={16} className="text-emerald-600"/>
+                                Resolution Provided
+                              </div>
+                              <div className="flex-grow border-t border-dashed border-emerald-300"></div>
+                            </div>
 
-                        {query.answeredAt && (
-                          <div className="flex justify-end mt-2">
-                            <span className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
-                              <IconClock size={12} />
-                              Resolved on{' '}
-                              {new Date(query.answeredAt).toLocaleString()}
-                            </span>
+                            <div className="bg-white p-5 rounded-lg border border-emerald-100 shadow-sm">
+                              <p className="text-slate-800 whitespace-pre-wrap text-sm leading-relaxed font-medium">
+                                {query.answerText}
+                              </p>
+                            </div>
+
+                            {query.answeredAt && (
+                              <div className="flex justify-end mt-3">
+                                <span className="text-xs text-emerald-700 font-semibold flex items-center gap-1.5 bg-emerald-100/50 px-2.5 py-1 rounded-md">
+                                  <IconClock size={14} />
+                                  Resolved on{' '}
+                                  {new Date(query.answeredAt).toLocaleString()}
+                                </span>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
 
-                      {/* Document Changes made DURING resolution */}
-                      {query.documentChanges?.length > 0 && (
-                        <div className="mt-5 border-t border-emerald-200/60 pt-4">
-                          <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-3 flex items-center gap-2">
-                            <IconPaperclip size={14} />
-                            Documents Updated in Resolution
+                          {query.documentChanges?.length > 0 && (
+                            <div className="mt-6 border-t border-emerald-200 pt-5">
+                              <p className="text-xs font-bold text-emerald-800 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                <IconPaperclip size={16} />
+                                Documents Updated in Resolution
+                              </p>
+                              <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {query.documentChanges.map((dc, idx) => {
+                                  const docName = getDocumentName(
+                                    dc.documentId,
+                                    dc.document,
+                                  );
+                                  const replacedDocName = dc.replacedDocument?.name;
+
+                                  return (
+                                    <li
+                                      key={idx}
+                                      className="bg-white border border-emerald-200 p-4 rounded-lg flex items-start gap-4 shadow-sm"
+                                    >
+                                      <div className={`p-2 rounded-lg shrink-0 ${dc.isReplacement ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                          <IconFileText size={20} />
+                                      </div>
+                                      <div className="flex flex-col min-w-0">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                                          {dc.isReplacement
+                                            ? 'Replaced Document'
+                                            : 'New Document'}
+                                        </span>
+                                        <span className="text-slate-800 font-bold break-words text-sm leading-tight">
+                                          {docName}
+                                        </span>
+                                        {dc.isReplacement && replacedDocName && (
+                                          <span className="text-[11px] text-slate-500 mt-1.5 flex flex-col gap-0.5">
+                                            <span className="font-semibold text-amber-600">Replaced:</span> 
+                                            <span className="line-through truncate" title={replacedDocName}>
+                                              {replacedDocName}
+                                            </span>
+                                          </span>
+                                        )}
+                                      </div>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!isResolved && query.documentChanges?.length > 0 && (
+                        <div className="mb-6 bg-blue-50/50 p-5 rounded-xl border border-blue-100">
+                          <p className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-4 flex items-center gap-2">
+                            <IconPaperclip size={16} className="text-blue-500" />
+                            Targeted Documents
                           </p>
-                          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             {query.documentChanges.map((dc, idx) => {
                               const docName = getDocumentName(
                                 dc.documentId,
@@ -1498,27 +1572,24 @@ const ViewProcess = () => {
                               return (
                                 <li
                                   key={idx}
-                                  className="text-sm bg-white border border-emerald-200/80 p-3 rounded-md flex items-start gap-3 shadow-sm"
+                                  className="bg-white border border-slate-200 p-4 rounded-lg flex items-start gap-4 shadow-sm"
                                 >
-                                  <IconFileText
-                                    size={20}
-                                    className={`${dc.isReplacement ? 'text-orange-500' : 'text-emerald-500'} mt-0.5 shrink-0`}
-                                  />
-                                  <div className="flex flex-col">
-                                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+                                  <div className={`p-2 rounded-lg shrink-0 ${dc.isReplacement ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>
+                                    <IconFileText size={20} />
+                                  </div>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${dc.isReplacement ? 'text-amber-600' : 'text-blue-600'}`}>
                                       {dc.isReplacement
-                                        ? 'Replaced Document'
-                                        : 'New Document Uploaded'}
+                                        ? 'Replacement Required'
+                                        : 'Action Required'}
                                     </span>
-                                    <span className="text-slate-800 font-medium break-words">
+                                    <span className="text-slate-800 font-bold break-words text-sm leading-tight">
                                       {docName}
                                     </span>
                                     {dc.isReplacement && replacedDocName && (
-                                      <span className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                                        Replaced:{' '}
-                                        <span className="line-through">
-                                          {replacedDocName}
-                                        </span>
+                                      <span className="text-[11px] text-slate-500 mt-1.5">
+                                        <span className="font-semibold text-amber-600 block">To Replace:</span> 
+                                        <span className="truncate block" title={replacedDocName}>{replacedDocName}</span>
                                       </span>
                                     )}
                                   </div>
@@ -1528,169 +1599,120 @@ const ViewProcess = () => {
                           </ul>
                         </div>
                       )}
-                    </div>
-                  )}
 
-                  {/* --- Targeted Documents (Shown ONLY if pending and attached to the query) --- */}
-                  {!isResolved && query.documentChanges?.length > 0 && (
-                    <div className="mb-5">
-                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                        <IconPaperclip size={14} className="text-blue-500" />
-                        Targeted Documents
-                      </p>
-                      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {query.documentChanges.map((dc, idx) => {
-                          const docName = getDocumentName(
-                            dc.documentId,
-                            dc.document,
-                          );
-                          const replacedDocName = dc.replacedDocument?.name;
-
-                          return (
-                            <li
-                              key={idx}
-                              className="text-sm bg-white border border-slate-200 p-3 rounded-md flex items-start gap-3 shadow-sm"
-                            >
-                              <IconFileText
-                                size={20}
-                                className={`${dc.isReplacement ? 'text-orange-500' : 'text-blue-500'} mt-0.5 shrink-0`}
-                              />
-                              <div className="flex flex-col">
-                                <span className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-0.5">
-                                  {dc.isReplacement
-                                    ? 'Replacement Required'
-                                    : 'Action Required'}
-                                </span>
-                                <span className="text-slate-800 font-medium break-words">
-                                  {docName}
-                                </span>
-                                {dc.isReplacement && replacedDocName && (
-                                  <span className="text-xs text-slate-500 mt-1">
-                                    To Replace: {replacedDocName}
-                                  </span>
-                                )}
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* --- Action Footer --- */}
-                  {!isResolved && (
-                    <div className="mt-4 flex justify-end pt-4 border-t border-slate-100">
-                      <CustomButton
-                        disabled={
-                          actionsLoading || isCompleted || disableActions
-                        }
-                        text="Solve Query"
-                        variant="primary"
-                        click={() => handleSolveQuery(query)}
-                      />
-                    </div>
-                  )}
+                      {!isResolved && (
+                        <div className="mt-8 pt-6 border-t border-amber-200 flex justify-end">
+                          <CustomButton
+                            disabled={
+                              actionsLoading || isCompleted || disableActions
+                            }
+                            text="Solve Query"
+                            variant="primary"
+                            className="shadow-md px-6 py-2.5"
+                            click={() => handleSolveQuery(query)}
+                          />
+                        </div>
+                      )}
+                  </div>
                 </CustomCard>
               );
             })}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Recommendations Section */}
       {process?.recommendationDetails?.length > 0 && (
-        <>
-          <div className="flex items-center mt-12 mb-2">
-            <div className="flex-grow border-t border-slate-400"></div>
-            <span className="mx-4 text-sm text-gray-500 uppercase tracking-wide font-medium">
-              Recommendations ({process.recommendationDetails.length})
-            </span>
-            <div className="flex-grow border-t border-slate-400"></div>
+        <section className="mt-12 space-y-6">
+          <div className="flex items-center">
+            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 px-4 py-1.5 bg-indigo-50 border border-indigo-100 rounded-full text-indigo-800">
+              <IconUsers size={18} /> Recommendations
+              <span className="bg-indigo-600 text-white text-xs px-2 py-0.5 rounded-full ml-1">{process.recommendationDetails.length}</span>
+            </h2>
+            <div className="flex-grow border-t border-slate-200 ml-4"></div>
           </div>
-          <div className="mt-2 space-y-4">
+          
+          <div className="space-y-6">
             {process?.recommendationDetails?.map((rec, index) => (
-              <CustomCard key={rec.recommendationId || index}>
-                <div className="space-y-1 text-sm text-gray-700">
-                  <p>
-                    <span className="font-semibold">Step:</span> {rec.stepName}{' '}
-                    (#{rec.stepNumber})
+              <CustomCard key={rec.recommendationId || index} className="border border-indigo-100 shadow-sm rounded-xl p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 mb-6 text-sm text-slate-700 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                  <p className="flex items-center gap-2">
+                    <span className="font-bold text-slate-500 uppercase text-xs w-24">Step:</span> 
+                    <span className="font-semibold text-slate-800">{rec.stepName} (#{rec.stepNumber})</span>
                   </p>
-                  <p>
-                    <span className="font-semibold">Status:</span> {rec.status}
+                  <p className="flex items-center gap-2">
+                    <span className="font-bold text-slate-500 uppercase text-xs w-24">Status:</span> 
+                    <span className="font-bold px-2.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[10px] uppercase tracking-wider">{rec.status}</span>
                   </p>
-                  <p>
-                    <span className="font-semibold">Initiator:</span>{' '}
-                    {rec.initiatorName}
+                  <p className="flex items-center gap-2">
+                    <span className="font-bold text-slate-500 uppercase text-xs w-24">Initiator:</span> 
+                    <span className="font-medium">{rec.initiatorName}</span>
                   </p>
-                  <p>
-                    <span className="font-semibold">Recommender:</span>{' '}
-                    {rec.recommenderName}
+                  <p className="flex items-center gap-2">
+                    <span className="font-bold text-slate-500 uppercase text-xs w-24">Recommender:</span> 
+                    <span className="font-medium bg-blue-50 text-blue-700 px-2 rounded">{rec.recommenderName}</span>
                   </p>
-                  <p>
-                    <span className="font-semibold">Recommendation:</span>{' '}
-                    {rec.recommendationText}
-                  </p>
-                  {rec.responseText && (
-                    <p>
-                      <span className="font-semibold">Response:</span>{' '}
-                      {rec.responseText}
-                    </p>
-                  )}
-                  <p>
-                    <span className="font-semibold">Created At:</span>{' '}
-                    {new Date(rec.createdAt).toLocaleString()}
+                  <p className="flex items-center gap-2">
+                    <span className="font-bold text-slate-500 uppercase text-xs w-24">Created:</span> 
+                    <span className="text-slate-500">{new Date(rec.createdAt).toLocaleString()}</span>
                   </p>
                   {rec.respondedAt && (
-                    <p>
-                      <span className="font-semibold">Responded At:</span>{' '}
-                      {new Date(rec.respondedAt).toLocaleString()}
+                    <p className="flex items-center gap-2">
+                      <span className="font-bold text-slate-500 uppercase text-xs w-24">Responded:</span> 
+                      <span className="text-emerald-600 font-medium">{new Date(rec.respondedAt).toLocaleString()}</span>
                     </p>
                   )}
-                  {rec.documentDetails?.length > 0 && (
-                    <div className="mt-4">
-                      <p className="font-semibold mb-2">Attached Documents:</p>
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full border text-sm">
-                          <thead className="bg-slate-100">
-                            <tr>
-                              <th className="border px-3 py-2 text-left">
-                                Document Name
-                              </th>
-                              <th className="border px-3 py-2 text-left">
-                                Query Text
-                              </th>
-                              <th className="border px-3 py-2 text-left">
-                                Answer Text
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {rec.documentDetails.map((doc) => (
-                              <tr key={doc.documentId}>
-                                <td className="border px-3 py-2">
-                                  {doc.documentName}
-                                </td>
-                                <td className="border px-3 py-2">
-                                  {doc.queryText || '-'}
-                                </td>
-                                <td className="border px-3 py-2">
-                                  {doc.answerText || '-'}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
                 </div>
+                
+                <div className="space-y-4">
+                    <div className="bg-white border border-slate-200 p-4 rounded-lg shadow-sm">
+                        <span className="font-bold text-slate-800 block mb-2 text-sm flex items-center gap-2"><IconMessageCircle size={16} className="text-indigo-500"/> Recommendation:</span> 
+                        <p className="text-slate-600 font-medium whitespace-pre-wrap text-sm">{rec.recommendationText}</p>
+                    </div>
+                    {rec.responseText && (
+                    <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-lg shadow-sm">
+                        <span className="font-bold text-emerald-800 block mb-2 text-sm flex items-center gap-2"><IconCheck size={16} /> Response:</span> 
+                        <p className="text-emerald-700 font-medium whitespace-pre-wrap text-sm">{rec.responseText}</p>
+                    </div>
+                    )}
+                </div>
+
+                {rec.documentDetails?.length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-slate-100">
+                    <p className="font-bold text-slate-800 mb-3 flex items-center gap-2"><IconPaperclip size={18} className="text-slate-400"/> Attached Documents</p>
+                    <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm">
+                      <table className="min-w-full text-sm text-left">
+                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider text-xs border-b border-slate-200">
+                          <tr>
+                            <th className="px-4 py-3">Document Name</th>
+                            <th className="px-4 py-3 border-l border-slate-200">Query Text</th>
+                            <th className="px-4 py-3 border-l border-slate-200">Answer Text</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-slate-100">
+                          {rec.documentDetails.map((doc) => (
+                            <tr key={doc.documentId} className="hover:bg-slate-50">
+                              <td className="px-4 py-3 font-semibold text-slate-800">
+                                {doc.documentName}
+                              </td>
+                              <td className="px-4 py-3 border-l border-slate-100 text-slate-600 font-medium whitespace-pre-wrap">
+                                {doc.queryText || <span className="text-slate-400 italic">-</span>}
+                              </td>
+                              <td className="px-4 py-3 border-l border-slate-100 text-emerald-700 font-medium whitespace-pre-wrap">
+                                {doc.answerText || <span className="text-slate-400 italic">-</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </CustomCard>
             ))}
           </div>
-        </>
+        </section>
       )}
 
-      {/* All Modals */}
       {fileView && (
         <ViewFile
           docu={fileView}
@@ -1703,13 +1725,13 @@ const ViewProcess = () => {
         <CustomModal
           isOpen={!!documentModalOpen}
           onClose={() => setDocumentModalOpen(false)}
-          className={'max-h-[99vh] overflow-auto'}
+          className={'max-h-[95vh] overflow-auto max-w-2xl w-full rounded-xl'}
         >
-          <div className="space-y-8 text-sm text-gray-800">
-            <h2 className="text-lg font-semibold text-gray-900 border-b pb-2">
-              Document Details
+          <div className="p-2 sm:p-4 space-y-8 text-sm text-slate-800">
+            <h2 className="text-xl font-bold text-slate-900 border-b border-slate-200 pb-3 flex items-center gap-2">
+              <IconAlignBoxCenterMiddle className="text-blue-500"/> Document Details
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-y-6 gap-x-8 bg-slate-50 p-6 rounded-xl border border-slate-100">
               <DetailItem
                 label="Name"
                 value={documentModalOpen?.name || '--'}
@@ -1747,63 +1769,59 @@ const ViewProcess = () => {
                 value={documentModalOpen?.type?.toUpperCase() || '--'}
               />
               <DetailItem
-                label="Tags"
-                value={documentModalOpen?.tags?.flat()?.join(', ') || '--'}
-              />
-              <DetailItem
                 label="Approval Count"
                 value={documentModalOpen?.approvalCount || '--'}
               />
             </div>
-            <div className="space-y-2">
-              <h3 className="text-base font-semibold text-gray-900 border-b pb-1">
-                Signed By
+
+            <div className="space-y-4">
+              <h3 className="text-base font-bold text-slate-800 border-b border-slate-200 pb-2 flex items-center gap-2">
+                <IconPencil size={18} className="text-blue-500"/> Signatures
               </h3>
               {documentModalOpen?.signedBy?.length > 0 ? (
-                <ul className="list-disc list-inside space-y-2 pl-2 text-gray-700">
+                <ul className="space-y-3">
                   {documentModalOpen?.signedBy?.map((entry, idx) => (
-                    <li key={idx}>
-                      <div>
-                        <span className="font-medium">{entry.signedBy}</span>
-                        <span className="text-gray-600">
-                          ({new Date(entry.signedAt).toLocaleString()})
+                    <li key={idx} className="bg-white border border-slate-200 p-3 rounded-lg shadow-sm">
+                      <div className="flex justify-between items-start flex-wrap gap-2">
+                        <span className="font-bold text-slate-800 flex items-center gap-2"><IconUser size={16} className="text-slate-400"/> {entry.signedBy}</span>
+                        <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                          {new Date(entry.signedAt).toLocaleString()}
                         </span>
                       </div>
                       {entry.remarks && (
-                        <div className="ml-4 italic text-gray-600">
-                          Remarks: {entry.remarks}
+                        <div className="mt-2 text-sm text-slate-600 bg-slate-50 p-2 rounded border border-slate-100">
+                          <span className="font-semibold block mb-1">Remarks:</span> {entry.remarks}
                         </div>
                       )}
                     </li>
                   ))}
                 </ul>
               ) : (
-                <span className="text-gray-500">—</span>
+                <span className="text-slate-400 italic block py-2 px-4 bg-slate-50 rounded-lg border border-slate-100">No signatures yet.</span>
               )}
             </div>
-            <div className="space-y-2">
-              <h3 className="text-base font-semibold text-gray-900 border-b pb-1">
-                Rejection Details
+
+            <div className="space-y-4">
+              <h3 className="text-base font-bold text-slate-800 border-b border-slate-200 pb-2 flex items-center gap-2">
+                <IconX size={18} className="text-red-500"/> Rejection Details
               </h3>
               {documentModalOpen?.rejectionDetails ? (
-                <div className="space-y-1 pl-1">
-                  <p>
-                    <span className="font-semibold">Rejected By:</span>{' '}
-                    {documentModalOpen?.rejectionDetails.rejectedBy}
+                <div className="bg-red-50 border border-red-100 p-4 rounded-lg space-y-2 text-sm shadow-sm">
+                  <p className="flex items-center gap-2">
+                    <span className="font-bold text-red-800 w-24">Rejected By:</span>{' '}
+                    <span className="font-semibold text-red-900">{documentModalOpen?.rejectionDetails.rejectedBy}</span>
                   </p>
-                  <p>
-                    <span className="font-semibold">Reason:</span>{' '}
-                    {documentModalOpen?.rejectionDetails.rejectionReason}
+                  <p className="flex items-start gap-2">
+                    <span className="font-bold text-red-800 w-24 shrink-0">Reason:</span>{' '}
+                    <span className="text-red-700 font-medium">{documentModalOpen?.rejectionDetails.rejectionReason}</span>
                   </p>
-                  <p>
-                    <span className="font-semibold">Rejected At:</span>{' '}
-                    {new Date(
-                      documentModalOpen?.rejectionDetails.rejectedAt,
-                    ).toLocaleString()}
+                  <p className="flex items-center gap-2">
+                    <span className="font-bold text-red-800 w-24">Date:</span>{' '}
+                    <span className="text-red-700 font-medium">{new Date(documentModalOpen?.rejectionDetails.rejectedAt).toLocaleString()}</span>
                   </p>
                 </div>
               ) : (
-                <span className="text-gray-500">—</span>
+                <span className="text-slate-400 italic block py-2 px-4 bg-slate-50 rounded-lg border border-slate-100">No rejection records.</span>
               )}
             </div>
           </div>
@@ -1815,16 +1833,15 @@ const ViewProcess = () => {
         onClose={() =>
           setCustomSignModal({ open: false, id: null, remarks: '' })
         }
-        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full rounded-xl'}
       >
-        <div className="p-4">
-          <h2 className="text-lg font-semibold mb-4">Sign Document</h2>
-          <p className="mb-4 text-gray-600">
-            Remarks are optional. You can leave it blank if you don't have any
-            remarks.
+        <div className="p-6">
+          <h2 className="text-xl font-bold mb-2 text-slate-800 flex items-center gap-2"><IconPencil className="text-blue-500"/> Sign Document</h2>
+          <p className="mb-6 text-slate-500 text-sm">
+            Provide optional remarks before signing. Leave blank if not required.
           </p>
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+          <div className="mb-6">
+            <label className="block text-sm font-bold text-slate-700 mb-2">
               Remarks (optional)
             </label>
             <textarea
@@ -1835,15 +1852,16 @@ const ViewProcess = () => {
                   remarks: e.target.value,
                 })
               }
-              className="w-full p-2 border border-gray-300 rounded-md"
-              rows={3}
-              placeholder="Enter optional remarks..."
+              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all resize-y shadow-sm"
+              rows={4}
+              placeholder="Enter your remarks here..."
             />
           </div>
-          <div className="flex justify-end space-x-2">
+          <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
             <CustomButton
               variant="secondary"
               text="Cancel"
+              className="bg-white"
               click={() =>
                 setCustomSignModal({ open: false, id: null, remarks: '' })
               }
@@ -1870,14 +1888,13 @@ const ViewProcess = () => {
         />
       )}
 
-      {/* Query Modal */}
       <CustomModal
         isOpen={openModal == 'query'}
         onClose={() => {
           setOpenModal('');
           setExistingQuery(null);
         }}
-        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full rounded-xl'}
       >
         <Query
           workflowId={process?.workflow?.id}
@@ -1893,13 +1910,12 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
-      {/* Documents Version Wise Modal */}
       <CustomModal
         isOpen={openModal == 'version-wise'}
         onClose={() => {
           setOpenModal('');
         }}
-        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full rounded-xl'}
       >
         <DocumentsVersionWise
           processId={process.processId}
@@ -1907,13 +1923,12 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
-      {/* Document Upload Modal */}
       <CustomModal
         isOpen={openModal == 'document-upload'}
         onClose={() => {
           setOpenModal('');
         }}
-        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full rounded-xl'}
       >
         <ProcessDocumentUpload
           processId={process.processId}
@@ -1931,13 +1946,12 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
-      {/* Query Solve Modal */}
       <CustomModal
         isOpen={existingQuery}
         onClose={() => {
           setExistingQuery(null);
         }}
-        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full rounded-xl'}
       >
         <QuerySolve
           workflowId={process?.workflow?.id}
@@ -1949,17 +1963,16 @@ const ViewProcess = () => {
           stepInstanceId={process.processStepInstanceId}
           queryRaiserStepInstanceId={process?.queryDetails[0]?.stepInstanceId}
           existingQuery={existingQuery}
-          documents={process.documents} // <-- UPDATED LINE
+          documents={process.documents} 
         />
       </CustomModal>
 
-      {/* Ask Recommendation Modal */}
       <CustomModal
         isOpen={openModal == 'recommend'}
         onClose={() => {
           setOpenModal('');
         }}
-        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full rounded-xl'}
       >
         <AskRecommend
           processId={process.processId}
@@ -1972,13 +1985,12 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
-      {/* Re-Open Process Modal */}
       <CustomModal
         isOpen={openModal == 're-open'}
         onClose={() => {
           setOpenModal('');
         }}
-        className={'max-h-[95vh] overflow-auto max-w-lg w-full'}
+        className={'max-h-[95vh] overflow-auto max-w-lg w-full rounded-xl'}
       >
         <ReOpenProcessModal
           workflowId={process?.workflow?.id}
@@ -1991,7 +2003,6 @@ const ViewProcess = () => {
         />
       </CustomModal>
 
-      {/* Sign All Documents Modal */}
       <CustomModal
         isOpen={signAllModalOpen.open}
         onClose={() => {
@@ -2001,20 +2012,21 @@ const ViewProcess = () => {
             listOfDocuments: [],
           });
         }}
-        className={'max-h-[95vh] overflow-auto max-w-xl w-full'}
+        className={'max-h-[95vh] overflow-auto max-w-xl w-full rounded-xl'}
       >
-        <div>
-          <h2 className="text-lg font-semibold mb-4">Approve All Documents</h2>
-          <p className="mb-4">
-            Are you sure you want to approve all documents?
+        <div className="p-4 sm:p-6">
+          <h2 className="text-xl font-bold mb-2 text-slate-800 flex items-center gap-2"><IconCheck className="text-emerald-500" size={24}/> Approve All Documents</h2>
+          <p className="mb-6 text-slate-500 text-sm">
+            Are you sure you want to approve all valid PDF documents in this process?
           </p>
           {signAllModalOpen.listOfDocuments.length > 0 && (
             <>
-              <div className="mb-4">
-                <label className="inline-flex items-center">
+              <div className="mb-6 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <label className="flex items-center cursor-pointer">
                   <input
                     type="checkbox"
                     name="signWithRemarks"
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
                     checked={signAllModalOpen.withRemarks}
                     onChange={() => {
                       setSignAllModalOpen({
@@ -2023,33 +2035,33 @@ const ViewProcess = () => {
                       });
                     }}
                   />
-                  <span className="ml-2">With Remarks</span>
+                  <span className="ml-3 font-semibold text-slate-700">Add remarks to documents</span>
                 </label>
               </div>
               {signAllModalOpen.withRemarks && (
-                <div className="mb-4">
-                  <table className="w-full border table-fixed">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th className="border px-3 py-2 text-left w-1/2">
+                <div className="mb-6 rounded-lg overflow-hidden border border-slate-200">
+                  <table className="w-full text-sm text-left bg-white">
+                    <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-3 w-2/5">
                           Document Name
                         </th>
-                        <th className="border px-3 py-2 text-left w-1/2">
+                        <th className="px-4 py-3 w-3/5 border-l border-slate-200">
                           Remarks
                         </th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-slate-100">
                       {signAllModalOpen.listOfDocuments.map((doc, index) => (
                         <tr key={index}>
-                          <td className="border px-3 py-2 w-1/2 overflow-x-auto">
-                            <div className="truncate" title={doc.name}>
+                          <td className="px-4 py-3 align-top">
+                            <div className="font-semibold text-slate-800 break-words line-clamp-2" title={doc.name}>
                               {doc.name}
                             </div>
                           </td>
-                          <td className="border px-3 py-2 w-1/2">
+                          <td className="px-4 py-3 border-l border-slate-100">
                             <textarea
-                              placeholder="Remarks...."
+                              placeholder="Type remarks here..."
                               value={doc.remarks || ''}
                               onChange={(e) => {
                                 const updatedDocuments = [
@@ -2062,7 +2074,7 @@ const ViewProcess = () => {
                                   listOfDocuments: updatedDocuments,
                                 });
                               }}
-                              className="w-full p-1 border rounded resize-y min-h-[60px]"
+                              className="w-full p-2 text-sm border border-slate-300 rounded outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-y min-h-[60px] shadow-sm"
                             />
                           </td>
                         </tr>
@@ -2073,10 +2085,11 @@ const ViewProcess = () => {
               )}
             </>
           )}
-          <div className="flex justify-end space-x-2">
+          <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
             <CustomButton
               variant="secondary"
               text={'Cancel'}
+              className="bg-white"
               click={() => {
                 setSignAllModalOpen({
                   open: false,
@@ -2101,17 +2114,15 @@ const ViewProcess = () => {
         </div>
       </CustomModal>
 
-      {/* Reject Modal (Remarks Required) */}
       <RemarksModal
         open={remarksModalOpen.open === 'reject'}
-        title="Reject Remarks"
+        title="Reject Process"
         onClose={() => setRemarksModalOpen({ id: null, open: false })}
         loading={actionsLoading}
         onSubmit={(remarks) => handleRejectDocument(remarks)}
         remarksOptional={false}
       />
 
-      {/* Delete Confirmation Modal */}
       <DeleteConfirmationModal
         isOpen={openModal.modal == 'delete-confirmation'}
         onClose={() => setOpenModal('')}
@@ -2130,3 +2141,4 @@ const ViewProcess = () => {
 };
 
 export default ViewProcess;
+

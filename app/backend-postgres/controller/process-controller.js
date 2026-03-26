@@ -322,13 +322,14 @@ const generate_unique_process_name = async (workflowId) => {
 };
 
 // Helper to get process tags (unique tags from all processDocuments)
+// Helper to get process tag directly from ProcessInstance
 const getProcessTags = async (processId) => {
-  const processDocs = await prisma.processDocument.findMany({
-    where: { processId },
+  const processInstance = await prisma.processInstance.findUnique({
+    where: { id: processId },
     select: { tags: true },
   });
-  const allTags = processDocs.flatMap((pd) => pd.tags || []);
-  return [...new Set(allTags)]; // unique tags
+  console.log("process instance", processInstance);
+  return processInstance?.tags || [];
 };
 
 export const initiate_process = async (req, res, next) => {
@@ -340,7 +341,14 @@ export const initiate_process = async (req, res, next) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
-    const { description, workflowId, issueNo, emailThreads = [] } = req.body;
+    // Capture the single 'tag' sent from the frontend
+    const {
+      description,
+      workflowId,
+      issueNo,
+      emailThreads = [],
+      tag,
+    } = req.body;
 
     const processName = await generate_unique_process_name(workflowId);
 
@@ -414,7 +422,6 @@ export const initiate_process = async (req, res, next) => {
 
     documentIds = copiedDocumentIds;
 
-    // FIX: Ensure all documents copied successfully before proceeding
     const requestedDocCount = req.body.documents?.length || 0;
     if (documentIds.length === 0 || documentIds.length !== requestedDocCount) {
       return res.status(500).json({
@@ -434,6 +441,7 @@ export const initiate_process = async (req, res, next) => {
           status: "IN_PROGRESS",
           description: description,
           issueNo: issueNo,
+          tags: tag ? [tag] : [], // <-- Save the single tag into the array structure
           currentStepId: null,
           reopenCycle: 0,
           storagePath: `../${workflowName}/${processName}`,
@@ -503,7 +511,7 @@ export const initiate_process = async (req, res, next) => {
         reopenCycle: 0,
         SOPIssueNo: issueNo || null,
         preApproved: item.preApproved || false,
-        tags: item.tags || [],
+        tags: item.tags || [], // <-- Maintained scope for document tags
         partNumber: item.partNumber || null,
         description: item.description || null,
         issueNo: item.issueNo || null,
@@ -1302,19 +1310,6 @@ export const view_process = async (req, res) => {
       }),
     );
 
-    emailThreads.forEach((thread, index) => {
-      console.log(
-        `Thread ${index + 1}: ${thread.originalEmails.length} emails`,
-      );
-      thread.originalEmails.forEach((email, emailIndex) => {
-        console.log(`  Email ${emailIndex + 1}:`);
-        console.log(`    bodyText length: ${email.bodyText?.length || 0}`);
-        console.log(`    bodyHtml length: ${email.bodyHtml?.length || 0}`);
-      });
-    });
-
-    console.log("email threads", emailThreads);
-
     // Format email threads for response
     const formattedEmailThreads = emailThreads.map((thread) => {
       const metadata = thread.metadata || {};
@@ -2080,7 +2075,6 @@ export const view_process = async (req, res) => {
     const queryDetails = await Promise.all(
       queryStepInstances.flatMap((step) =>
         step.processQA.map(async (qa) => {
-          // ADDED FILTER HERE to remove undefined/null document history IDs
           const rawHistoryIds = [
             ...(qa.details?.documentChanges?.map(
               (dc) => dc.documentHistoryId,
@@ -2219,7 +2213,6 @@ export const view_process = async (req, res) => {
           const documentSummaries = rec.documentSummaries || [];
           const documentResponses = rec.details?.documentResponses || [];
 
-          // ADDED FILTER HERE for safety
           const documentIds = documentSummaries
             .map((ds) => parseInt(ds.documentId))
             .filter((id) => !isNaN(id));
@@ -2290,13 +2283,6 @@ export const view_process = async (req, res) => {
       ...new Set(processDocs.map((doc) => doc.reopenCycle + 1)),
     ].sort((a, b) => a - b);
 
-    const currentStepInstance = process.stepInstances.find(
-      (item) =>
-        item.id ===
-        process.stepInstances.filter((item) => item.status === "IN_PROGRESS")[0]
-          ?.id,
-    );
-
     const normalizedEmailThreads = formattedEmailThreads.map((thread) => {
       const attachmentsMapping = [];
       const extractedDocumentIds = new Set();
@@ -2345,6 +2331,7 @@ export const view_process = async (req, res) => {
         status: process.status,
         createdAt: process.createdAt,
         issueNo: process.issueNo,
+        tags: process.tags || [], // Mapping tags array
         processId: process.id,
         reopenCycle: process.reopenCycle,
         versions: versions,
@@ -2388,12 +2375,10 @@ export const view_process = async (req, res) => {
       success: false,
       error: {
         message: "Failed to view process",
-        details: "Error viewing the process",
+        details: "Failed to retrieve process details. Please try again later.",
         code: "PROCESS_VIEW_ERROR",
       },
     });
-  } finally {
-    // await prisma.$disconnect();
   }
 };
 
@@ -3370,7 +3355,7 @@ export const complete_process_step = async (req, res) => {
     console.error("Error completing step:", error);
     return res.status(500).json({
       message: "Error completing step",
-      error: "Error completing step",
+      error: "Failed to complete the step. Please try again later.",
     });
   }
 };
@@ -4134,7 +4119,7 @@ export const createRecommendation = async (req, res) => {
     console.error("Error creating recommendation:", error);
     return res.status(500).json({
       message: "Error creating recommendation",
-      error: "Error creating recommendation",
+      error: "Failed to create recommendation. Please try again later.",
     });
   }
 };
@@ -4244,7 +4229,7 @@ export const signAsRecommender = async (req, res) => {
     console.error("Error signing as recommender:", error);
     return res.status(500).json({
       message: "Error signing document",
-      error: "Error signing document",
+      error: "Failed to sign document. Please try again later.",
     });
   }
 };
@@ -4421,7 +4406,8 @@ export const submitRecommendationResponse = async (req, res) => {
     console.error("Error submitting recommendation response:", error);
     return res.status(500).json({
       message: "Error submitting recommendation response",
-      error: "Error submitting recommendation response",
+      error:
+        "Failed to submit recommendation response. Please try again later.",
     });
   }
 };
@@ -4476,7 +4462,7 @@ export const get_recommendations = async (req, res) => {
       success: false,
       error: {
         message: "Failed to fetch recommendations",
-        details: "Error fetching recommendations",
+        details: "Failed to fetch recommendations. Please try again later.",
         code: "RECOMMENDATIONS_FETCH_ERROR",
       },
     });
@@ -4585,7 +4571,8 @@ export const get_recommendation = async (req, res) => {
       success: false,
       error: {
         message: "Failed to fetch recommendation",
-        details: "Error fetching recommendations",
+        details:
+          "Failed to retrieve recommendation details. Please try again later.",
         code: "RECOMMENDATION_FETCH_ERROR",
       },
     });
@@ -4883,7 +4870,7 @@ export const reopen_process = async (req, res) => {
     console.error("Error reopening process:", error);
     return res.status(500).json({
       message: "Error reopening process",
-      error: "Error reopening process",
+      error: "Failed to reopen process. Please try again later.",
     });
   }
 };
@@ -5444,7 +5431,8 @@ export const get_completed_initiator_processes = async (req, res) => {
       success: false,
       error: {
         message: "Failed to retrieve completed initiator processes",
-        details: "Error getting completed processes for initiator",
+        details:
+          "Failed to retrieve completed initiator processes. Please try again later.",
         code: "PROCESS_RETRIEVAL_ERROR",
       },
     });
@@ -5747,7 +5735,7 @@ export const upload_documents_in_process = async (req, res) => {
     console.error("Error uploading documents to process:", error);
     return res.status(500).json({
       message: "Error uploading documents to process",
-      error: "Error uploading documents to process",
+      error: "Failed to upload documents. Please try again later.",
     });
   }
 };
@@ -5914,7 +5902,7 @@ export const delete_document_in_process = async (req, res) => {
     console.error("Error deleting document from process:", error);
     return res.status(500).json({
       message: "Error deleting document from process",
-      error: "Error deleting document from process",
+      error: "Failed to delete document from process. Please try again later.",
     });
   }
 };
