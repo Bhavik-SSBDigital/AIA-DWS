@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import fs from "fs/promises";
+import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
 import path from "path";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
@@ -955,11 +955,7 @@ async function print_signature_after_content_on_the_last_page(
   p12Path,
   p12password,
 ) {
-  const user = await prisma.user.findUnique({
-    where: { username: username },
-    select: { dscFileName: true },
-  });
-
+  // 1. Get exact visual coordinates from Python
   const absDocumentPath = path.join(
     __dirname,
     "../../../../",
@@ -972,138 +968,174 @@ async function print_signature_after_content_on_the_last_page(
     absDocumentPath,
   );
 
-  const startingY = lastContentCoordinates.last_y;
-  const pageHeight = lastContentCoordinates.height;
-  const availableSpace = pageHeight - startingY;
+  const pageHeight = lastContentCoordinates.height || lastPage.getHeight();
+  const startingYFromTop = lastContentCoordinates.last_y || pageHeight;
+  const availableSpaceAtBottom = Math.max(0, pageHeight - startingYFromTop);
 
+  // 2. Prepare Signature Image Dimensions
   const signatureImageBytes = await fs.readFile(jpegImagePath);
   const signatureImage = await pdfDoc.embedJpg(signatureImageBytes);
   const signatureImageWidth = 200;
   const signatureImageHeight = 75;
-
   const fontSize = 12;
   const textPadding = 15;
+
+  // Total height of the signature block
   const requiredHeight = signatureImageHeight + fontSize * 3 + textPadding * 3;
 
-  let currentY = availableSpace - 20;
-  let signatureCoordinates = {};
-  let maxWidth = signatureImageWidth;
+  // THE FIX: Add a 40-point buffer so the signature doesn't touch the document text
+  const SAFETY_MARGIN = 40;
 
+  // 3. Page Setup & Rotation Detection
+  const pageRotation = lastPage.getRotation().angle;
+  let targetPage = lastPage;
+  let currentRotation = pageRotation;
+  let isNewPage = false;
+
+  // If there isn't enough space for the signature PLUS the safety margin, add a new page
+  if (availableSpaceAtBottom < requiredHeight + SAFETY_MARGIN) {
+    targetPage = pdfDoc.addPage();
+    currentRotation = 0; // New pages are never rotated
+    isNewPage = true;
+  }
+
+  // 4. Mathematical Translation Helpers for pdf-lib Quadrants
+  const drawRotatedText = (page, text, vx, vy, rotationAngle, font, size) => {
+    const W = page.getWidth();
+    const H = page.getHeight();
+    let rawX, rawY, drawRot;
+
+    if (rotationAngle === 0) {
+      rawX = vx;
+      rawY = vy;
+      drawRot = 0;
+    } else if (rotationAngle === 90) {
+      rawX = W - vy;
+      rawY = vx;
+      drawRot = 90;
+    } else if (rotationAngle === 270 || rotationAngle === -90) {
+      rawX = vy;
+      rawY = H - vx;
+      drawRot = -90;
+    } else if (rotationAngle === 180 || rotationAngle === -180) {
+      rawX = W - vx;
+      rawY = H - vy;
+      drawRot = 180;
+    }
+
+    page.drawText(text, {
+      x: rawX,
+      y: rawY,
+      size: size,
+      font: font,
+      color: rgb(0, 0, 0),
+      rotate: degrees(drawRot),
+    });
+  };
+
+  const drawRotatedImage = (page, img, vx, vy, imgW, imgH, rotationAngle) => {
+    const W = page.getWidth();
+    const H = page.getHeight();
+    let rawX, rawY, drawRot;
+
+    if (rotationAngle === 0) {
+      rawX = vx;
+      rawY = vy;
+      drawRot = 0;
+    } else if (rotationAngle === 90) {
+      rawX = W - vy;
+      rawY = vx;
+      drawRot = 90;
+    } else if (rotationAngle === 270 || rotationAngle === -90) {
+      rawX = vy;
+      rawY = H - vx;
+      drawRot = -90;
+    } else if (rotationAngle === 180 || rotationAngle === -180) {
+      rawX = W - vx;
+      rawY = H - vy;
+      drawRot = 180;
+    }
+
+    page.drawImage(img, {
+      x: rawX,
+      y: rawY,
+      width: imgW,
+      height: imgH,
+      rotate: degrees(drawRot),
+    });
+  };
+
+  let maxWidth = signatureImageWidth;
   const calculateMaxWidth = (text) => {
     const textWidth = helveticaFont.widthOfTextAtSize(text, fontSize);
     maxWidth = Math.max(maxWidth, textWidth);
   };
 
-  if (currentY < requiredHeight) {
-    const newPage = pdfDoc.addPage();
-    currentY = pageHeight - signatureImageHeight;
+  // 5. Calculate Starting Visual Y (Applying the Safety Margin)
+  let visualY = isNewPage
+    ? targetPage.getHeight() - requiredHeight - 50
+    : availableSpaceAtBottom - requiredHeight - SAFETY_MARGIN; // Pushes the block down
 
-    newPage.drawImage(signatureImage, {
-      x: 50,
-      y: currentY,
-      width: signatureImageWidth,
-      height: signatureImageHeight,
-    });
-    currentY -= textPadding;
-    newPage.drawText(`Signed By: ${username}`, {
-      x: 50,
-      y: currentY,
-      size: fontSize,
-      font: helveticaFont,
-      color: rgb(0, 0, 0),
-    });
-    calculateMaxWidth(`Signed By: ${username}`);
-    currentY -= fontSize + textPadding;
-    newPage.drawText(`Timestamp: ${timestamp}`, {
-      x: 50,
-      y: currentY,
-      size: fontSize,
-      font: helveticaFont,
-      color: rgb(0, 0, 0),
-    });
-    calculateMaxWidth(`Timestamp: ${timestamp}`);
-    currentY -= fontSize + textPadding;
-    newPage.drawText(`Remarks: ${remarks}`, {
-      x: 50,
-      y: currentY,
-      size: fontSize,
-      font: helveticaFont,
-      color: rgb(0, 0, 0),
-    });
-    calculateMaxWidth(`Remarks: ${remarks}`);
+  // 6. Draw Elements (Stacking visually from bottom to top)
+  let currentVisualY = visualY;
 
-    signatureCoordinates = {
-      x: 50,
-      y: signatureImageHeight - 20 - textPadding,
-      width: maxWidth,
-      height: requiredHeight,
-      newlyAdded: true,
-    };
-  } else {
-    currentY -= signatureImageHeight;
-    lastPage.drawImage(signatureImage, {
-      x: 50,
-      y: currentY,
-      width: signatureImageWidth,
-      height: signatureImageHeight,
-    });
-    currentY -= textPadding;
-    lastPage.drawText(`Signed By: ${username}`, {
-      x: 50,
-      y: currentY,
-      size: fontSize,
-      font: helveticaFont,
-      color: rgb(0, 0, 0),
-    });
-    calculateMaxWidth(`Signed By: ${username}`);
-    currentY -= fontSize + textPadding;
-    lastPage.drawText(`Timestamp: ${timestamp}`, {
-      x: 50,
-      y: currentY,
-      size: fontSize,
-      font: helveticaFont,
-      color: rgb(0, 0, 0),
-    });
-    calculateMaxWidth(`Timestamp: ${timestamp}`);
-    currentY -= fontSize + textPadding;
-    lastPage.drawText(`Remarks: ${remarks}`, {
-      x: 50,
-      y: currentY,
-      size: fontSize,
-      font: helveticaFont,
-      color: rgb(0, 0, 0),
-    });
-    calculateMaxWidth(`Remarks: ${remarks}`);
+  drawRotatedText(
+    targetPage,
+    `Remarks: ${remarks}`,
+    50,
+    currentVisualY,
+    currentRotation,
+    helveticaFont,
+    fontSize,
+  );
+  calculateMaxWidth(`Remarks: ${remarks}`);
 
-    signatureCoordinates = {
-      x: 50,
-      y: startingY + textPadding,
-      width: maxWidth,
-      height: requiredHeight,
-    };
-  }
+  currentVisualY += fontSize + textPadding;
+  drawRotatedText(
+    targetPage,
+    `Timestamp: ${timestamp}`,
+    50,
+    currentVisualY,
+    currentRotation,
+    helveticaFont,
+    fontSize,
+  );
+  calculateMaxWidth(`Timestamp: ${timestamp}`);
 
-  let pdfBytes;
+  currentVisualY += fontSize + textPadding;
+  drawRotatedText(
+    targetPage,
+    `Signed By: ${username}`,
+    50,
+    currentVisualY,
+    currentRotation,
+    helveticaFont,
+    fontSize,
+  );
+  calculateMaxWidth(`Signed By: ${username}`);
 
-  // if (!user.dscFileName) {
-  pdfBytes = await pdfDoc.save();
+  currentVisualY += fontSize + textPadding;
+  drawRotatedImage(
+    targetPage,
+    signatureImage,
+    50,
+    currentVisualY,
+    signatureImageWidth,
+    signatureImageHeight,
+    currentRotation,
+  );
+
+  // 7. Save and Return
+  const pdfBytes = await pdfDoc.save();
   await fs.writeFile(absDocumentPath, pdfBytes);
-  // } else {
-  //   pdfBytes = await pdfDoc.save({ useObjectStreams: false });
-  //   const pdfWithPlaceholder = await plainAddPlaceholder({
-  //     pdfBuffer: Buffer.from(pdfBytes),
-  //     reason: "Digital Signature",
-  //     signatureLength: 8192,
-  //   });
 
-  //   const p12Buffer = readFileSync(p12Path);
-  //   const signer = new P12Signer(p12Buffer, { passphrase: p12password });
-  //   const signPdf = new SignPdf();
-  //   const signedPdf = await signPdf.sign(pdfWithPlaceholder, signer);
-  //   await fs.writeFile(absDocumentPath, signedPdf);
-  // }
-
-  return signatureCoordinates;
+  return {
+    x: 50,
+    y: visualY,
+    width: maxWidth,
+    height: requiredHeight,
+    newlyAdded: isNewPage,
+  };
 }
 
 async function print_signature_at_coordinates(
