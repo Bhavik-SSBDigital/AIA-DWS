@@ -86,6 +86,7 @@ const ViewProcess = () => {
   const [fileView, setFileView] = useState(null);
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
   const [existingQuery, setExistingQuery] = useState(null);
+
   const formatDate = (date) => {
     const now = new Date();
     const emailDate = new Date(date);
@@ -107,13 +108,12 @@ const ViewProcess = () => {
       minute: '2-digit',
     });
   };
+
   const [openModal, setOpenModal] = useState('');
   const [recommendations, setRecommendations] = useState([]);
   const [canEdit, setCanEdit] = useState({});
-
   const [showEmailThreadModal, setShowEmailThreadModal] = useState(false);
   const [autoOpenProcessed, setAutoOpenProcessed] = useState(false);
-
   const [selectedEmailThread, setSelectedEmailThread] = useState(null);
   const [expandedEmailThreads, setExpandedEmailThreads] = useState({});
 
@@ -123,7 +123,7 @@ const ViewProcess = () => {
     remarks: '',
   });
 
-  const disableActions = process?.currentStepType != 'APPROVAL';
+  const disableActions = process?.currentStepType !== 'APPROVAL';
 
   const processDetails = [
     { label: 'Process ID', value: process?.processId },
@@ -138,17 +138,29 @@ const ViewProcess = () => {
         </span>
       ) : 'N/A'
     },
+    {
+      label: 'PO Numbers',
+      value: process?.poNumbers?.length > 0 ? (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {process.poNumbers.map((po, i) => (
+             <span key={i} className="bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded-full font-bold">{po}</span>
+          ))}
+        </div>
+      ) : 'None'
+    },
     { label: 'Description', value: process?.description || 'N/A' },
     { label: 'Initiator Name', value: process?.initiatorName || 'Unknown' },
     {
       label: 'Status',
       value: (
         <span
-          className={`px-3 py-1 rounded-full text-white text-xs font-bold uppercase tracking-wider inline-block mt-1 ${
-            process?.status === 'PENDING' ? 'bg-amber-500' : 'bg-emerald-500'
+          className={`px-3 py-1 rounded-full text-white text-[10px] font-bold uppercase tracking-wider inline-block mt-1 ${
+            process?.status === 'PENDING' ? 'bg-amber-500' : 
+            process?.status === 'PO_NO_ATTACHED' ? 'bg-blue-500' :
+            'bg-emerald-500'
           }`}
         >
-          {process?.status}
+          {process?.status?.replace(/_/g, ' ')}
         </span>
       ),
     },
@@ -160,12 +172,6 @@ const ViewProcess = () => {
       label: 'Updated At',
       value: process?.updatedAt
         ? new Date(process?.updatedAt).toLocaleString()
-        : 'N/A',
-    },
-    {
-      label: 'Completed At',
-      value: process?.completedAt
-        ? new Date(process?.completedAt).toLocaleString()
         : 'N/A',
     },
   ];
@@ -210,16 +216,16 @@ const ViewProcess = () => {
   );
 
   const handleDownloadConverted = async (docId, processId, fileName) => {
-  setActionsLoading(true);
-  try {
-    await DownloadConvertedSignedPdf(docId, processId, fileName);
-    toast.success("File converted and downloaded successfully");
-  } catch (error) {
-    toast.error("Failed to download converted file");
-  } finally {
-    setActionsLoading(false);
-  }
-};
+    setActionsLoading(true);
+    try {
+      await DownloadConvertedSignedPdf(docId, processId, fileName);
+      toast.success("File converted and downloaded successfully");
+    } catch (error) {
+      toast.error("Failed to download converted file");
+    } finally {
+      setActionsLoading(false);
+    }
+  };
 
   const handleCompleteProcess = async (stepId) => {
     setActionsLoading(true);
@@ -276,14 +282,13 @@ const ViewProcess = () => {
     listOfDocuments: [],
   });
 
-const openModelSignAllDoec = async (stepId) => {
+  const openModelSignAllDoec = async (stepId) => {
     setSignAllModalOpen({
       open: true,
       withRemarks: false,
       stepId,
       processStepInstanceId: process?.processStepInstanceId,
       processId: process?.processId,
-      // REMOVED the doc.type === 'pdf' filter below
       listOfDocuments: process.documents
         .filter((doc) => !doc.rejectionDetails) 
         .map((doc) => ({
@@ -775,9 +780,6 @@ const openModelSignAllDoec = async (stepId) => {
             <IconActivity size={32} />
           </div>
           <div>
-            {/* <h1 className="text-2xl font-bold text-slate-800 mb-1">
-              Process <span className="text-blue-600">#{process?.processId}</span>
-            </h1> */}
             <p className="text-l text-slate-500 font-medium">
               {process?.processName || 'Unnamed Process'}
             </p>
@@ -1140,23 +1142,6 @@ const openModelSignAllDoec = async (stepId) => {
                       title="Download Original Document"
                       text={<IconDownload size={18} className="text-white" />}
                     />
-                    
-                    {/* NEW BUTTON: Only shows for non-PDFs to download them as signed PDFs
-                    {extension !== 'pdf' && (
-                      <CustomButton
-                        variant="secondary"
-                        className="px-2 shadow-sm border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
-                        click={() => handleDownloadConverted(doc.id, process.processId, doc.name)}
-                        disabled={actionsLoading}
-                        title="Download as Signed PDF"
-                        text={
-                          <div className="flex items-center gap-1">
-                            <IconDownload size={18} />
-                            <span className="text-xs font-bold">PDF</span>
-                          </div>
-                        }
-                      />
-                    )} */}
                   </div>
                 </CustomCard>
               );
@@ -2141,4 +2126,3 @@ const openModelSignAllDoec = async (stepId) => {
 };
 
 export default ViewProcess;
-

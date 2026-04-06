@@ -88,7 +88,7 @@ const RecycleBin = () => {
           : await GetBinFolderData(updatedPath);
       setDeletedFiles(response?.data?.children || []);
     } catch (error) {
-      console.log(error?.response?.data?.message || error?.message);
+      // console.log(error?.response?.data?.message || error?.message);
     } finally {
       setLoading(false);
     }

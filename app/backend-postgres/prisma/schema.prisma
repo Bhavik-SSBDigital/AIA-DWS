@@ -61,7 +61,7 @@ model Document {
   documentHistory       DocumentHistory[]        @relation("DocumentHistory")
   replacedByProcessDocuments ProcessDocument[]   @relation("ReplacedDocument")
   replacedByDocumentHistory DocumentHistory[]    @relation("ReplacedDocumentHistory")
-  workflows             Workflow[]               @relation("WorkflowTemplates", name: "WorkflowTemplates")
+  templateTags          Tag[]                    @relation("TagTemplates")
   physicalDocumentRequests PhysicalDocumentRequest[] @relation() // Added relation
 }
 
@@ -179,7 +179,6 @@ model Workflow {
   steps            WorkflowStep[]
   processes        ProcessInstance[]
   nextVersions     Workflow[] @relation("WorkflowVersion")
-  templateDocuments Document[] @relation("WorkflowTemplates", name: "WorkflowTemplates") 
 }
 
 model WorkflowStep {
@@ -302,10 +301,13 @@ model ProcessInstance {
   workflowId       String
   description      String?
   tags             String[]  @default([])
+  poNumbers        String[]          @default([])
   issueNo          String?
   initiatorId      Int
   emailThreads  EmailThread[] 
   currentStepId    String?
+  emailRecipients String[] @default([])  // manually added email addresses list
+  sentEmails      ProcessEmail[] 
   status           ProcessStatus @default(PENDING)
   customizations   Json?
   createdAt        DateTime  @default(now())
@@ -580,6 +582,23 @@ model Tag {
   id        Int      @id @default(autoincrement())
   name      String   @unique
   createdAt DateTime @default(now())
+  templates Document[] @relation("TagTemplates")
+}
+
+model ProcessEmail {
+  id              String   @id @default(uuid())
+  processId       String
+  recipientEmail  String
+  subject         String
+  body            String?
+  attachments     Json     // stores array of { documentId, fileName }
+  sentAt          DateTime @default(now())
+  status          String   @default("SENT") // SENT, FAILED
+
+  process         ProcessInstance @relation(fields: [processId], references: [id], onDelete: Cascade)
+
+  @@index([processId])
+  @@index([sentAt])
 }
 
 
@@ -659,6 +678,7 @@ enum ProcessStatus {
   IN_PROGRESS
   COMPLETED
   REJECTED
+  PO_NO_ATTACHED
 }
 
 enum StepStatus {

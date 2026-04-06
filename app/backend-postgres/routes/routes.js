@@ -22,6 +22,14 @@ import {
   forget_password,
 } from "../controller/auth-controller.js";
 import {
+  getEmailRecipients,
+  getSentEmails,
+  addEmailRecipients,
+  removeEmailRecipient,
+  sendManualEmail,
+  getAllUniqueEmails,
+} from "../controller/email-controller.js";
+import {
   add_department,
   deactivate_department,
   get_department,
@@ -35,10 +43,7 @@ import {
   view_workflow,
   delete_workflow,
   get_workflows,
-  create_template_document,
   get_workflow_templates,
-  upload_template_document,
-  use_template_document,
   get_workflow_steps_with_assignments,
   get_all_workflows_with_basics,
 } from "../controller/workflow-controller.js";
@@ -132,6 +137,7 @@ import {
   get_process_documents,
   upload_documents_in_process,
   delete_document_in_process,
+  attach_po_numbers,
 } from "../controller/process-controller.js";
 import { pick_process_step } from "../controller/process-step-claim.js";
 import { upload_signature } from "../controller/image-controller.js";
@@ -158,6 +164,10 @@ import {
   get_tags,
   update_tag,
   delete_tag,
+  create_template_document,
+  upload_template_document,
+  use_template_document,
+  get_templates_by_tag,
 } from "../controller/tag-controller.js";
 
 const router = express.Router();
@@ -220,6 +230,13 @@ router.post("/signup", requireAdmin, sign_up);
 router.post("/createAdmin", requireAdmin, create_admin);
 router.post("/deleteUser/:id", requireAdmin, deactivate_user);
 
+router.get("/process/email-recipients/:processId", getEmailRecipients);
+router.post("/process/email-recipients/:processId", addEmailRecipients);
+router.get("/process/unique-emails", getAllUniqueEmails);
+router.delete("/process/email-recipients/:processId", removeEmailRecipient);
+router.get("/process/sent-emails/:processId", getSentEmails);
+router.post("/process/send-email/:processId", sendManualEmail);
+
 // Departments
 router.post("/addDepartment", requireAdmin, add_department);
 router.delete("/deleteDepartment/:id", requireAdmin, deactivate_department);
@@ -248,6 +265,7 @@ router.post("/tags", requireAdmin, add_tags);
 router.get("/tags", get_tags);
 router.put("/tags/:id", requireAdmin, update_tag);
 router.delete("/tags/:id", requireAdmin, delete_tag);
+router.get("/getTemplatesByTag/:tagId", get_templates_by_tag);
 
 // ✅ FIXED: Added requireAdmin to global Department & Role read routes
 router.get("/getDepartments", requireAdmin, get_departments);
@@ -353,6 +371,7 @@ router.post("/completeStep", complete_process_step);
 router.get("/getUserProcesses", get_user_processes);
 router.get("/getCompletedProcesses", get_completed_initiator_processes);
 router.post("/reopenProcess", reopen_process);
+router.post("/process/attach-po", attach_po_numbers);
 router.get(
   "/processDocuments/:processId/:versionNumber",
   get_process_documents,

@@ -15,7 +15,7 @@ const AutoLoginHandler = () => {
   const { setShow } = sessionData();
 
 
-  console.log("called this ")
+
 
   useEffect(() => {
     const handleAutoLogin = async () => {
@@ -33,7 +33,6 @@ const AutoLoginHandler = () => {
 
         // Call auto-login endpoint
         const response = await axios.get(`${backendUrl}/auto-login?token=${token}`);
-        console.log("response", response)
         if (response.data.success) {
           const { accessToken, refreshToken, user, redirectUrl } = response.data;
           

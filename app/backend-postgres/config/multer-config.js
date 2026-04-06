@@ -63,20 +63,22 @@ const diskStorage = multer.diskStorage({
         destinationDirectory = process.env.DSC_FOLDER_PATH || "uploads/dsc";
         break;
       case "template":
-        const { workflowId } = req.body;
-        if (!workflowId) {
-          return cb(new Error("Workflow ID is required for template uploads"));
+        // 🔄 FIXED: Use tagId as provided in the payload
+        const { tagId } = req.body;
+        if (!tagId) {
+          return cb(new Error("Tag ID is required for template uploads"));
         }
-        const workflow = await prisma.workflow.findUnique({
-          where: { id: parseInt(workflowId) }, // Added parseInt for safety
+        const tag = await prisma.tag.findUnique({
+          where: { id: parseInt(tagId) },
           select: { name: true },
         });
-        if (!workflow) {
-          return cb(new Error("Workflow not found"));
+        if (!tag) {
+          return cb(new Error("Tag not found"));
         }
         destinationDirectory = path.join(
           process.env.STORAGE_PATH,
-          workflow.name,
+          "tags",
+          tag.name,
           "templates",
         );
         break;

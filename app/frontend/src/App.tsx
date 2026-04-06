@@ -10,6 +10,7 @@ import WorkList from './pages/Processes/List';
 import DepartmentList from './pages/Department/List';
 import NewBranch from './pages/Branches/NewBranch';
 import TagsMasterPage from './master/tags';
+import TagTemplates from './pages/Templates/TagTemplates';
 import NewUser from './pages/Users/NewUser';
 import NewRole from './pages/Roles/NewRole';
 import NewDepartment from './pages/Department/NewDepartment';
@@ -184,6 +185,7 @@ function App() {
             </DefaultLayout>
           }
         />
+        <Route path="/tags/:id/templates" element={<TagTemplates />} />
         <Route
           path="/bookmark"
           element={

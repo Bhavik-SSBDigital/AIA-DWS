@@ -61,7 +61,7 @@ export default function NewUser() {
         const response = await GetUser(id);
         reset(response?.data?.data);
       } catch (error) {
-        console.log(error?.response?.data?.message || error?.message);
+        // console.log(error?.response?.data?.message || error?.message);
         navigate('/users/list');
       } finally {
         setActionsLoading(false);

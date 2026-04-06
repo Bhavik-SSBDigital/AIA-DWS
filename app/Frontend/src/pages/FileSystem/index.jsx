@@ -298,7 +298,7 @@ const handleDownloadFolder = async (name, path) => {
           : await GetFolderData(updatedPath);
       setData(response?.data?.children || []);
     } catch (error) {
-      console.log(error?.response?.data?.message || error?.message);
+      // console.log(error?.response?.data?.message || error?.message);
     } finally {
       setLoading(false);
     }
@@ -555,7 +555,7 @@ const handleDownloadFolder = async (name, path) => {
         const response = await getDepartments();
         setDepartments(response?.data?.departments);
       } catch (error) {
-        console.log(error);
+        // console.log(error);
       }
     };
     getDepartmentList();

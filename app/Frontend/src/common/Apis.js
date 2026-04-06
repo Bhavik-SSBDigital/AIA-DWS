@@ -26,27 +26,19 @@ apiClient.interceptors.request.use((config) => {
 });
 
 // ✅ VAPT UX FIX: Global Response Interceptor
-// If the backend forces a session termination (401 Unauthorized), catch it globally, clear data, and redirect.
 apiClient.interceptors.response.use(
   (response) => {
-    return response; // If the request is successful, just pass it through
+    return response;
   },
   (error) => {
-    // Check if the error is a 401 Unauthorized (Invalid/Expired Token)
     if (error.response && error.response.status === 401) {
-      // 1. Clear all session data to securely log the user out
       sessionStorage.clear();
-
-      // 2. Show a graceful message to the user
       toast.error('Session expired or unauthorized. Please log in again.');
-
-      // 3. Force redirect to the sign-in page
-      // We use window.location.href here because we are outside a React component router
       if (window.location.pathname !== '/auth/signin') {
         window.location.href = '/auth/signin';
       }
     }
-    return Promise.reject(error); // Propagate the error so specific components can still handle it if needed
+    return Promise.reject(error);
   },
 );
 
@@ -76,6 +68,12 @@ export const extractEMLDetails = async (documentId, workflowId) => {
   } catch (error) {
     throw error;
   }
+};
+
+export const AttachPoNumbers = async (processId, poNumbers) => {
+  console.log('attach po nos called', poNumbers);
+  const token = localStorage.getItem('token'); // Left as is based on your code
+  return apiClient.post('/process/attach-po', { processId, poNumbers });
 };
 
 export const exportFileLogs = async (fromDate, toDate) => {
@@ -187,6 +185,34 @@ export const CopyWorkflow = async (id) => {
 };
 export const deleteWorkflow = async (id) => {
   return apiClient.delete(`/workflows/deleteWorkflow/${id}`);
+};
+
+// Email management
+export const getEmailRecipients = async (processId) => {
+  return apiClient.get(`/process/email-recipients/${processId}`);
+};
+// In common/Apis.js
+export const getAllUniqueEmails = () => {
+  // Note: No processId needed since it fetches for the logged-in user
+  return apiClient.get(`/process/unique-emails`);
+};
+
+export const addEmailRecipients = async (processId, emails) => {
+  return apiClient.post(`/process/email-recipients/${processId}`, { emails });
+};
+
+export const removeEmailRecipient = async (processId, email) => {
+  return apiClient.delete(`/process/email-recipients/${processId}`, {
+    data: { email },
+  });
+};
+
+export const getSentEmails = async (processId) => {
+  return apiClient.get(`/process/sent-emails/${processId}`);
+};
+
+export const sendManualEmail = async (processId, data) => {
+  return apiClient.post(`/process/send-email/${processId}`, data);
 };
 
 // documents apis
@@ -330,10 +356,8 @@ export const DownloadConvertedSignedPdf = async (
     link.click();
     link.remove();
 
-    // Clean up the object URL to avoid memory leaks
     window.URL.revokeObjectURL(url);
   } catch (error) {
-    // If the backend sent a JSON error but it's formatted as a Blob, we extract the text
     if (error.response && error.response.data instanceof Blob) {
       try {
         const errorText = await error.response.data.text();
@@ -483,8 +507,6 @@ export const signIn = async (data) => {
   return apiClient.post(`/login`, data);
 };
 
-// signUp endpoints
-
 // viewer endpoints
 export const storeSignCoordinates = async (data) => {
   return apiClient.post(`/storeSignCoordinates`, data);
@@ -559,9 +581,32 @@ export const GetNotifications = async () => {
   return apiClient.get(`/getUserProcesses`);
 };
 
-// templets
+// templets (Legacy)
 export const getWorkflowTemplates = async (workflowId) => {
   return apiClient.get(`/getWorkflowTemplates/${workflowId}`);
+};
+
+// =======================================================
+// ✅ TAG MANAGEMENT API ENDPOINTS
+// =======================================================
+export const GetTags = async () => {
+  return apiClient.get('/tags');
+};
+export const AddTags = async (data) => {
+  return apiClient.post('/tags', data);
+};
+export const EditTag = async (id, data) => {
+  return apiClient.put(`/tags/${id}`, data);
+};
+export const DeleteTag = async (id) => {
+  return apiClient.delete(`/tags/${id}`);
+};
+
+// =======================================================
+// ✅ TAG TEMPLATES API ENDPOINTS
+// =======================================================
+export const getTemplatesByTag = async (tagId) => {
+  return apiClient.get(`/getTemplatesByTag/${tagId}`);
 };
 
 export const createTemplateDocument = async (payload) => {
@@ -570,9 +615,7 @@ export const createTemplateDocument = async (payload) => {
 
 export const uploadTemplateFile = async (formData) => {
   return apiClient.post('/upload-template', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+    headers: { 'Content-Type': 'multipart/form-data' },
   });
 };
 

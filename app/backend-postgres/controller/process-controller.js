@@ -1,5 +1,5 @@
 import { verifyUser } from "../utility/verifyUser.js";
-
+import axios from "axios";
 import pkg from "@prisma/client";
 import { file_copy, delete_file } from "./file-controller.js";
 import { createFolder } from "./file-controller.js";
@@ -15,6 +15,7 @@ dotenv.config();
 import path from "path";
 
 const STORAGE_PATH = process.env.STORAGE_PATH;
+const P2P_SERVER = process.env.P2P_SERVER;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -2353,6 +2354,7 @@ export const view_process = async (req, res) => {
         documents: transformedDocuments,
         steps,
         queryDetails,
+        poNumbers: process.poNumbers,
         recommendationDetails,
         documentVersioning: finalDocumentVersioning,
         sededDocuments,
@@ -2379,6 +2381,74 @@ export const view_process = async (req, res) => {
         code: "PROCESS_VIEW_ERROR",
       },
     });
+  }
+};
+
+export const attach_po_numbers = async (req, res) => {
+  try {
+    const { processId, poNumbers } = req.body;
+
+    if (
+      !processId ||
+      !poNumbers ||
+      !Array.isArray(poNumbers) ||
+      poNumbers.length === 0
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid PO Numbers payload" });
+    }
+
+    // 1. Update the Process in Postgres
+    const updatedProcess = await prisma.processInstance.update({
+      where: { id: processId },
+      data: {
+        poNumbers: { push: poNumbers },
+        status: "PO_NO_ATTACHED",
+      },
+      include: {
+        documents: {
+          include: {
+            document: true,
+            signatures: { include: { user: true } },
+          },
+        },
+      },
+    });
+
+    // 2. Prepare payload for Mongo Sync
+    const syncPayload = {
+      processId: updatedProcess.id,
+      processName: updatedProcess.name,
+      poNumbers: poNumbers,
+      documents: updatedProcess.documents.map((pd) => ({
+        name: pd.document.name,
+        path: path.join(__dirname, STORAGE_PATH, pd.document.path),
+        signatures: pd.signatures.map((sig) => ({
+          signedBy: sig.user.username,
+          signedAt: sig.signedAt,
+          remarks: sig.reason,
+        })),
+      })),
+    };
+
+    // 3. Send to Mongo Setup
+    try {
+      await axios.post(`${P2P_SERVER}/sync-po-details`, syncPayload, {
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (syncError) {
+      console.error("Failed to sync to Mongo:", syncError.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "PO Numbers attached successfully",
+      data: updatedProcess,
+    });
+  } catch (error) {
+    console.error("Error attaching PO numbers:", error);
+    return res.status(500).json({ success: false, message: "Server Error" });
   }
 };
 
