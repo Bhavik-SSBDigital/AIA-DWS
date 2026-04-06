@@ -279,12 +279,12 @@ const SignIn: React.FC = () => {
                       name="password"
                       value={data.password}
                       required
-                      autoComplete="current-password" // VAPT FIX #18
-                      type={showPass ? 'text' : 'password'}
+                      autoComplete="off" // VAPT FIX #18
+                      type='password'
                       placeholder="Enter your password"
                       className="w-full rounded-lg border border-stroke bg-transparent py-4 pl-3 pr-10 text-black outline-none focus:border-primary focus-visible:shadow-none dark:border-form-strokedark dark:bg-form-input dark:text-white dark:focus:border-primary"
                     />
-
+{/* 
                     <span className="absolute right-2 top-2">
                       {showPass ? (
                         <IconButton onClick={() => setShowPass(false)}>
@@ -295,7 +295,7 @@ const SignIn: React.FC = () => {
                           <IconEye />
                         </IconButton>
                       )}
-                    </span>
+                    </span> */}
                   </div>
                 </div>
                 {error && (

@@ -288,14 +288,14 @@ const SignUp: React.FC = () => {
                       name="currentPassword"
                       value={data.currentPassword}
                       disabled={loading}
-                      type={showPass ? 'text' : 'password'}
+                      type='password'
                       required
-                      autoComplete="current-password" // VAPT FIX #18
+                      autoComplete="off" // VAPT FIX #18
                       placeholder="Enter your password"
                       className="w-full rounded-lg border border-stroke bg-transparent py-4 pl-6 pr-10 text-black outline-none focus:border-primary focus-visible:shadow-none dark:border-form-strokedark dark:bg-form-input dark:text-white dark:focus:border-primary"
                     />
 
-                    <span className="absolute right-2 top-2">
+                    {/* <span className="absolute right-2 top-2">
                       {showPass ? (
                         <IconButton onClick={() => setShowPass(false)}>
                           <IconEyeOff />
@@ -305,7 +305,7 @@ const SignUp: React.FC = () => {
                           <IconEye />
                         </IconButton>
                       )}
-                    </span>
+                    </span> */}
                   </div>
                 </div>
                 <div className="mb-6">
@@ -319,13 +319,13 @@ const SignUp: React.FC = () => {
                       name="newPassword"
                       required
                       disabled={loading}
-                      type={showPass1 ? 'text' : 'password'}
-                      autoComplete="new-password" // VAPT FIX #18
+                      type='password'
+                      autoComplete="off" // VAPT FIX #18
                       placeholder="Enter your password"
                       className="w-full rounded-lg border border-stroke bg-transparent py-4 pl-6 pr-10 text-black outline-none focus:border-primary focus-visible:shadow-none dark:border-form-strokedark dark:bg-form-input dark:text-white dark:focus:border-primary"
                     />
 
-                    <span className="absolute right-2 top-2">
+                    {/* <span className="absolute right-2 top-2">
                       {showPass1 ? (
                         <IconButton onClick={() => setShowPass1(false)}>
                           <IconEyeOff />
@@ -335,7 +335,7 @@ const SignUp: React.FC = () => {
                           <IconEye />
                         </IconButton>
                       )}
-                    </span>
+                    </span> */}
                   </div>
                 </div>
                 {error && (

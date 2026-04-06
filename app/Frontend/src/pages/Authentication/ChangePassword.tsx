@@ -131,8 +131,8 @@ const ChangePassword: React.FC = () => {
             fullWidth
             required
             name="currentPassword"
-            type={showPasswords.current ? 'text' : 'password'}
-            autoComplete="current-password" // VAPT FIX #18
+            type='password'
+            autoComplete="off" // VAPT FIX #18
             placeholder="Enter current password"
             value={formData.currentPassword}
             onChange={handleChange}
@@ -153,8 +153,8 @@ const ChangePassword: React.FC = () => {
             fullWidth
             required
             name="newPassword"
-            type={showPasswords.new ? 'text' : 'password'}
-            autoComplete="new-password" // VAPT FIX #18
+            type='password'
+            autoComplete="off" // VAPT FIX #18
             placeholder="Enter new password"
             value={formData.newPassword}
             onChange={handleChange}
@@ -175,8 +175,8 @@ const ChangePassword: React.FC = () => {
             fullWidth
             required
             name="confirmPassword"
-            type={showPasswords.confirm ? 'text' : 'password'}
-            autoComplete="new-password" // VAPT FIX #18
+            type='password'
+            autoComplete="off" // VAPT FIX #18
             placeholder="Confirm new password"
             value={formData.confirmPassword}
             onChange={handleChange}
