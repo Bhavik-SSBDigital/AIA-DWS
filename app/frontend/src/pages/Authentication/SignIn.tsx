@@ -16,6 +16,7 @@ import { IconEyeOff } from '@tabler/icons-react';
 import sessionData from '../../Store';
 import userSocket from '../Socket_Connection';
 import { signIn } from '../../common/Apis';
+import CryptoJS from 'crypto-js';
 
 const SignIn: React.FC = () => {
   const { setShow } = sessionData();
@@ -43,7 +44,13 @@ const SignIn: React.FC = () => {
     setLoading(true);
     e.preventDefault();
     try {
-      const res = await signIn(data);
+      // VAPT FIX: Hash password before network transmission
+      const securePayload = {
+  ...data,
+  password: CryptoJS.AES.encrypt(data.password, import.meta.env.VITE_ENCRYPTION_KEY).toString(),
+};
+
+      const res = await signIn(securePayload);
       if (res.status === 200) {
         // VAPT FIX #20: Use proper role checks instead of hardcoded username
         if (res.data.isAdmin || res.data.isRootUser) {
@@ -279,12 +286,12 @@ const SignIn: React.FC = () => {
                       name="password"
                       value={data.password}
                       required
-                      autoComplete="off" // VAPT FIX #18
-                      type='password'
+                      autoComplete="current-password" // VAPT FIX #18
+                      type={showPass ? 'text' : 'password'}
                       placeholder="Enter your password"
                       className="w-full rounded-lg border border-stroke bg-transparent py-4 pl-3 pr-10 text-black outline-none focus:border-primary focus-visible:shadow-none dark:border-form-strokedark dark:bg-form-input dark:text-white dark:focus:border-primary"
                     />
-{/* 
+
                     <span className="absolute right-2 top-2">
                       {showPass ? (
                         <IconButton onClick={() => setShowPass(false)}>
@@ -295,7 +302,7 @@ const SignIn: React.FC = () => {
                           <IconEye />
                         </IconButton>
                       )}
-                    </span> */}
+                    </span>
                   </div>
                 </div>
                 {error && (

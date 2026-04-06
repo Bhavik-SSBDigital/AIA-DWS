@@ -28,9 +28,9 @@ const ForgotPass: React.FC = () => {
         toast.success(res?.data?.message || 'Email Sent');
         navigate('/auth/signin');
       }
-    } catch (error) {
-      toast.error(error?.response?.data?.message || error.message);
-      console.error(error.message);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || "An error occurred");
+      // VAPT FIX #18: Removed console.log(error.message) to prevent info leakage
     } finally {
       setLoading(false);
     }
@@ -59,6 +59,7 @@ const ForgotPass: React.FC = () => {
               onChange={handleChange}
               fullWidth
               required
+              autoComplete="username" // VAPT FIX #18
             />
             <TextField
               label="Email"
@@ -67,6 +68,7 @@ const ForgotPass: React.FC = () => {
               onChange={handleChange}
               fullWidth
               required
+              autoComplete="email" // VAPT FIX #18
               error={
                 !!data.email &&
                 !/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(data.email)

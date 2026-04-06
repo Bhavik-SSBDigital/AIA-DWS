@@ -13,7 +13,8 @@ import {
 } from '@mui/material';
 import { IconEye, IconEyeOff } from '@tabler/icons-react';
 import { toast } from 'react-toastify';
-import { changePassword } from '../../common/Apis'; // you'll need to add this API function
+import { changePassword } from '../../common/Apis'; 
+import CryptoJS from 'crypto-js';
 
 const ChangePassword: React.FC = () => {
   const navigate = useNavigate();
@@ -81,11 +82,14 @@ const ChangePassword: React.FC = () => {
 
     setLoading(true);
     try {
-      const response = await changePassword({
+      // VAPT FIX: Encrypt passwords using AES before network transmission
+      const securePayload = {
         username: formData.username,
-        currentPassword: formData.currentPassword,
-        newPassword: formData.newPassword,
-      });
+        currentPassword: CryptoJS.AES.encrypt(formData.currentPassword, import.meta.env.VITE_ENCRYPTION_KEY).toString(),
+        newPassword: CryptoJS.AES.encrypt(formData.newPassword, import.meta.env.VITE_ENCRYPTION_KEY).toString(),
+      };
+      
+      const response = await changePassword(securePayload);
       toast.success(response?.data?.message || 'Password changed successfully');
       // Optionally logout or stay logged in
       setTimeout(() => navigate('/profile'), 1500);
@@ -131,8 +135,8 @@ const ChangePassword: React.FC = () => {
             fullWidth
             required
             name="currentPassword"
-            type='password'
-            autoComplete="off" // VAPT FIX #18
+            type={showPasswords.current ? 'text' : 'password'}
+            autoComplete="current-password" // VAPT FIX #18
             placeholder="Enter current password"
             value={formData.currentPassword}
             onChange={handleChange}
@@ -153,8 +157,8 @@ const ChangePassword: React.FC = () => {
             fullWidth
             required
             name="newPassword"
-            type='password'
-            autoComplete="off" // VAPT FIX #18
+            type={showPasswords.new ? 'text' : 'password'}
+            autoComplete="new-password" // VAPT FIX #18
             placeholder="Enter new password"
             value={formData.newPassword}
             onChange={handleChange}
@@ -175,8 +179,8 @@ const ChangePassword: React.FC = () => {
             fullWidth
             required
             name="confirmPassword"
-            type='password'
-            autoComplete="off" // VAPT FIX #18
+            type={showPasswords.confirm ? 'text' : 'password'}
+            autoComplete="new-password" // VAPT FIX #18
             placeholder="Confirm new password"
             value={formData.confirmPassword}
             onChange={handleChange}

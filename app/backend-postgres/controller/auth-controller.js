@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
 import ExcelJS from "exceljs";
 import { sendUserEmail } from "../services/emailService.js";
+import CryptoJS from "crypto-js"; // ✅ Added CryptoJS for decryption
 
 const prisma = new PrismaClient();
 
@@ -124,7 +125,25 @@ export const login = async (req, res) => {
       return res.status(401).json({ message: "Invalid username or password" });
     }
 
-    const match = await bcrypt.compare(password, user.password);
+    // ✅ VAPT FIX: Decrypt the AES encrypted password from frontend
+    let plainTextPassword;
+    try {
+      const bytes = CryptoJS.AES.decrypt(
+        password,
+        process.env.FRONTEND_ENCRYPTION_KEY,
+      );
+      plainTextPassword = bytes.toString(CryptoJS.enc.Utf8);
+      if (!plainTextPassword)
+        throw new Error("Decryption resulted in empty string");
+    } catch (err) {
+      return res
+        .status(400)
+        .json({ message: "Invalid encrypted password payload" });
+    }
+
+    // Pass the decrypted text to bcrypt
+    const match = await bcrypt.compare(plainTextPassword, user.password);
+
     if (!match) {
       await prisma.loginLog.create({
         data: {
@@ -454,38 +473,56 @@ export const change_password = async (req, res) => {
   try {
     const { username, currentPassword, newPassword } = req.body;
 
-    // ✅ VAPT FIX: Serverside Validation
+    // ✅ VAPT FIX: Serverside Validation & Decryption
     if (
       !username ||
       typeof username !== "string" ||
       !currentPassword ||
-      !newPassword ||
-      typeof newPassword !== "string" ||
-      newPassword.length < 8
+      !newPassword
     ) {
-      return res.status(400).json({
-        message:
-          "Invalid input. New password must be at least 8 characters long.",
-      });
+      return res.status(400).json({ message: "Invalid input." });
+    }
+
+    let plainCurrent, plainNew;
+    try {
+      plainCurrent = CryptoJS.AES.decrypt(
+        currentPassword,
+        process.env.FRONTEND_ENCRYPTION_KEY,
+      ).toString(CryptoJS.enc.Utf8);
+      plainNew = CryptoJS.AES.decrypt(
+        newPassword,
+        process.env.FRONTEND_ENCRYPTION_KEY,
+      ).toString(CryptoJS.enc.Utf8);
+
+      if (!plainCurrent || !plainNew) throw new Error("Decryption failed");
+    } catch (err) {
+      console.log("error changing password", err);
+      return res
+        .status(400)
+        .json({ message: "Invalid encrypted password payload" });
+    }
+
+    console.log("hellossm");
+    if (plainNew.length < 8) {
+      return res
+        .status(400)
+        .json({ message: "New password must be at least 8 characters long." });
     }
 
     const user = await prisma.user.findUnique({ where: { username } });
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const isPasswordValid = await bcrypt.compare(
-      currentPassword,
-      user.password,
-    );
+    const isPasswordValid = await bcrypt.compare(plainCurrent, user.password);
     if (!isPasswordValid)
       return res.status(401).json({ message: "Current password is incorrect" });
 
-    if (currentPassword === newPassword) {
+    if (plainCurrent === plainNew) {
       return res.status(400).json({
         message: "New password must be different from current password",
       });
     }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const hashedPassword = await bcrypt.hash(plainNew, 10);
 
     await prisma.$transaction(async (tx) => {
       await tx.user.update({

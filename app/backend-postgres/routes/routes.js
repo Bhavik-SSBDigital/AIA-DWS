@@ -178,6 +178,7 @@ router.post("/login", loginLimiter, login);
 router.get("/auto-login", autoLogin);
 router.post("/validate-auto-login", validateAutoLogin);
 router.post("/forgetPassword", loginLimiter, forget_password);
+router.post("/changePassword", change_password);
 
 // WOPI endpoints
 router.get("/wopi/discovery", wopiDiscovery);
@@ -241,7 +242,6 @@ router.post("/getAllDocuments", requireAdmin, getDocumentDetailsForAdmin);
 // 🛡️ AUTHENTICATED USER ROUTES
 // ==========================================
 router.post("/logout", logout);
-router.post("/changePassword", change_password);
 
 // Tags
 router.post("/tags", requireAdmin, add_tags);
