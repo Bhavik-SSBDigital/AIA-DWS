@@ -159,6 +159,7 @@ export const file_upload = async (req, res) => {
       "csv",
       "zip",
       "rar",
+      "eml",
     ]);
     const fileExtension = uploadedFileName.split(".").pop().toLowerCase();
 

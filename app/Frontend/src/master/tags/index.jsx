@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useForm } from 'react-hook-form';
 import {
   IconTags,
   IconPlus,
@@ -6,31 +7,256 @@ import {
   IconLoader2,
   IconPencil,
   IconTrash,
+  IconTemplate,
+  IconUpload,
+  IconFileText,
+  IconEye,
+  IconFileSpreadsheet,
+  IconPresentation,
+  IconArrowRight,
 } from '@tabler/icons-react';
-import apiClient from '../../common/Apis';
 import { toast } from 'react-toastify';
 
+// Make sure your API imports point to your actual file
+import {
+  GetTags,
+  AddTags,
+  EditTag,
+  DeleteTag,
+  getTemplatesByTag,
+  createTemplateDocument,
+  uploadTemplateFile,
+  ViewDocument,
+} from '../../common/Apis';
+import ViewFile from '../../pages/view/View';
+import TopLoader from '../../common/Loader/TopLoader';
+
+const supportedExtensions = [
+  'docx', 'xlsx', 'pptx', 'docm', 'xlsm', 'pptm', 'dotx', 'xltx', 'potx',
+];
+
+const getFileIcon = (filename) => {
+  const ext = filename?.split('.').pop()?.toLowerCase();
+  if (['xlsx', 'xlsm', 'xltx'].includes(ext)) return <IconFileSpreadsheet className="text-green-600" size={32} stroke={1.5} />;
+  if (['pptx', 'pptm', 'potx'].includes(ext)) return <IconPresentation className="text-orange-500" size={32} stroke={1.5} />;
+  return <IconFileText className="text-blue-600" size={32} stroke={1.5} />;
+};
+
+// =====================================================================
+// SUB-COMPONENT: Tag Template Manager (Detail Panel)
+// =====================================================================
+const TagTemplateManagerPanel = ({ tag }) => {
+  const [file, setFile] = useState(null);
+  const [templates, setTemplates] = useState([]);
+  const [actionsLoading, setActionsLoading] = useState(false);
+  const [fileView, setFileView] = useState(null);
+
+  const { register, handleSubmit, reset, formState: { errors } } = useForm({
+    defaultValues: { templateName: '', extension: supportedExtensions[0] },
+  });
+
+  const fetchTemplates = useCallback(async () => {
+    try {
+      const res = await getTemplatesByTag(tag.id);
+      setTemplates(res.data.templates);
+    } catch (error) {
+      console.error('Failed to fetch templates', error);
+    }
+  }, [tag.id]);
+
+  useEffect(() => {
+    // Reset state and fetch new templates when the selected tag changes
+    setFile(null);
+    reset();
+    fetchTemplates();
+  }, [tag, fetchTemplates, reset]);
+
+  const onCreateTemplate = async (data) => {
+    setActionsLoading(true);
+    try {
+      const payload = { ...data, tagId: tag.id };
+      const res = await createTemplateDocument(payload);
+      toast.success(res?.data?.message || 'Template created successfully');
+      reset();
+      fetchTemplates();
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error?.message);
+    } finally {
+      setActionsLoading(false);
+    }
+  };
+
+  const handleFileUpload = async () => {
+    if (!file) return;
+    setActionsLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('tagId', tag.id);
+      formData.append('purpose', 'template');
+      formData.append('file', file);
+
+      const res = await uploadTemplateFile(formData);
+      toast.success(res?.data?.message || 'File uploaded successfully');
+      setFile(null);
+      fetchTemplates();
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error?.message);
+    } finally {
+      setActionsLoading(false);
+    }
+  };
+
+  const handleViewFile = async (name, path, fileId) => {
+    setActionsLoading(true);
+    try {
+      const type = name?.split('.').pop()?.toLowerCase();
+      const fileData = await ViewDocument(name, path, type, fileId);
+      setFileView(fileData);
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error?.message);
+    } finally {
+      setActionsLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden h-full flex flex-col animate-fade-in">
+      {actionsLoading && <TopLoader />}
+
+      {/* Header */}
+      <div className="px-6 py-5 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between shrink-0">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <IconTemplate className="text-indigo-600" size={24} />
+            {tag.name} Templates
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">Manage files attached to this tag</p>
+        </div>
+        <div className="bg-indigo-100 text-indigo-700 font-bold py-1 px-3 rounded-lg text-sm">
+          {templates.length} Files
+        </div>
+      </div>
+
+      <div className="p-6 overflow-y-auto flex-grow space-y-6 bg-gray-50/30">
+        {/* Actions Grid (Upload vs Create) */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          
+          {/* Create Blank Template */}
+          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+            <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
+              <IconPlus className="text-indigo-600" size={18} /> Create Blank
+            </h3>
+            <form onSubmit={handleSubmit(onCreateTemplate)} className="space-y-3">
+              <div>
+                <input
+                  {...register('templateName', { required: 'Name required' })}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="Template Name"
+                />
+              </div>
+              <div className="flex gap-2">
+                <select
+                  {...register('extension')}
+                  className="w-1/3 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                >
+                  {supportedExtensions.map((ext) => (
+                    <option key={ext} value={ext}>.{ext}</option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  disabled={actionsLoading}
+                  className="w-2/3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg text-sm transition-colors disabled:opacity-50"
+                >
+                  Create
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Upload Existing Template */}
+          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col">
+            <h3 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
+              <IconUpload className="text-emerald-600" size={18} /> Upload Existing
+            </h3>
+            <label className="flex-grow flex flex-col items-center justify-center border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-emerald-50 transition-all p-3 text-center">
+              <IconUpload className="w-6 h-6 mb-1 text-gray-400" />
+              <span className="text-xs text-gray-500 font-medium">{file ? file.name : "Click to select file"}</span>
+              <input type="file" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            </label>
+            <button
+              onClick={handleFileUpload}
+              disabled={actionsLoading || !file}
+              className="w-full py-2 mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-sm transition-colors disabled:opacity-50"
+            >
+              Upload
+            </button>
+          </div>
+        </div>
+
+        {/* Template List */}
+        <div>
+          <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wide mb-3">Available Templates</h3>
+          {templates.length === 0 ? (
+            <div className="text-center py-10 bg-white rounded-xl border border-gray-200 border-dashed">
+              <IconTemplate className="mx-auto text-gray-300 mb-2" size={32} />
+              <p className="text-sm font-medium text-gray-500">No templates attached yet.</p>
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {templates.map((tpl, idx) => (
+                <li key={idx} className="bg-white border border-gray-200 rounded-xl p-3 flex items-center justify-between hover:border-indigo-300 transition-colors shadow-sm">
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="p-1.5 bg-gray-50 border border-gray-100 rounded-lg shrink-0">
+                      {getFileIcon(tpl.name)}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-gray-900 truncate">{tpl.name}</div>
+                      <div className="text-xs text-gray-500 truncate mt-0.5">{tpl.path}</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleViewFile(tpl.name, tpl.path, tpl.id)}
+                    className="ml-3 shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 rounded-lg transition-colors"
+                  >
+                    <IconEye size={16} /> View
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {fileView && <ViewFile docu={fileView} setFileView={setFileView} handleViewClose={() => setFileView(null)} />}
+    </div>
+  );
+};
+
+
+// =====================================================================
+// MAIN COMPONENT: Tags Master Page (Split View)
+// =====================================================================
 export default function TagsMasterPage() {
-  const [tags, setTags] = useState([]); // { id, name }
+  const [tags, setTags] = useState([]);
   const [newTags, setNewTags] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Edit state
-  const [editingTag, setEditingTag] = useState(null); // { id, name }
-  const [editInput, setEditInput] = useState('');
+  // New state: The currently selected tag for the right-hand panel
+  const [activeTag, setActiveTag] = useState(null);
 
-  // Delete confirmation state
-  const [deletingTag, setDeletingTag] = useState(null); // { id, name }
+  const [editingTag, setEditingTag] = useState(null);
+  const [editInput, setEditInput] = useState('');
+  const [deletingTag, setDeletingTag] = useState(null);
 
   const inputRef = useRef(null);
 
-  // Fetch tags
   const fetchTags = useCallback(async () => {
     try {
       setLoading(true);
-      const { data } = await apiClient.get('/tags');
+      const { data } = await GetTags();
       setTags(data);
     } catch (err) {
       console.error('Fetch tags failed:', err);
@@ -44,65 +270,27 @@ export default function TagsMasterPage() {
     fetchTags();
   }, [fetchTags]);
 
-  // Add tag
   const addTag = useCallback(() => {
     const tag = input.trim();
     if (!tag) return;
-
-    if (
-      newTags.some((t) => t.toLowerCase() === tag.toLowerCase()) ||
-      tags.some((t) => t.name.toLowerCase() === tag.toLowerCase())
-    ) {
+    if (newTags.some((t) => t.toLowerCase() === tag.toLowerCase()) || tags.some((t) => t.name.toLowerCase() === tag.toLowerCase())) {
       setInput('');
       return;
     }
-
     setNewTags((prev) => [...prev, tag]);
     setInput('');
   }, [input, newTags, tags]);
 
-  const removeTag = (tag) => {
-    setNewTags((prev) => prev.filter((t) => t !== tag));
-  };
-
-  // Helper for repeated words
-  const getRepeatedWords = () => {
-    const countMap = newTags.reduce((acc, word) => {
-      const lower = word.toLowerCase().trim();
-      if (!lower) return acc;
-      acc[lower] = (acc[lower] || 0) + 1;
-      return acc;
-    }, {});
-    return Object.entries(countMap)
-      .filter(([_, count]) => count >= 2)
-      .map(([word, count]) => ({ word, count }))
-      .sort((a, b) => b.count - a.count);
-  };
-
-  const [open, setOpen] = useState(false);
-  const [hasRepeats, setHasRepeats] = useState([]);
-
-  const checkTags = async () => {
-    if (!newTags.length) return;
-    const repeated = getRepeatedWords();
-    if (repeated.length) {
-      setOpen(true);
-      setHasRepeats(repeated);
-    } else {
-      handleSubmit();
-    }
-  };
+  const removeTag = (tag) => setNewTags((prev) => prev.filter((t) => t !== tag));
 
   const handleSubmit = async () => {
     if (!newTags.length) return;
     try {
       setSubmitting(true);
-      await apiClient.post('/tags', { tags: newTags });
+      await AddTags({ tags: newTags });
       setNewTags([]);
       fetchTags();
-      toast.success('Tags saved.');
-      setOpen(false);
-      setHasRepeats([]);
+      toast.success('Tags saved successfully.');
     } catch (err) {
       console.error('Submit tags failed:', err);
       toast.error('Failed to save tags.');
@@ -111,327 +299,166 @@ export default function TagsMasterPage() {
     }
   };
 
-  const handleClose = () => {
-    setOpen(false);
-    setHasRepeats([]);
-  };
-
-  // Delete handlers
-  const confirmDelete = (tag) => {
-    setDeletingTag(tag);
-  };
-
-  const cancelDelete = () => {
-    setDeletingTag(null);
-  };
-
   const handleDelete = async () => {
     if (!deletingTag) return;
     try {
       setDeletingTag({ ...deletingTag, loading: true });
-      await apiClient.delete(`/tags/${deletingTag.id}`);
+      await DeleteTag(deletingTag.id);
       setTags((prev) => prev.filter((tag) => tag.id !== deletingTag.id));
+      
+      // If the deleted tag was the active one, clear the detail view
+      if (activeTag?.id === deletingTag.id) {
+        setActiveTag(null);
+      }
+      
       toast.success('Tag deleted.');
-      cancelDelete();
+      setDeletingTag(null);
     } catch (err) {
-      console.error('Delete failed:', err);
       toast.error('Failed to delete tag.');
       setDeletingTag((prev) => ({ ...prev, loading: false }));
     }
   };
 
-  // Edit handlers
+  const saveEdit = async () => {
+    if (!editInput.trim()) return;
+    try {
+      const { data } = await EditTag(editingTag.id, { name: editInput.trim() });
+      setTags((prev) => prev.map((tag) => (tag.id === editingTag.id ? data : tag)));
+      
+      // Update active tag name if it's currently selected
+      if (activeTag?.id === editingTag.id) {
+         setActiveTag(data);
+      }
+      
+      toast.success('Tag updated.');
+      setEditingTag(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update tag.');
+    }
+  };
+
   const startEdit = (tag) => {
     setEditingTag(tag);
     setEditInput(tag.name);
   };
 
-  const cancelEdit = () => {
-    setEditingTag(null);
-    setEditInput('');
-  };
-
-  const saveEdit = async () => {
-    if (!editInput.trim()) return;
-    try {
-      const { data } = await apiClient.put(`/tags/${editingTag.id}`, {
-        name: editInput.trim(),
-      });
-      setTags((prev) =>
-        prev.map((tag) => (tag.id === editingTag.id ? data : tag))
-      );
-      toast.success('Tag updated.');
-      cancelEdit();
-    } catch (err) {
-      console.error('Edit failed:', err);
-      toast.error(err.response?.data?.message || 'Failed to update tag.');
-    }
+  const confirmDelete = (tag) => {
+    setDeletingTag(tag);
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-10 px-4">
-      {/* Repeated words warning modal */}
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div
-            className="absolute inset-0"
-            onClick={handleClose}
-            aria-hidden="true"
-          />
-          <div className="relative w-full max-w-md mx-4 sm:mx-6 bg-white rounded-xl shadow-2xl overflow-hidden">
-            <div className="px-6 py-5 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Repeated Words Found
-              </h2>
+    <div className="min-h-screen bg-gray-50/80 p-4 sm:p-8">
+      {/* ... KEEP YOUR EXISTING MODALS HERE (Edit, Delete, Repeated Words) ... */}
+
+      {/* Header */}
+      <div className="mb-6 flex items-center gap-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-200 max-w-[1400px] mx-auto">
+        <div className="p-3 bg-indigo-100 rounded-xl">
+          <IconTags size={28} className="text-indigo-600" stroke={2} />
+        </div>
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Tag & Template Management</h1>
+          <p className="text-sm font-medium text-gray-500">Select a tag on the left to manage its templates.</p>
+        </div>
+      </div>
+
+      {/* Master-Detail Layout */}
+      <div className="max-w-[1400px] mx-auto flex flex-col lg:flex-row gap-6 h-[calc(100vh-140px)]">
+        
+        {/* ======================================= */}
+        {/* LEFT COLUMN: MASTER (Tags List)         */}
+        {/* ======================================= */}
+        <div className="lg:w-1/3 flex flex-col gap-6 h-full">
+          
+          {/* Quick Add */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 shrink-0">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Quick Add Tags</h3>
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap gap-2 items-center min-h-[44px] px-3 border border-gray-300 rounded-xl p-1.5 focus-within:ring-2 focus-within:ring-indigo-500 bg-gray-50">
+                {newTags.map((tag, idx) => (
+                  <span key={tag + idx} className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600 text-white rounded-md text-xs font-medium">
+                    {tag}
+                    <button onClick={() => removeTag(tag)} className="hover:text-red-200"><IconX size={14} /></button>
+                  </span>
+                ))}
+                <input
+                  value={input}
+                  ref={inputRef}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addTag()}
+                  placeholder={newTags.length === 0 ? "Type and enter..." : "Type another..."}
+                  className="flex-1 min-w-[120px] outline-none text-sm text-gray-700 bg-transparent px-1"
+                />
+              </div>
+              <button onClick={handleSubmit} disabled={submitting || !newTags.length} className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm transition-colors disabled:opacity-50 disabled:bg-gray-400">
+                Save Tags {newTags.length > 0 ? `(${newTags.length})` : ''}
+              </button>
             </div>
-            <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">
-              {hasRepeats.length > 0 ? (
-                <>
-                  <div className="mb-5 p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-800">
-                    <div className="flex items-center gap-3">
-                      <svg
-                        className="w-5 h-5 flex-shrink-0 text-amber-600"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path d="M10 2a8 8 0 100 16 8 8 0 000-16zM9 5h2v6H9V5zm0 8h2v2H9v-2z" />
-                      </svg>
-                      <p className="text-sm font-medium">
-                        Some words appear more than once!
-                      </p>
+          </div>
+
+          {/* Tags List */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col flex-grow overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 bg-gray-50 shrink-0 flex justify-between items-center">
+              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Directory ({tags.length})</h2>
+            </div>
+            
+            <div className="overflow-y-auto p-3 space-y-1.5 flex-grow bg-gray-50/30">
+              {loading ? (
+                <div className="py-10 text-center"><IconLoader2 className="animate-spin text-indigo-500 mx-auto" size={24} /></div>
+              ) : tags.length === 0 ? (
+                <div className="py-10 text-center text-sm text-gray-500">No tags found.</div>
+              ) : (
+                tags.map((tag) => (
+                  <div 
+                    key={tag.id} 
+                    onClick={() => setActiveTag(tag)}
+                    className={`group flex items-center justify-between px-4 py-3 rounded-xl cursor-pointer transition-all border ${
+                      activeTag?.id === tag.id 
+                        ? 'bg-indigo-50 border-indigo-300 shadow-sm' 
+                        : 'bg-white border-gray-200 hover:border-indigo-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className={`text-sm font-bold truncate ${activeTag?.id === tag.id ? 'text-indigo-700' : 'text-gray-700'}`}>
+                      {tag.name}
+                    </span>
+                    
+                    <div className="flex items-center gap-1">
+                      {/* Only show Edit/Delete on hover or if selected */}
+                      <div className={`flex items-center transition-opacity ${activeTag?.id === tag.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                        <button onClick={(e) => { e.stopPropagation(); startEdit(tag); }} className="p-1.5 text-gray-400 hover:text-indigo-600 rounded-md">
+                          <IconPencil size={16} />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); confirmDelete(tag); }} className="p-1.5 text-gray-400 hover:text-red-600 rounded-md">
+                          <IconTrash size={16} />
+                        </button>
+                      </div>
+                      <IconArrowRight size={18} className={`ml-1 transition-transform ${activeTag?.id === tag.id ? 'text-indigo-500 translate-x-1' : 'text-gray-300'}`} />
                     </div>
                   </div>
-                  <p className="mb-3 text-gray-700 font-medium">
-                    Repeated words ({hasRepeats.length}):
-                  </p>
-                  <ul className="space-y-2">
-                    {hasRepeats.map(({ word, count }) => (
-                      <li
-                        key={word + count}
-                        className="py-2 px-3 bg-gray-50 rounded-md border border-gray-100"
-                      >
-                        <span className="font-medium text-gray-900">
-                          {word}
-                        </span>
-                        <span className="text-gray-500 ml-2">
-                          — appeared{' '}
-                          <span className="font-semibold text-indigo-700">
-                            {count}
-                          </span>{' '}
-                          time{count > 1 ? 's' : ''}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              ) : (
-                <p className="text-gray-600 py-4 text-center">
-                  No repeated words were found.
-                </p>
+                ))
               )}
             </div>
-            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
-              <button
-                onClick={handleClose}
-                className="px-5 py-2.5 text-gray-700 font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Close
-              </button>
-              <button
-                onClick={handleSubmit}
-                className="px-5 py-2.5 text-white font-medium bg-indigo-600 rounded-lg hover:bg-indigo-700"
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit tag modal */}
-      {editingTag && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="absolute inset-0" onClick={cancelEdit} />
-          <div className="relative w-full max-w-md mx-4 bg-white rounded-xl shadow-2xl overflow-hidden">
-            <div className="px-6 py-5 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-900">Edit Tag</h2>
-            </div>
-            <div className="px-6 py-5">
-              <input
-                type="text"
-                value={editInput}
-                onChange={(e) => setEditInput(e.target.value)}
-                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none"
-                placeholder="Tag name"
-                autoFocus
-              />
-            </div>
-            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
-              <button
-                onClick={cancelEdit}
-                className="px-5 py-2.5 text-gray-700 font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveEdit}
-                disabled={!editInput.trim()}
-                className="px-5 py-2.5 text-white font-medium bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete confirmation modal */}
-      {deletingTag && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="absolute inset-0" onClick={cancelDelete} />
-          <div className="relative w-full max-w-md mx-4 bg-white rounded-xl shadow-2xl overflow-hidden">
-            <div className="px-6 py-5 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-900">Delete Tag</h2>
-            </div>
-            <div className="px-6 py-5">
-              <p className="text-gray-700">
-                Are you sure you want to delete{' '}
-                <span className="font-semibold text-indigo-600">
-                  {deletingTag.name}
-                </span>
-                ? This action cannot be undone.
-              </p>
-            </div>
-            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
-              <button
-                onClick={cancelDelete}
-                className="px-5 py-2.5 text-gray-700 font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deletingTag.loading}
-                className="px-5 py-2.5 text-white font-medium bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
-              >
-                {deletingTag.loading && (
-                  <IconLoader2 size={18} className="animate-spin" />
-                )}
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="max-w-5xl mx-auto space-y-10">
-        {/* Header */}
-        <div className="flex items-center gap-4">
-          <div className="p-4 bg-indigo-600 rounded-xl shadow">
-            <IconTags size={28} className="text-white" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold">Tag Management</h1>
-            <p className="text-gray-500">Add one or many tags at once</p>
           </div>
         </div>
 
-        {/* Add Tags */}
-        <div className="bg-white rounded-xl shadow-lg p-6 space-y-4">
-          <div className="flex gap-2 items-center">
-            <div className="flex flex-1 flex-wrap gap-2 items-center h-10 px-2 border rounded-lg p-1 focus-within:ring-2 focus-within:ring-indigo-400">
-              {newTags.map((tag, idx) => (
-                <span
-                  key={tag + idx}
-                  className="flex items-center gap-1 px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm"
-                >
-                  {tag}
-                  <button
-                    type="button"
-                    onClick={() => removeTag(tag)}
-                    className="hover:text-red-500"
-                  >
-                    <IconX size={14} />
-                  </button>
-                </span>
-              ))}
-
-              <input
-                value={input}
-                ref={inputRef}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Type tag"
-                className="flex-1 min-w-[160px] outline-none text-sm"
-              />
-            </div>
-            <button
-              onClick={addTag}
-              disabled={submitting}
-              className="flex items-center h-10 gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
-            >
-              {submitting ? (
-                <IconLoader2 size={18} className="animate-spin" />
-              ) : (
-                <IconPlus size={18} />
-              )}
-              Add
-            </button>
-          </div>
-
-          {/* Submit button */}
-          <button
-            onClick={checkTags}
-            disabled={submitting || !newTags.length}
-            className="flex items-center gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
-          >
-            {submitting ? (
-              <IconLoader2 size={18} className="animate-spin" />
-            ) : (
-              <IconPlus size={18} />
-            )}
-            Add {newTags.length} Tag{newTags.length !== 1 && 's'}
-          </button>
-        </div>
-
-        {/* Tags List */}
-        <div className="bg-white rounded-xl shadow-lg">
-          <div className="p-5 border-b">
-            <h2 className="font-semibold">All Tags ({tags.length})</h2>
-          </div>
-
-          {loading ? (
-            <div className="py-10 text-center">
-              <IconLoader2 className="animate-spin mx-auto" />
-            </div>
+        {/* ======================================= */}
+        {/* RIGHT COLUMN: DETAIL (Templates)        */}
+        {/* ======================================= */}
+        <div className="lg:w-2/3 h-full">
+          {activeTag ? (
+            <TagTemplateManagerPanel tag={activeTag} />
           ) : (
-            <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-              {tags.map((tag) => (
-                <div
-                  key={tag.id}
-                  className="flex items-center justify-between px-4 py-2 bg-gray-100 rounded-lg text-gray-700"
-                >
-                  <span className="truncate font-medium">{tag.name}</span>
-                  <div className="flex gap-1 ml-2">
-                    <button
-                      onClick={() => startEdit(tag)}
-                      className="p-1 text-gray-500 hover:text-indigo-600 transition-colors"
-                      title="Edit tag"
-                    >
-                      <IconPencil size={16} />
-                    </button>
-                    <button
-                      onClick={() => confirmDelete(tag)}
-                      className="p-1 text-gray-500 hover:text-red-600 transition-colors"
-                      title="Delete tag"
-                    >
-                      <IconTrash size={16} />
-                    </button>
-                  </div>
-                </div>
-              ))}
+            <div className="h-full bg-white rounded-2xl shadow-sm border border-gray-200 border-dashed flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+              <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+                <IconTemplate className="text-gray-300" size={40} />
+              </div>
+              <h2 className="text-xl font-bold text-gray-800">No Tag Selected</h2>
+              <p className="text-gray-500 mt-2 max-w-sm">
+                Select a tag from the left panel to upload, create, and manage its associated templates.
+              </p>
             </div>
           )}
         </div>
+
       </div>
     </div>
   );

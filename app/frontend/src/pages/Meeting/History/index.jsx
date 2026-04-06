@@ -73,7 +73,7 @@ export default function History({ joinMeet }) {
       });
       setMeetings(res.data.meetings || []);
     } catch (error) {
-      console.log(error?.response?.data?.message || error?.message);
+      // console.log(error?.response?.data?.message || error?.message);
     } finally {
       setLoading(false);
     }

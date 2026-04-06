@@ -218,7 +218,7 @@ export default function DocumentSearch() {
       const response = await GetUsersWithDetails();
       setUsers(response?.data);
     } catch (error) {
-      console.log(error);
+      // console.log(error);
     }
   };
 
@@ -227,7 +227,7 @@ export default function DocumentSearch() {
       const response = await getDepartments();
       setDepartments(response?.data?.departments);
     } catch (error) {
-      console.log(error);
+      // console.log(error);
     }
   };
 
@@ -250,7 +250,7 @@ export default function DocumentSearch() {
       const response = await getSearches();
       setRecentSearches(response?.data?.data || []);
     } catch (error) {
-      console.log(error);
+      // console.log(error);
     }
   };
 

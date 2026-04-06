@@ -94,7 +94,7 @@ export default function MetaData() {
   const [selectedDepartment, setSelectedDepartment] = useState();
 
   const create = async (path, foldername) => {
-    console.log(path, foldername);
+    // console.log(path, foldername);
     try {
       let createPath = `${path}/${foldername}`;
       const response = await axios.post(
@@ -120,7 +120,7 @@ export default function MetaData() {
       const response = await axios.get(url);
       setHeadOfficeName(response?.data?.branchName);
     } catch (error) {
-      console.log(error?.response?.data?.message || error?.message);
+      // console.log(error?.response?.data?.message || error?.message);
     }
   };
   useEffect(() => {
@@ -193,7 +193,7 @@ export default function MetaData() {
       reset();
     } catch (error) {
       toast.error(error?.response?.data?.message || error?.message);
-      console.log(error?.message);
+      // console.log(error?.message);
     }
   };
 
@@ -246,7 +246,7 @@ export default function MetaData() {
           );
           setPathList(res.data.children);
         } catch (error) {
-          console.log(error?.response?.data?.message || error?.message);
+          // console.log(error?.response?.data?.message || error?.message);
         }
       };
       getPath();

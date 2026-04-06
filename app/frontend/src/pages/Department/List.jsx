@@ -40,7 +40,7 @@ export default function List() {
       const res = await getDepartmentsHierarchy();
       setData(res.data.data);
     } catch (error) {
-      console.log(error);
+      // console.log(error);
     } finally {
       setIsLoading(false);
     }

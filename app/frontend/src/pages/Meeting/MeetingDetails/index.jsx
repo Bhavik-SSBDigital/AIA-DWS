@@ -71,7 +71,7 @@ const MeetingDetailsDialog = ({ open, setOpen, onClose, id }) => {
       });
       setMeetingDetails(res.data.meetingDetails || {});
     } catch (error) {
-      console.log(error?.response?.data?.message || error?.message);
+      // console.log(error?.response?.data?.message || error?.message);
     } finally {
       setLoading(false);
     }

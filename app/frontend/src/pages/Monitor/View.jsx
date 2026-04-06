@@ -181,7 +181,7 @@ export default function View() {
         setSignLoading((value) => !value);
       }
     } catch (error) {
-      console.log('error', error);
+      // console.log('error', error);
       toast.error(error.response.data.message);
       setSignLoading(false);
     }
@@ -262,7 +262,7 @@ export default function View() {
       });
       setWorks(data.works);
     } catch (error) {
-      console.log(error);
+      // console.log(error);
     }
   };
   const handleWorkChange = (e) => {

@@ -28,7 +28,7 @@ const Socket = () => {
     const disconnect_socket = () => {
         socketConnection.disconnect();
         setSocketConnection(null);
-        console.log("Socket disconnected");
+        // console.log("Socket disconnected");
     }
     return { connect_socket, disconnect_socket };
 

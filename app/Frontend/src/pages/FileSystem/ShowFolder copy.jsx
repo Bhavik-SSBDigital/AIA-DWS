@@ -164,7 +164,7 @@ export default function ShowFolder(props) {
     }
   }, [loaded, pathValue]);
   const onFileChange = (files) => {
-    console.log(files);
+    // console.log(files);
   };
   const createFolder = async () => {
     setOpen(false);
@@ -238,7 +238,7 @@ export default function ShowFolder(props) {
     setFileView(null);
   };
   const handleView = async (path, name, id) => {
-    console.log(id);
+    // console.log(id);
     setLoading(true);
     try {
       const fileData = await download(name, path, true);
@@ -558,7 +558,7 @@ export default function ShowFolder(props) {
     }));
   };
   const handleTransferFile = async () => {
-    console.log({ ...transferData, documentId: properties.id });
+    // console.log({ ...transferData, documentId: properties.id });
     if (!transferData.borrower) {
       toast.warn('Please select a borrower user');
       return;
