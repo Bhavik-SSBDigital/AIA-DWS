@@ -299,21 +299,26 @@ model ProcessInstance {
   id               String    @id @default(uuid())
   name             String
   workflowId       String
-  description      String?
+  description      String?   // Keep for backward compatibility
+  descriptionFormat String?  @default("plain") // 'plain', 'html', 'markdown'
+  descriptionHTML  String?   @db.Text // Rich HTML content
+  printDescriptionPref String? @default("none") // 'none', 'all', 'individual'
   tags             String[]  @default([])
-  poNumbers        String[]          @default([])
+  poNumbers        String[]  @default([])
   issueNo          String?
   initiatorId      Int
-  emailThreads  EmailThread[] 
+  emailThreads     EmailThread[] 
   currentStepId    String?
-  emailRecipients String[] @default([])  // manually added email addresses list
-  sentEmails      ProcessEmail[] 
+  emailRecipients  String[]  @default([])
+  sentEmails       ProcessEmail[] 
   status           ProcessStatus @default(PENDING)
   customizations   Json?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime? @updatedAt
   isRecirculated   Boolean   @default(false)
   reopenCycle      Int       @default(0)
+  storagePath      String    @default("")
+  
   workflow         Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   initiator        User      @relation(fields: [initiatorId], references: [id], onDelete: Cascade)
   currentStep      WorkflowStep? @relation("CurrentStepRelation", fields: [currentStepId], references: [id], onDelete: Cascade)
@@ -323,10 +328,9 @@ model ProcessInstance {
   trackings        ProcessTracking[]
   documentAccess   DocumentAccess[]
   assignmentProgresses AssignmentProgress[] @relation()
-  recommendations   Recommendation[]
+  recommendations  Recommendation[]
   departmentStepProgresses DepartmentStepProgress[] @relation()
   documentHistory  DocumentHistory[] @relation("ProcessDocumentHistory")
-  storagePath     String    @default("")
 }
 
 model EmailThread {
@@ -442,29 +446,33 @@ model ProcessTracking {
 }
 
 model ProcessDocument {
-  id               String    @id @default(uuid())
-  processId        String
-  description      String?
-  reasonOfSupersed String?
-  issueNo          String?
-  partNumber       String?
-  preApproved      Boolean   @default(false)
-  tags                  String[]  @default([])
-  documentId       Int
-  isReplacement    Boolean   @default(false)
-  superseding      Boolean   @default(false)
+  id                 String    @id @default(uuid())
+  processId          String
+  description        String?   // Keep for backward compatibility
+  descriptionFormat  String?   @default("plain") // 'plain', 'html', 'markdown'
+  descriptionHTML    String?   @db.Text // Rich HTML content
+  reasonOfSupersed   String?
+  issueNo            String?
+  partNumber         String?
+  preApproved        Boolean   @default(false)
+  tags               String[]  @default([])
+  documentId         Int
+  isReplacement      Boolean   @default(false)
+  superseding        Boolean   @default(false)
   replacedDocumentId Int?
-  rejectedById     Int?
-  reopenCycle      Int       @default(0)
-  SOPIssueNo String?
-  process          ProcessInstance @relation("ProcessDocumentRelation", fields: [processId], references: [id], onDelete: Cascade)
-  document         Document  @relation("ProcessDocumentRelation", fields: [documentId], references: [id], onDelete: Cascade)
-  replacedDocument Document? @relation("ReplacedDocument", fields: [replacedDocumentId], references: [id], onDelete: Cascade)
-  rejectedBy       User?     @relation("RejectedByUser", fields: [rejectedById], references: [id], onDelete: Cascade)
-  signatures       DocumentSignature[]
-  rejections       DocumentRejection[]
-  signCoordinates  SignCoordinate[] @relation()
-  documentHistory  DocumentHistory[] @relation("ProcessDocumentDocumentHistory")
+  rejectedById       Int?
+  reopenCycle        Int       @default(0)
+  SOPIssueNo         String?
+  
+  process            ProcessInstance @relation("ProcessDocumentRelation", fields: [processId], references: [id], onDelete: Cascade)
+  document           Document  @relation("ProcessDocumentRelation", fields: [documentId], references: [id], onDelete: Cascade)
+  replacedDocument   Document? @relation("ReplacedDocument", fields: [replacedDocumentId], references: [id], onDelete: Cascade)
+  rejectedBy         User?     @relation("RejectedByUser", fields: [rejectedById], references: [id], onDelete: Cascade)
+  signatures         DocumentSignature[]
+  rejections         DocumentRejection[]
+  signCoordinates    SignCoordinate[] @relation()
+  documentHistory    DocumentHistory[] @relation("ProcessDocumentDocumentHistory")
+  
   @@unique([documentId, processId])
   @@index([processId])
   @@index([documentId])

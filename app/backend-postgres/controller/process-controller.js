@@ -1,14 +1,18 @@
 import { verifyUser } from "../utility/verifyUser.js";
 import axios from "axios";
 import pkg from "@prisma/client";
+import { executePythonScript } from "./e-sign-controller.js";
 import { file_copy, delete_file } from "./file-controller.js";
 import { createFolder } from "./file-controller.js";
 import { fileURLToPath } from "url";
+import puppeteer from "puppeteer";
+import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
 import { dirname, join, normalize, extname } from "path";
 import { file_delete } from "./file-controller.js";
 import { watermarkDocument } from "./watermark.js";
 import dotenv from "dotenv";
 import { sendProcessNotification } from "../services/emailService.js";
+import fs from "fs/promises";
 
 dotenv.config();
 
@@ -168,7 +172,6 @@ export async function generateUniqueDocumentName({
   extension,
 }) {
   try {
-    console.log("workflow id", workflowId);
     // Fetch workflow details
     const workflow = await prisma.workflow.findUnique({
       where: { id: workflowId },
@@ -329,12 +332,220 @@ const getProcessTags = async (processId) => {
     where: { id: processId },
     select: { tags: true },
   });
-  console.log("process instance", processInstance);
+
   return processInstance?.tags || [];
 };
 
+import { exec } from "child_process";
+import { promisify } from "util";
+const execPromise = promisify(exec);
+
+/**
+ * Appends an HTML description to an existing PDF, placing it right after the
+ * last content on the last page (like a signature), using the same Y‑coordinate
+ * detection as the signing process.
+ *
+ * @param {string} pdfPath - Path to the existing PDF file.
+ * @param {string} descriptionHtml - HTML string (typically a table) to append.
+ * @param {string} pythonEnvPath - Path to Python executable (e.g., venv/bin/python).
+ * @param {string} pythonScriptPath - Path to getFileSpace.py script.
+ * @param {object} options - Optional settings.
+ * @param {number} options.marginTop - Top margin in points (default 20).
+ * @param {number} options.marginBottom - Bottom margin (default 20).
+ * @param {number} options.marginLeft - Left margin (default 20).
+ * @param {number} options.marginRight - Right margin (default 20).
+ */
+
+async function appendDescriptionToPdf(
+  pdfDoc,
+  lastPage,
+  documentPath,
+  descriptionHtml,
+  pythonEnvPath,
+  pythonScriptPath,
+  options = {},
+) {
+  const { marginLeft = 50, marginTop = 50, safetyMargin = 25 } = options;
+
+  let browser = null;
+
+  try {
+    const absDocumentPath = path.join(
+      __dirname,
+      "../../../../",
+      "storage",
+      documentPath,
+    );
+
+    // -----------------------------------------
+    // ✅ CORRECT SPACE CALCULATION (FIXED)
+    // -----------------------------------------
+    let contentExtremes;
+    try {
+      contentExtremes = await executePythonScript(
+        pythonEnvPath,
+        pythonScriptPath,
+        absDocumentPath,
+      );
+    } catch (e) {
+      contentExtremes = {
+        height: lastPage.getHeight(),
+        last_y: 0,
+      };
+    }
+
+    const pageHeight = contentExtremes.height || lastPage.getHeight();
+
+    // 🔥 Convert TOP-based (pdfplumber) → BOTTOM-based (pdf-lib)
+    const usedFromTop = contentExtremes.last_y || 0;
+    const freeSpaceBottom = Math.max(0, pageHeight - usedFromTop);
+
+    // Start Y from bottom coordinate system
+    let startY = freeSpaceBottom - safetyMargin;
+
+    // -----------------------------------------
+    // 🚀 RENDER HTML USING PUPPETEER (UNCHANGED)
+    // -----------------------------------------
+    browser = await puppeteer.launch({
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+      ],
+      headless: "new",
+    });
+
+    const page = await browser.newPage();
+    await page.setViewport({ width: 800, height: 1080 });
+
+    const fullHtml = `
+      <html>
+        <head>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+              font-family: Helvetica, Arial, sans-serif;
+              font-size: 13px;
+              line-height: 1.6;
+            }
+            .description-container {
+              padding: 10px;
+              white-space: pre-wrap;
+              word-break: break-word;
+            }
+            table {
+              border-collapse: collapse;
+              width: 100%;
+              margin-top: 10px;
+            }
+            th, td {
+              border: 1px solid #999;
+              padding: 6px;
+              font-size: 12px;
+            }
+            th {
+              background: #f2f2f2;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="description-container">
+            <b>Description:</b><br/><br/>
+            ${descriptionHtml}
+          </div>
+        </body>
+      </html>
+    `;
+
+    await page.setContent(fullHtml, { waitUntil: "networkidle0" });
+
+    const container = await page.$(".description-container");
+    const box = await container.boundingBox();
+
+    const rawWidth = Math.ceil(box.width) + 10;
+    const rawHeight = Math.ceil(box.height) + 10;
+
+    const pdfBuffer = await page.pdf({
+      width: `${rawWidth}px`,
+      height: `${rawHeight}px`,
+      printBackground: true,
+      margin: { top: 0, bottom: 0, left: 0, right: 0 },
+    });
+
+    const tempDoc = await PDFDocument.load(pdfBuffer);
+    const embeddedPage = await pdfDoc.embedPage(tempDoc.getPages()[0]);
+
+    // -----------------------------------------
+    // 📐 SCALE TO FIT WIDTH
+    // -----------------------------------------
+    const maxWidth = lastPage.getWidth() - marginLeft * 2;
+    const scale = rawWidth > maxWidth ? maxWidth / rawWidth : 1;
+
+    const finalWidth = rawWidth * scale;
+    const finalHeight = rawHeight * scale;
+
+    // -----------------------------------------
+    // 🎯 SMART PLACEMENT (FIXED)
+    // -----------------------------------------
+    let targetPage = lastPage;
+    let pagesAdded = 0;
+
+    // If not enough space → new page
+    if (startY < marginTop || finalHeight > startY) {
+      targetPage = pdfDoc.addPage([lastPage.getWidth(), lastPage.getHeight()]);
+      startY = targetPage.getHeight() - marginTop;
+      pagesAdded++;
+    }
+
+    let remainingHeight = finalHeight;
+    let offsetY = 0;
+
+    while (remainingHeight > 0) {
+      const availableHeight = startY - marginTop;
+
+      const drawHeight = Math.min(availableHeight, remainingHeight);
+
+      targetPage.drawPage(embeddedPage, {
+        x: marginLeft,
+        y: startY - drawHeight,
+        width: finalWidth,
+        height: finalHeight,
+      });
+
+      remainingHeight -= drawHeight;
+
+      if (remainingHeight > 0) {
+        targetPage = pdfDoc.addPage([
+          lastPage.getWidth(),
+          lastPage.getHeight(),
+        ]);
+        startY = targetPage.getHeight() - marginTop;
+        pagesAdded++;
+      }
+    }
+
+    return {
+      x: marginLeft,
+      y: startY,
+      width: finalWidth,
+      height: finalHeight,
+      pagesAdded,
+      newlyAdded: pagesAdded > 0,
+    };
+  } catch (err) {
+    throw err;
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
 export const initiate_process = async (req, res, next) => {
   try {
+    const pythonScriptPath = path.join(
+      __dirname,
+      "../../support/getFileSpace.py",
+    );
+    const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
     const accessToken = req.headers["authorization"]?.substring(7);
     const userData = await verifyUser(accessToken);
 
@@ -342,13 +553,13 @@ export const initiate_process = async (req, res, next) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
-    // Capture the single 'tag' sent from the frontend
     const {
       description,
       workflowId,
       issueNo,
       emailThreads = [],
       tag,
+      printDescriptionPref = "NONE",
     } = req.body;
 
     const processName = await generate_unique_process_name(workflowId);
@@ -363,7 +574,6 @@ export const initiate_process = async (req, res, next) => {
     await createFolder(false, `../${workflowName}/${processName}`, userData);
 
     let documentIds = req.body.documents?.map((item) => item.documentId) || [];
-
     const copiedDocumentIds = [];
 
     for (const documentId of documentIds) {
@@ -396,7 +606,12 @@ export const initiate_process = async (req, res, next) => {
           });
 
           if (copyResult.documentId) {
-            copiedDocumentIds.push(copyResult.documentId);
+            copiedDocumentIds.push({
+              newDocId: copyResult.documentId,
+              oldDocId: documentId,
+              type: document.type,
+              newPath: copyResult.newPath || copyResult.documentPath,
+            });
           }
 
           await new Promise((resolve, reject) => {
@@ -415,21 +630,88 @@ export const initiate_process = async (req, res, next) => {
               },
             );
           });
-        } catch (error) {
-          console.error(`Error processing document ${documentId}:`, error);
-        }
+        } catch (error) {}
       }
     }
 
-    documentIds = copiedDocumentIds;
-
     const requestedDocCount = req.body.documents?.length || 0;
-    if (documentIds.length === 0 || documentIds.length !== requestedDocCount) {
+    if (
+      copiedDocumentIds.length === 0 ||
+      copiedDocumentIds.length !== requestedDocCount
+    ) {
       return res.status(500).json({
         message:
           "Failed to copy one or more documents. Process initiation aborted.",
       });
     }
+
+    if (printDescriptionPref !== "NONE") {
+      for (const docObj of copiedDocumentIds) {
+        if (docObj.type.toLowerCase() === "pdf") {
+          const reqDoc = req.body.documents.find(
+            (d) => d.documentId === docObj.oldDocId,
+          );
+
+          let descToPrint = "";
+          if (printDescriptionPref === "PROCESS" && description) {
+            descToPrint = description;
+          } else if (
+            printDescriptionPref === "INDIVIDUAL" &&
+            reqDoc &&
+            reqDoc.description
+          ) {
+            descToPrint = reqDoc.description;
+          }
+
+          if (descToPrint && descToPrint.trim() !== "") {
+            const physicalDocInfo = await prisma.document.findUnique({
+              where: { id: parseInt(docObj.newDocId) },
+              select: { path: true },
+            });
+
+            if (physicalDocInfo) {
+              const documentPath = physicalDocInfo.path;
+              const absolutePath = path.join(
+                __dirname,
+                "../../../../",
+                "storage",
+                documentPath,
+              );
+
+              try {
+                const existingPdfBytes = await fs.readFile(absolutePath);
+
+                const pdfDoc = await PDFDocument.load(existingPdfBytes, {
+                  ignoreEncryption: true,
+                });
+
+                const pages = pdfDoc.getPages();
+                if (!pages || pages.length === 0) {
+                  throw new Error("No pages found in the PDF.");
+                }
+
+                const lastPage = pages[pages.length - 1];
+
+                await appendDescriptionToPdf(
+                  pdfDoc,
+                  lastPage,
+                  documentPath,
+                  descToPrint,
+                  pythonEnvPath,
+                  pythonScriptPath,
+                  {},
+                );
+
+                const updatedPdfBytes = await pdfDoc.save();
+                await fs.writeFile(absolutePath, updatedPdfBytes);
+              } catch (pdfError) {}
+            }
+          }
+        }
+      }
+    }
+
+    documentIds = copiedDocumentIds.map((d) => d.newDocId);
 
     const initiatorId = userData.id;
 
@@ -441,8 +723,9 @@ export const initiate_process = async (req, res, next) => {
           name: processName,
           status: "IN_PROGRESS",
           description: description,
+          printDescriptionPref: printDescriptionPref,
           issueNo: issueNo,
-          tags: tag ? [tag] : [], // <-- Save the single tag into the array structure
+          tags: tag ? [tag] : [],
           currentStepId: null,
           reopenCycle: 0,
           storagePath: `../${workflowName}/${processName}`,
@@ -512,7 +795,7 @@ export const initiate_process = async (req, res, next) => {
         reopenCycle: 0,
         SOPIssueNo: issueNo || null,
         preApproved: item.preApproved || false,
-        tags: item.tags || [], // <-- Maintained scope for document tags
+        tags: item.tags || [],
         partNumber: item.partNumber || null,
         description: item.description || null,
         issueNo: item.issueNo || null,
@@ -598,16 +881,13 @@ export const initiate_process = async (req, res, next) => {
           });
         }
       }
-    } catch (emailError) {
-      console.error("Error sending email notification:", emailError);
-    }
+    } catch (emailError) {}
 
     return res.status(200).json({
       message: `Process with the name ${processName} initiated successfully`,
       processId: process.id,
     });
   } catch (error) {
-    console.error("Error initiating the process", error);
     return res.status(500).json({
       message: "Error initiating the process",
       error: "Error initiating the process",
@@ -1743,7 +2023,6 @@ export const view_process = async (req, res) => {
         const processDoc = docIdToProcessDoc.get(currentDocId);
 
         if (!processDoc) {
-          console.log("No processDoc found for docId:", currentDocId);
           break;
         }
 
@@ -1810,7 +2089,6 @@ export const view_process = async (req, res) => {
             issueNo: standaloneDoc.issueNo || null,
             SOPIssueNo: standaloneDoc.SOPIssueNo || null,
             preApproved: standaloneDoc.preApproved,
-            description: standaloneDoc.description,
           },
         ],
       });
@@ -1950,7 +2228,6 @@ export const view_process = async (req, res) => {
               SOPIssueNo: documentWhichSuperseded.SOPIssueNo || null,
               reasonOfSupersed:
                 documentWhichSuperseded.reasonOfSupersed || null,
-              description: documentWhichSuperseded.description || null,
               partNumber: documentWhichSuperseded.partNumber || null,
             },
             latestDocumentId: latestDocument
@@ -2326,13 +2603,13 @@ export const view_process = async (req, res) => {
     const responseData = {
       process: {
         processStoragePath: process.storagePath,
-        description: process.description,
+        description: process.description, // HTML goes perfectly here
         processName: process.name,
         initiatorName: process.initiator.username,
         status: process.status,
         createdAt: process.createdAt,
         issueNo: process.issueNo,
-        tags: process.tags || [], // Mapping tags array
+        tags: process.tags || [],
         processId: process.id,
         reopenCycle: process.reopenCycle,
         versions: versions,
@@ -3531,7 +3808,7 @@ async function copyAndDeleteSingleDocument(processId, documentId, accessToken) {
 
     throw new Error("Copy operation did not return a documentId");
   } catch (error) {
-    console.error(
+    console.log(
       `Error processing document ${documentId} for process ${processId}:`,
       error,
     );
@@ -4964,7 +5241,6 @@ export const get_completed_initiator_processes = async (req, res) => {
     const processes = await prisma.processInstance.findMany({
       where: {
         initiatorId: userData.id,
-        // status: ProcessStatus.COMPLETED,
       },
       include: {
         initiator: {
@@ -4977,6 +5253,8 @@ export const get_completed_initiator_processes = async (req, res) => {
             version: true,
           },
         },
+        // Note: poNumbers is a String[] array in your schema, so it is automatically
+        // fetched. Adding it to "include" would cause a Prisma error.
         currentStep: {
           select: {
             id: true,
@@ -5460,12 +5738,19 @@ export const get_completed_initiator_processes = async (req, res) => {
           version: process.workflow.version,
         };
 
+        // Extracting PO Numbers safely
+        let formattedPOs = [];
+        if (Array.isArray(process.poNumbers)) {
+          formattedPOs = process.poNumbers;
+        }
+
         return {
           processName: process.name,
           initiatorName: process.initiator.username,
           status: process.status,
           createdAt: process.createdAt,
           processId: process.id,
+          poNumbers: formattedPOs,
           processStepInstanceId:
             process.stepInstances.filter(
               (item) => item.status === "IN_PROGRESS",
@@ -5506,8 +5791,6 @@ export const get_completed_initiator_processes = async (req, res) => {
         code: "PROCESS_RETRIEVAL_ERROR",
       },
     });
-  } finally {
-    // await prisma.$disconnect();
   }
 };
 
@@ -5776,8 +6059,6 @@ export const upload_documents_in_process = async (req, res) => {
       },
     });
 
-    console.log("eligible users", eligibleUsers);
-
     if (eligibleUsers.length > 0) {
       await prisma.processStepInstance.createMany({
         data: eligibleUsers.map((user) => ({
@@ -5925,9 +6206,6 @@ export const delete_document_in_process = async (req, res) => {
               status: (code) => ({
                 json: (data) => {
                   if (code === 200) {
-                    console.log(
-                      `Document ${documentId} permanently deleted from drive`,
-                    );
                     resolve(data);
                   } else {
                     console.error(

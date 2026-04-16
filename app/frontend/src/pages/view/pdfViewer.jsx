@@ -1,572 +1,247 @@
-import React, { useState, useEffect, useRef } from 'react';
+'use client';
+
+import React, { useEffect, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
+import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 
 import {
-  Box,
-  Button,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  MenuItem,
-  Select,
-  Stack,
-  TextField,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+  IconZoomIn,
+  IconZoomOut,
+  IconRotate,
+  IconRefresh,
+  IconX,
+} from '@tabler/icons-react';
+
 import { toast } from 'react-toastify';
-import { IconInfoTriangle } from '@tabler/icons-react';
-import CustomModal from '../../CustomComponents/CustomModal';
-import CustomButton from '../../CustomComponents/CustomButton';
-import {
-  getHighlightsInFile,
-  getSignCoordinatesForCurrentStep,
-  postHighlightInFile,
-  removeCoordinates,
-  storeSignCoordinates,
-} from '../../common/Apis';
+import CustomCard from '../../CustomComponents/CustomCard';
 
+// Setup PDF worker
 pdfjs.GlobalWorkerOptions.workerSrc = '/worker.js';
 
-function PdfContainer({
-  url,
-  documentId,
-  workflow,
-  maxReceiverStepNumber,
-  processId,
-  currentStep,
-  controls = true,
-  signed,
-}) {
-  const username = sessionStorage.getItem('username');
-  const initiator = sessionStorage.getItem('initiator') == 'true';
+export default function PdfContainer({ url, contentHigh, refPage, onClose }) {
   const [numPages, setNumPages] = useState(null);
-  const [selectedText, setSelectedText] = useState('');
-  const [coordinates, setCoordinates] = useState([]);
-  const [openRemarksMenu, setOpenRemarksMenu] = useState(false);
-  const [remark, setRemark] = useState('');
-  const [actionsLoading, setActionsLoading] = useState(false);
-  const [highlights, setHighlights] = useState([]);
-  const [signAreas, setSignAreas] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState('');
-  const [drawing, setDrawing] = useState(false);
-  const [currentSignArea, setCurrentSignArea] = useState(null);
+  const [scale, setScale] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  
+  // Track the currently visible page for UX anchoring
+  const [visiblePage, setVisiblePage] = useState(refPage || 1);
+
   const pageRefs = useRef([]);
-  const backendUrl = import.meta.env.VITE_BACKEND_URL;
-  const token = sessionStorage.getItem('accessToken');
+  const renderedPages = useRef(new Set());
+  const scrollContainerRef = useRef(null);
+  const observerRef = useRef(null);
+  const initialScrollDone = useRef(false);
 
-  const [userSignDialogOpen, setUserSignDialogOpen] = useState(false);
+  const targetPage = refPage - 1 || 1;
 
+  /* ---------------- INTERSECTION OBSERVER (Tracks active page) ---------------- */
   useEffect(() => {
-    if (mode === 'signSelection') {
-      document.addEventListener('dblclick', handleMouseDown);
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    } else {
-      document.removeEventListener('dblclick', handleMouseDown);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    }
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        let maxRatio = 0;
+        let activePage = visiblePage;
 
-    return () => {
-      document.removeEventListener('dblclick', handleMouseDown);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [mode, drawing, currentSignArea]);
-
-  useEffect(() => {
-    const handleTextSelection = () => {
-      if (mode !== 'textSelection') return;
-      const selection = window.getSelection();
-      const selectedText = selection.toString()?.trim() || '';
-      if (selectedText.length > 0 && selectedText) {
-        const range = selection.getRangeAt(0);
-        const rects = range.getClientRects();
-        const newCoordinates = [];
-        let isOverlapDetected = false;
-
-        for (const rect of rects) {
-          const container = pageRefs.current.find((ref) =>
-            ref.contains(range.commonAncestorContainer),
-          );
-          if (container) {
-            const containerRect = container.getBoundingClientRect();
-            const rectCoordinates = {
-              page: pageRefs.current.indexOf(container) + 1,
-              x: rect.left - containerRect.left,
-              y: rect.top - containerRect.top,
-              width: rect.width,
-              height: rect.height,
-            };
-            const isOverlap = highlights.some((highlight) =>
-              highlight.coordinates.some(
-                (hCoord) =>
-                  hCoord.page === rectCoordinates.page &&
-                  hCoord.y < rectCoordinates.y + rectCoordinates.height &&
-                  hCoord.y + hCoord.height > rectCoordinates.y &&
-                  ((hCoord.x >= rectCoordinates.x &&
-                    hCoord.x <= rectCoordinates.x + rectCoordinates.width) ||
-                    (rectCoordinates.x >= hCoord.x &&
-                      rectCoordinates.x <= hCoord.x + hCoord.width)),
-              ),
-            );
-
-            if (isOverlap) {
-              isOverlapDetected = true;
-              break;
-            } else {
-              newCoordinates.push(rectCoordinates);
-            }
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && entry.intersectionRatio > maxRatio) {
+            maxRatio = entry.intersectionRatio;
+            const pageIndex = parseInt(entry.target.getAttribute('data-page-index'), 10);
+            if (!isNaN(pageIndex)) activePage = pageIndex;
           }
-        }
-        if (isOverlapDetected) {
-          toast.info('Selected text overlaps with existing highlights.');
-        } else if (newCoordinates.length > 0) {
-          setSelectedText(selectedText);
-          setCoordinates([{ remark: '', coordinates: newCoordinates }]);
-          setOpenRemarksMenu(true);
-        }
-      }
-    };
+        });
 
-    document.addEventListener('mouseup', handleTextSelection);
+        if (maxRatio > 0) {
+          setVisiblePage(activePage);
+        }
+      },
+      {
+        root: scrollContainerRef.current,
+        rootMargin: '0px',
+        threshold: [0.1, 0.5, 0.9], // Check at multiple visibility depths
+      }
+    );
 
     return () => {
-      document.removeEventListener('mouseup', handleTextSelection);
+      if (observerRef.current) observerRef.current.disconnect();
     };
-  }, [mode, highlights]);
+  }, []); // Run once on mount
 
-  const handleMouseDown = (e) => {
-    if (userSignDialogOpen) return;
-    if (mode === 'signSelection') {
-      setDrawing(true);
-      const container = pageRefs.current.find((ref) => ref.contains(e.target));
-      if (container) {
-        const containerRect = container.getBoundingClientRect();
-        setCurrentSignArea({
-          page: pageRefs.current.indexOf(container) + 1,
-          x: e.clientX - containerRect.left,
-          y: e.clientY - containerRect.top,
-          width: 0,
-          height: 0,
-        });
-      }
-    }
-  };
-
-  const handleMouseMove = (e) => {
-    if (mode === 'signSelection' && drawing && currentSignArea) {
-      const container = pageRefs.current[currentSignArea.page - 1];
-      if (container) {
-        const containerRect = container.getBoundingClientRect();
-        const width = Math.max(
-          0,
-          e.clientX - containerRect.left - currentSignArea.x,
-        );
-        const height = Math.max(
-          0,
-          e.clientY - containerRect.top - currentSignArea.y,
-        );
-        setCurrentSignArea({
-          ...currentSignArea,
-          width: width,
-          height: height,
-        });
-      }
-    }
-  };
-
-  const handleMouseUp = () => {
-    setDrawing(false);
-    if (mode === 'signSelection' && drawing) {
-      setDrawing(false);
-      if (currentSignArea.width > 0 && currentSignArea.height > 0) {
-        setUserSignDialogOpen(true);
-      }
-    }
-  };
-
-  const [userSelected, setUserSelected] = useState(null);
-  const submitSignArea = async () => {
-    setActionsLoading(true);
-    try {
-      await storeSignCoordinates({
-        docId: documentId,
-        processId,
-        coordinates: [{ ...currentSignArea, stepNo: userSelected }],
-      });
-      setSignAreas((prev) => [
-        ...prev,
-        { ...currentSignArea, stepNo: userSelected },
-      ]);
-      setCurrentSignArea(null);
-      setUserSignDialogOpen(false);
-      setUserSelected(null);
-    } catch (error) {
-      toast.error(error?.response?.data?.message || error?.message);
-    } finally {
-      setActionsLoading(false);
-    }
-  };
-
-  const onSignAreaDialogClose = () => {
-    setCurrentSignArea(null);
-    setUserSignDialogOpen(false);
-    setUserSelected(null);
-  };
-
+  /* ---------------- PDF LOAD & RENDER ---------------- */
   const onDocumentLoadSuccess = ({ numPages }) => {
     setNumPages(numPages);
-    setLoading(false);
   };
 
-  const removeSignArea = async (signArea, index) => {
-    try {
-      const response = await removeCoordinates({
-        documentId,
-        coordinates: signArea,
-      });
-      setSignAreas((prev) => prev.filter((_, i) => i !== index));
-      toast.success(response?.data?.message);
-    } catch (error) {
-      toast.error(error?.response?.data?.message || error?.message);
+  const handleRenderSuccess = (pageNumber) => {
+    renderedPages.current.add(pageNumber);
+
+    const el = pageRefs.current[pageNumber - 1];
+    if (el) {
+      el.setAttribute('data-page-index', pageNumber);
+      observerRef.current?.observe(el); // Start tracking this page
+    }
+
+    // Initial load jump to target page
+    if (pageNumber === targetPage && !initialScrollDone.current) {
+      const container = scrollContainerRef.current;
+      if (container && el) {
+        container.scrollTo({ top: el.offsetTop - 20, behavior: 'smooth' });
+      }
+      initialScrollDone.current = true;
     }
   };
 
-  const [openTooltip, setOpenTooltip] = useState(false);
-  const renderPages = () => {
-    const pages = [];
-    for (let i = 1; i <= numPages; i++) {
-      pages.push(
-        <Box
-          key={i}
-          ref={(el) => (pageRefs.current[i - 1] = el)}
-          className="pdf-page"
-          position="relative"
-        >
-          <Page
-            className={'!block !mx-auto w-fit'}
-            pageNumber={i}
-            renderTextLayer
-          />
-          {highlights.map((highlight, index1) =>
-            highlight.coordinates
-              .filter((coord) => coord.page === i)
-              .map((coord, index2) => (
-                <>
-                  <Box
-                    sx={{
-                      display:
-                        openTooltip?.x == coord?.x && openTooltip?.y == coord?.y
-                          ? 'block'
-                          : 'none',
-                      position: 'absolute',
-                      width: 'fit-content',
-                      right: 10,
-                      background: 'white',
-                      boxShadow:
-                        'rgba(6, 24, 44, 0.4) 0px 0px 0px 2px, rgba(6, 24, 44, 0.65) 0px 4px 6px -1px, rgba(255, 255, 255, 0.08) 0px 1px 0px inset',
-                      padding: '2px',
-                      top: coord.y + coord.height,
-                      left: coord.x,
-                      zIndex: 3,
-                    }}
-                  >
-                    <Typography fontWeight={700} fontSize={14} color="black">
-                      User : {highlight.createdBy}
-                    </Typography>
-                    <Typography fontWeight={700} fontSize={14} color="black">
-                      Remarks : {highlight.remark}
-                    </Typography>
-                  </Box>
-                  <div
-                    onMouseEnter={() =>
-                      setOpenTooltip({ x: coord.x, y: coord.y })
-                    }
-                    onMouseLeave={() => setOpenTooltip(null)}
-                    style={{
-                      userSelect: 'none',
-                      position: 'absolute',
-                      zIndex: 2,
-                      top: coord.y,
-                      left: coord.x,
-                      width: coord.width,
-                      height: coord.height,
-                      backgroundColor: generateColor(index1),
-                      backgroundBlendMode: 'lighten',
-                      borderRadius: '2px',
-                      cursor: 'pointer',
-                    }}
-                  />
-                </>
-              )),
-          )}
-          {mode === 'signSelection' &&
-            currentSignArea &&
-            currentSignArea.page === i && (
-              <Box
-                sx={{
-                  position: 'absolute',
-                  top: currentSignArea.y,
-                  left: currentSignArea.x,
-                  width: currentSignArea.width,
-                  height: currentSignArea.height,
-                  border: '2px dashed red',
-                  backgroundColor: 'rgba(255, 0, 0, 0.3)',
-                }}
-              />
-            )}
-
-          {signAreas
-            ?.filter((signArea) => signArea.page === i)
-            ?.map((signArea, index) => (
-              <Tooltip
-                title={
-                  signArea?.isSigned
-                    ? signArea.signedBy
-                    : workflow
-                        ?.find((item) => item.step == signArea.stepNo)
-                        ?.users?.map((user) => user.user)
-                        .join(',')
-                }
-              >
-                <Box
-                  key={index}
-                  sx={{
-                    position: 'absolute',
-                    top: signArea.y,
-                    left: signArea.x,
-                    width: signArea.width,
-                    height: signArea.height,
-                    border: workflow?.length ? '2px solid red' : null,
-                    backgroundColor:
-                      signed && workflow?.length ? '#FAD4D477' : null,
-                    zIndex: 20,
-                  }}
-                >
-                  {initiator ? (
-                    <Button
-                      onClick={() => removeSignArea(signArea, index)}
-                      sx={{
-                        position: 'absolute',
-                        top: -10,
-                        right: -10,
-                        backgroundColor: 'white',
-                        borderRadius: '50%',
-                        width: '20px',
-                        height: '20px',
-                        minWidth: '0',
-                        padding: '0',
-                        border: '2px solid red',
-                        zIndex: 9,
-                      }}
-                    >
-                      X
-                    </Button>
-                  ) : null}
-                </Box>
-              </Tooltip>
-            ))}
-        </Box>,
-      );
-    }
-    return pages;
+  /* ---------------- ZOOM & ROTATE WITH SCROLL ANCHORING ---------------- */
+  const maintainScrollPosition = (action) => {
+    action(); // Update the zoom/rotate state
+    
+    // Wait a brief moment for the React-PDF canvas to resize, then snap scroll back to the active page
+    setTimeout(() => {
+      const el = pageRefs.current[visiblePage - 1];
+      const container = scrollContainerRef.current;
+      if (el && container) {
+        container.scrollTo({ top: el.offsetTop - 20, behavior: 'auto' });
+      }
+    }, 100); 
   };
 
-  function generateColor(num) {
-    const hash = num * 123456789;
-    const r = 200 + (((hash & 0xff0000) >> 16) % 56);
-    const g = 200 + (((hash & 0x00ff00) >> 8) % 56);
-    const b = 200 + ((hash & 0x0000ff) % 56);
-    return `rgba(${r}, ${g}, ${b}, 0.3)`;
-  }
+  const zoomIn = () => maintainScrollPosition(() => setScale((s) => Math.min(s + 0.2, 3)));
+  const zoomOut = () => maintainScrollPosition(() => setScale((s) => Math.max(s - 0.2, 0.5)));
+  const resetZoom = () => maintainScrollPosition(() => setScale(1));
+  const rotateRight = () => maintainScrollPosition(() => setRotation((r) => (r + 90) % 360));
+  const resetRotation = () => maintainScrollPosition(() => setRotation(0));
 
-  const [remarkError, setRemarkError] = useState('');
-  
-  const getFileHighlights = async () => {
-    try {
-      const res = await getHighlightsInFile(documentId);
-      setHighlights(res.data.highlights);
-    } catch (error) {
-      console.log(error.message);
-    }
-  };
+  /* ---------------- HIGHLIGHT LOGIC ---------------- */
+  const escapeRegex = (text = '') => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  const getSignCoordinates = async () => {
-    try {
-      const res = await getSignCoordinatesForCurrentStep({
-        docId: documentId,
-        processId: processId,
-        stepNo: currentStep,
-        initiator,
-      });
-      setSignAreas(res?.data?.coordinates);
-    } catch (error) {
-      console.log(error?.response?.data?.message || error?.message);
-    }
+  const highlightMatches = () => {
+    const spans = document.querySelectorAll('.react-pdf__Page__textContent span');
+    if (!contentHigh) return;
+
+    const safeContent = escapeRegex(contentHigh);
+    spans.forEach((span) => {
+      const text = span.textContent || '';
+      span.innerHTML = text;
+
+      if (contentHigh) {
+        const regex = new RegExp(`(${safeContent})`, 'gi');
+        if (regex.test(text)) {
+          span.innerHTML = text.replace(regex, `<mark class="pdf-content">$1</mark>`);
+        }
+      }
+    });
   };
 
   useEffect(() => {
-    getFileHighlights();
-    getSignCoordinates();
-  }, []);
+    const t = setTimeout(highlightMatches, 300);
+    return () => clearTimeout(t);
+  }, [numPages, scale, rotation, contentHigh]);
 
-  const submitRemarks = async () => {
-    if (!remark) {
-      setRemarkError('Enter Remarks');
-      return;
-    }
-    setActionsLoading(true);
-    const data = {
-      remark,
-      coordinates: coordinates[0].coordinates,
-      documentId,
-    };
-    try {
-      const res = await postHighlightInFile(data);
-      toast.success(res?.data?.message || 'Remarks Submitted');
-      setOpenRemarksMenu(false);
-      getFileHighlights();
-      setRemark('');
-    } catch (error) {
-      toast.error(error?.response?.data?.message || error?.message);
-    } finally {
-      setActionsLoading(false);
-    }
-  };
+  /* ---------------- RENDER ---------------- */
+  const iconBtnClass =
+    'p-2 text-gray-700 hover:bg-gray-200 rounded-md transition-colors flex items-center justify-center shrink-0';
 
   return (
-    <div
-      style={{
-        userSelect: mode === 'signSelection' ? 'none' : 'auto',
-      }}
-    >
-      {controls ? (
-        <div className="bg-white sticky top-11 z-20 p-2 mb-1">
-          <div className="flex justify-between">
-            {false ? (
-              <>
-                <button
-                  className={`${
-                    mode === 'textSelection'
-                      ? 'bg-blue-500 text-white'
-                      : 'border border-gray-300 text-gray-700'
-                  } p-2 rounded-md`}
-                  onClick={() => setMode('textSelection')}
-                >
-                  Text Selection Mode
-                </button>
-                <button
-                  className={`${
-                    mode === 'signSelection'
-                      ? 'bg-blue-500 text-white'
-                      : 'border border-gray-300 text-gray-700'
-                  } p-2 rounded-md`}
-                  onClick={() => setMode('signSelection')}
-                >
-                  Sign Selection Mode
-                </button>
-              </>
-            ) : null}
-          </div>
+    // Fixed height layout ensures the toolbar is immune to scrolling
+    <CustomCard className="p-0 flex flex-col h-[85vh] overflow-hidden bg-white relative shadow-lg">
+      
+      {/* 1. STRICTLY STATIC TOOLBAR */}
+      <div className="flex-none w-full bg-white border-b border-gray-200 flex items-center justify-between px-3 py-2 min-h-[60px] z-50">
+        
+        {/* Left Side: Page Indicator */}
+        <div className="flex-1 min-w-0 flex items-center pl-2">
+           <span className="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+             Page {visiblePage} {numPages ? `of ${numPages}` : ''}
+           </span>
         </div>
-      ) : null}
 
-      <Document
-        // ✅ CORS FIX: Simply pass the URL string. 
-        // Because the URL already has `?token=...`, the backend will authorize it natively.
-        // This stops react-pdf from injecting custom headers, allowing the browser to skip the strict OPTIONS preflight entirely.
-        file={url}
-        onLoadSuccess={onDocumentLoadSuccess}
-        onLoadError={(error) => {
-          console.error('PDF Load Error:', error);
-          toast.error(`Failed to load PDF: ${error.message}`);
-        }}
-        loading={
-          <div className="flex justify-center items-center h-[70vh]">
-            <div className="animate-spin rounded-full border-t-4 border-blue-500 w-12 h-12"></div>
-          </div>
-        }
-      >
-        {renderPages()}
-      </Document>
+        {/* Middle: Controls */}
+        <div className="flex items-center justify-center gap-1 sm:gap-2 overflow-x-auto no-scrollbar px-2 shrink-0">
+          <button type="button" onClick={zoomOut} className={iconBtnClass} title="Zoom Out">
+            <IconZoomOut size={18} />
+          </button>
+          <h3 className="text-sm font-medium w-12 text-center text-gray-700 shrink-0">
+            {Math.round(scale * 100)}%
+          </h3>
+          <button type="button" onClick={zoomIn} className={iconBtnClass} title="Zoom In">
+            <IconZoomIn size={18} />
+          </button>
+          <button type="button" onClick={resetZoom} className={iconBtnClass} title="Reset Zoom">
+            <IconRefresh size={18} />
+          </button>
 
-      {openRemarksMenu && (
-        <CustomModal
-          isOpen={openRemarksMenu}
-          onClose={() => setOpenRemarksMenu(false)}
-          className="w-96"
-        >
-          <div className="rounded-md font-semibold">Enter Remarks</div>
-          <div className="flex flex-col gap-2">
-            <textarea
-              value={remark}
-              onChange={(e) => setRemark(e.target.value)}
-              rows={3}
-              className="w-full p-2 border border-gray-300 rounded-md resize-none"
-            ></textarea>
-            <CustomButton
-              click={submitRemarks}
-              text="Submit"
-              disabled={actionsLoading}
-            />
-          </div>
-        </CustomModal>
-      )}
+          <div className="w-px h-5 bg-gray-300 mx-1 sm:mx-2 shrink-0"></div>
 
-      {userSignDialogOpen && (
-        <CustomModal
-          isOpen={userSignDialogOpen}
-          onClose={onSignAreaDialogClose}
-        >
-          <form className="bg-white rounded-lg max-w-md mx-auto space-y-4">
-            <div className="text-lg font-semibold rounded-md">
-              Select user you want sign of here
-            </div>
+          <button type="button" onClick={rotateRight} className={iconBtnClass} title="Rotate 90°">
+            <IconRotate size={18} />
+          </button>
+          <button type="button" onClick={resetRotation} className={iconBtnClass} title="Reset Rotation">
+            <IconRefresh size={18} />
+          </button>
+        </div>
 
-            <div>
-              <select
-                id="userSelect"
-                value={userSelected}
-                onChange={(e) => setUserSelected(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-gray-800"
-              >
-                {workflow
-                  ?.filter(
-                    (item) =>
-                      !item.users.some((user) => user.user === username),
-                  )
-                  .filter((item) => item.step <= maxReceiverStepNumber)
-                  .map((item) => (
-                    <option key={item.step} value={item.step}>
-                      forward to{' '}
-                      {item.users.map((user) => user.user).join(', ')} for work{' '}
-                      {item.work} (step - {item.step})
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div className="flex w-full">
-              <CustomButton
-                className="w-full"
-                text="Submit"
+        {/* Right Side: Close Button */}
+        <div className="flex-1 flex justify-end min-w-0 pr-1">
+          {onClose && (
+            <div className="border-l border-gray-200 pl-3 ml-2">
+              <button
                 type="button"
-                click={submitSignArea}
-                disabled={actionsLoading}
+                onClick={onClose}
+                className="p-2 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-md transition-colors flex items-center justify-center shrink-0"
+                title="Close"
+              >
+                <IconX size={20} strokeWidth={2.5} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 2. INDEPENDENTLY SCROLLING PDF CONTAINER */}
+      <div 
+        ref={scrollContainerRef}
+        className="flex-1 bg-gray-100 py-6 overflow-y-auto relative"
+      >
+        <Document
+          file={url}
+          onLoadSuccess={onDocumentLoadSuccess}
+          onLoadError={(e) => {
+            console.error(e);
+            toast.error('Failed to load PDF');
+          }}
+          loading={
+            <div className="flex justify-center items-center h-[50vh]">
+              <div className="animate-spin rounded-full border-t-4 border-blue-500 w-10 h-10"></div>
+            </div>
+          }
+        >
+          {Array.from({ length: numPages || 0 }, (_, i) => (
+            <div
+              key={i}
+              ref={(el) => (pageRefs.current[i] = el)}
+              className="mb-8 flex justify-center shadow-md bg-white w-fit mx-auto transition-all duration-200 relative"
+            >
+              <Page
+                pageNumber={i + 1}
+                scale={scale}
+                rotate={rotation}
+                renderTextLayer
+                renderAnnotationLayer={false}
+                onRenderSuccess={() => handleRenderSuccess(i + 1)}
               />
             </div>
-          </form>
-        </CustomModal>
-      )}
-    </div>
+          ))}
+        </Document>
+      </div>
+
+      {/* HIGHLIGHT STYLES */}
+      <style>
+        {`
+          mark.pdf-content {
+            background: rgba(0, 140, 255, 0.45);
+            padding: 0;
+          }
+        `}
+      </style>
+    </CustomCard>
   );
 }
-
-export default PdfContainer;

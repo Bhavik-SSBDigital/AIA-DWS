@@ -148,7 +148,31 @@ const ViewProcess = () => {
         </div>
       ) : 'None'
     },
-    { label: 'Description', value: process?.description || 'N/A' },
+    {
+      label: 'Description',
+      value: process?.description ? (
+        <div
+           className="w-full max-h-64 overflow-y-auto border border-slate-200 bg-white p-5 rounded-lg shadow-inner text-sm text-slate-700
+              /* Lists Styling */
+              [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:mb-3 [&_ul]:space-y-1 
+              [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:mb-3 [&_ol]:space-y-1 
+              /* Table Styling */
+              [&_table]:w-full [&_table]:border-collapse [&_table]:mb-4 [&_table]:mt-2 [&_table]:bg-white [&_table]:block [&_table]:overflow-x-auto
+              [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-slate-800
+              [&_td]:border [&_td]:border-slate-300 [&_td]:px-4 [&_td]:py-2.5 [&_td]:align-top
+              /* Typography */
+              [&_b]:font-bold [&_strong]:font-bold 
+              [&_i]:italic [&_em]:italic 
+              [&_u]:underline
+              [&_p]:mb-3 [&_p]:leading-relaxed
+              [&_h1]:text-lg [&_h1]:font-bold [&_h1]:mb-2 [&_h1]:text-slate-900
+              [&_h2]:text-base [&_h2]:font-bold [&_h2]:mb-2 [&_h2]:text-slate-900
+              [&_h3]:text-sm [&_h3]:font-bold [&_h3]:mb-2 [&_h3]:text-slate-900
+              [&_a]:text-blue-600 [&_a]:underline"
+           dangerouslySetInnerHTML={{ __html: process.description }}
+        />
+      ) : 'N/A'
+    },
     { label: 'Initiator Name', value: process?.initiatorName || 'Unknown' },
     {
       label: 'Status',
@@ -211,7 +235,7 @@ const ViewProcess = () => {
   const DetailItem = ({ label, value }) => (
     <div className="flex flex-col gap-1">
       <span className="text-sm text-slate-500 font-medium uppercase tracking-wide">{label}</span>
-      <span className="text-base font-semibold text-slate-800 break-words">{value}</span>
+      <div className="text-base font-semibold text-slate-800 break-words">{value}</div>
     </div>
   );
 
@@ -337,6 +361,20 @@ const ViewProcess = () => {
       setActionsLoading(false);
     }
   };
+
+  // --- Added Clean Handlers for Approve All Modal ---
+  const toggleRemarks = () => {
+    setSignAllModalOpen((prev) => ({ ...prev, withRemarks: !prev.withRemarks }));
+  };
+
+  const handleRemarkChange = (index, value) => {
+    setSignAllModalOpen((prev) => {
+      const updatedDocuments = [...prev.listOfDocuments];
+      updatedDocuments[index] = { ...updatedDocuments[index], remarks: value };
+      return { ...prev, listOfDocuments: updatedDocuments };
+    });
+  };
+  // ----------------------------------------------------
 
   const handleViewAllSelectedFiles = async () => {
     setActionsLoading(true);
@@ -845,7 +883,9 @@ const ViewProcess = () => {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-6 gap-x-8 p-6">
           {processDetails.map((detail, index) => (
-            <DetailItem key={index} label={detail.label} value={detail.value} />
+            <div key={index} className={detail.label === 'Description' ? "col-span-1 sm:col-span-2 md:col-span-3 lg:col-span-4" : ""}>
+              <DetailItem label={detail.label} value={detail.value} />
+            </div>
           ))}
         </div>
       </CustomCard>
@@ -977,18 +1017,18 @@ const ViewProcess = () => {
                           </div>
                         )}
 
-{threadEmails.length > 0 && (
-  <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end">
-    <button
-      onClick={() => handleViewEmailThread(thread)}
-      disabled={actionsLoading}
-      className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 hover:border-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      <IconEye size={16} />
-      View Thread
-    </button>
-  </div>
-)}
+                        {threadEmails.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-slate-100 flex justify-end">
+                            <button
+                              onClick={() => handleViewEmailThread(thread)}
+                              disabled={actionsLoading}
+                              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 hover:border-blue-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <IconEye size={16} />
+                              View Thread
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1009,16 +1049,16 @@ const ViewProcess = () => {
                 </h2>
                 <div className="flex-grow border-t border-slate-200 hidden sm:block"></div>
             </div>
-<div className="pl-4 shrink-0">
-  <button
-    disabled={selectedDocs.length === 0}
-    onClick={handleViewAllSelectedFiles}
-    className="flex items-center gap-2 ml-auto px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg shadow-sm hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-  >
-    <IconEye size={16} />
-    View Selected ({selectedDocs.length})
-  </button>
-</div>
+            <div className="pl-4 shrink-0">
+              <button
+                disabled={selectedDocs.length === 0}
+                onClick={handleViewAllSelectedFiles}
+                className="flex items-center gap-2 ml-auto px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg shadow-sm hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <IconEye size={16} />
+                View Selected ({selectedDocs.length})
+              </button>
+            </div>
           </div>
 
          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1091,6 +1131,20 @@ const ViewProcess = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* Document specific formatted description render with responsive table support */}
+                  {doc.description && (
+                     <div className="mb-4 mx-4 bg-slate-50 p-4 rounded-lg border border-slate-200 max-h-48 overflow-y-auto text-sm text-slate-700 shadow-inner
+                            [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:mb-2 [&_ul]:space-y-1
+                            [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:mb-2 [&_ol]:space-y-1
+                            [&_table]:w-full [&_table]:border-collapse [&_table]:mb-3 [&_table]:bg-white [&_table]:block [&_table]:overflow-x-auto
+                            [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold
+                            [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2
+                            [&_b]:font-bold [&_strong]:font-bold [&_i]:italic [&_em]:italic [&_u]:underline 
+                            [&_p]:mb-2 [&_p]:leading-relaxed [&_h1]:font-bold [&_h2]:font-bold [&_h3]:font-bold"
+                          dangerouslySetInnerHTML={{ __html: doc.description }}>
+                     </div>
+                  )}
 
                   <div className="mt-auto pt-4 border-t border-slate-100 flex flex-wrap justify-end gap-2 bg-slate-50/50 -mx-4 -mb-4 p-4 rounded-b-xl">
                     <CustomButton
@@ -1721,10 +1775,23 @@ const ViewProcess = () => {
                 label="Name"
                 value={documentModalOpen?.name || '--'}
               />
-              <DetailItem
-                label="Description"
-                value={documentModalOpen?.description || '--'}
-              />
+              <div className="md:col-span-2">
+                <DetailItem
+                    label="Description"
+                    value={
+                        documentModalOpen?.description ? (
+                            <div className="max-h-64 overflow-y-auto bg-white p-5 rounded-lg border border-slate-200 text-sm text-slate-700 shadow-sm
+                                [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:mb-2 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:mb-2 [&_ol]:space-y-1
+                                [&_table]:w-full [&_table]:border-collapse [&_table]:mb-3 [&_table]:bg-white [&_table]:block [&_table]:overflow-x-auto
+                                [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-4 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold
+                                [&_td]:border [&_td]:border-slate-300 [&_td]:px-4 [&_td]:py-2
+                                [&_b]:font-bold [&_strong]:font-bold [&_i]:italic [&_em]:italic [&_u]:underline 
+                                [&_p]:mb-2 [&_p]:leading-relaxed [&_h1]:font-bold [&_h2]:font-bold [&_h3]:font-bold"
+                            dangerouslySetInnerHTML={{ __html: documentModalOpen.description }} />
+                        ) : '--'
+                    }
+                />
+              </div>
               <DetailItem
                 label="Created At"
                 value={
@@ -1997,105 +2064,87 @@ const ViewProcess = () => {
             listOfDocuments: [],
           });
         }}
-        className={'max-h-[95vh] overflow-auto max-w-xl w-full rounded-xl'}
+        className={'max-h-[90vh] flex flex-col max-w-2xl w-full rounded-xl overflow-hidden bg-white'}
       >
-        <div className="p-4 sm:p-6">
-          <h2 className="text-xl font-bold mb-2 text-slate-800 flex items-center gap-2"><IconCheck className="text-emerald-500" size={24}/> Approve All Documents</h2>
-          <p className="mb-6 text-slate-500 text-sm">
-            Are you sure you want to approve all valid PDF documents in this process?
+        <div className="px-6 py-5 border-b border-slate-100 bg-white z-10 shrink-0">
+          <h2 className="text-xl font-bold mb-1 text-slate-800 flex items-center gap-2">
+            <IconCheck className="text-emerald-500" size={24} /> 
+            Approve All Documents
+          </h2>
+          <p className="text-slate-500 text-sm">
+            You are about to approve {signAllModalOpen.listOfDocuments.length} valid PDF document(s).
           </p>
+        </div>
+
+        <div className="px-6 py-5 overflow-y-auto flex-1 bg-slate-50/50">
           {signAllModalOpen.listOfDocuments.length > 0 && (
-            <>
-              <div className="mb-6 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    name="signWithRemarks"
-                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
-                    checked={signAllModalOpen.withRemarks}
-                    onChange={() => {
-                      setSignAllModalOpen({
-                        ...signAllModalOpen,
-                        withRemarks: !signAllModalOpen.withRemarks,
-                      });
-                    }}
-                  />
-                  <span className="ml-3 font-semibold text-slate-700">Add remarks to documents</span>
-                </label>
-              </div>
+            <div className="flex flex-col gap-5">
+              
+              <label className="flex items-center p-4 bg-white rounded-lg border border-slate-200 shadow-sm cursor-pointer hover:bg-slate-50 transition-colors">
+                <input
+                  type="checkbox"
+                  name="signWithRemarks"
+                  className="w-5 h-5 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                  checked={signAllModalOpen.withRemarks}
+                  onChange={toggleRemarks}
+                />
+                <span className="ml-3 font-semibold text-slate-700">
+                  Add remarks to documents
+                </span>
+              </label>
+
               {signAllModalOpen.withRemarks && (
-                <div className="mb-6 rounded-lg overflow-hidden border border-slate-200">
-                  <table className="w-full text-sm text-left bg-white">
-                    <thead className="bg-slate-100 text-slate-600 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
-                      <tr>
-                        <th className="px-4 py-3 w-2/5">
-                          Document Name
-                        </th>
-                        <th className="px-4 py-3 w-3/5 border-l border-slate-200">
-                          Remarks
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {signAllModalOpen.listOfDocuments.map((doc, index) => (
-                        <tr key={index}>
-                          <td className="px-4 py-3 align-top">
-                            <div className="font-semibold text-slate-800 break-words line-clamp-2" title={doc.name}>
-                              {doc.name}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 border-l border-slate-100">
-                            <textarea
-                              placeholder="Type remarks here..."
-                              value={doc.remarks || ''}
-                              onChange={(e) => {
-                                const updatedDocuments = [
-                                  ...signAllModalOpen.listOfDocuments,
-                                ];
-                                updatedDocuments[index].remarks =
-                                  e.target.value;
-                                setSignAllModalOpen({
-                                  ...signAllModalOpen,
-                                  listOfDocuments: updatedDocuments,
-                                });
-                              }}
-                              className="w-full p-2 text-sm border border-slate-300 rounded outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-y min-h-[60px] shadow-sm"
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="flex flex-col gap-4">
+                  {signAllModalOpen.listOfDocuments.map((doc, index) => (
+                    <div key={index} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
+                      <div className="mb-3">
+                        <h4 className="font-semibold text-slate-800 break-words line-clamp-1" title={doc.name}>
+                          {doc.name}
+                        </h4>
+                      </div>
+                      
+                      <textarea
+                        placeholder="Enter professional remarks here..."
+                        value={doc.remarks || ''}
+                        onChange={(e) => handleRemarkChange(index, e.target.value)}
+                        rows={3}
+                        className="w-full p-3 text-sm text-slate-700 bg-slate-50 border border-slate-300 rounded-md outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all resize-y min-h-[100px]"
+                      />
+                    </div>
+                  ))}
                 </div>
               )}
-            </>
+              
+            </div>
           )}
-          <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-            <CustomButton
-              variant="secondary"
-              text={'Cancel'}
-              className="bg-white"
-              click={() => {
-                setSignAllModalOpen({
-                  open: false,
-                  withRemarks: false,
-                  listOfDocuments: [],
-                });
-              }}
-            />
-            <CustomButton
-              variant="primary"
-              text={'Confirm'}
-              click={async () => {
-                await handleSignAllDocuments();
-                setSignAllModalOpen({
-                  open: false,
-                  withRemarks: false,
-                  listOfDocuments: [],
-                });
-              }}
-            />
-          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 shrink-0 flex justify-end gap-3 z-10">
+          <CustomButton
+            variant="secondary"
+            text="Cancel"
+            className="bg-white border-slate-300 hover:bg-slate-50 text-slate-700"
+            click={() => {
+              setSignAllModalOpen({
+                open: false,
+                withRemarks: false,
+                listOfDocuments: [],
+              });
+            }}
+          />
+          <CustomButton
+            variant="primary"
+            text="Confirm & Approve"
+            className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+            click={async () => {
+              await handleSignAllDocuments();
+              setSignAllModalOpen({
+                open: false,
+                withRemarks: false,
+                listOfDocuments: [],
+              });
+            }}
+          />
         </div>
       </CustomModal>
 

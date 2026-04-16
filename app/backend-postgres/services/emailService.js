@@ -34,7 +34,6 @@ export const transporter = nodemailer.createTransport({
 // });
 
 const formatTags = (tags) => {
-  console.log("tags", tags);
   if (!tags || tags.length === 0) return "<span>None</span>";
   return `<div style="margin: 4px 0;">${tags.map((tag) => `<span style="display: inline-block; background-color: #e9ecef; border-radius: 16px; padding: 4px 12px; margin-right: 4px; font-size: 13px; font-weight: 600; color: #495057;">${tag}</span>`).join("")}</div>`;
 };
@@ -133,26 +132,60 @@ const generateEmailTemplate = (data) => {
     timelineDetails,
     quickAccessLinks,
     closingMessage,
-    text,
   } = data;
 
   return `
     <!DOCTYPE html>
     <html>
     <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <style>
+        /* --- General Reset & Typography --- */
+        body, table, td, th, p, h1, h2, h3, div { 
+          margin: 0; 
+          padding: 0; 
+          box-sizing: border-box;
+        }
         body { 
           font-family: Arial, sans-serif; 
           line-height: 1.6; 
           color: #333; 
-          margin: 0;
-          padding: 0;
+          background-color: #f4f7f6; /* Soft background outside container */
+          font-size: 12px; /* Matched from PDF script */
         }
+
+        /* --- PDF-Matched Description Formatting --- */
+        table {
+          border-collapse: collapse;
+          width: 100%; /* Better email compatibility than max-content */
+          background-color: #ffffff;
+          margin: 10px 0;
+        }
+        th, td {
+          border: 1px solid #999;
+          padding: 6px;
+          text-align: left;
+          /* Optional: uncomment below if you strictly want no-wrap in emails */
+          /* white-space: nowrap; */ 
+        }
+        th {
+          background-color: #f2f2f2 !important;
+          font-weight: bold;
+        }
+        .description-container {
+          background-color: #ffffff;
+          width: 100%;
+          overflow-x: auto; /* Allows scrolling on mobile if tables are wide */
+        }
+
+        /* --- Email Layout Styles --- */
         .container { 
           max-width: 700px; 
-          margin: 0 auto; 
+          margin: 20px auto; 
           padding: 30px; 
           background-color: #ffffff;
+          border: 1px solid #ddd;
+          border-radius: 8px;
         }
         .header { 
           text-align: center;
@@ -177,17 +210,17 @@ const generateEmailTemplate = (data) => {
         h1 { 
           color: #0056b3; 
           font-size: 24px;
-          margin: 0;
+          margin-bottom: 10px;
         }
         h2 {
           color: #333;
           font-size: 18px;
-          margin-top: 0;
           margin-bottom: 15px;
         }
         p {
           margin: 10px 0;
           color: #444;
+          font-size: 14px; /* Kept standard reading size for emails */
         }
         ul {
           margin: 10px 0;
@@ -214,11 +247,6 @@ const generateEmailTemplate = (data) => {
           color: #666;
           text-align: center;
         }
-        .signature {
-          margin-top: 30px;
-          font-style: italic;
-          color: #555;
-        }
         .highlight {
           background-color: #fff3cd;
           padding: 10px;
@@ -237,11 +265,27 @@ const generateEmailTemplate = (data) => {
         <div class="content">
           <p><strong>${greeting}</strong></p>
           
-          ${message}
+          <div class="description-container">
+            ${message}
+          </div>
           
-          ${processDetails ? `<div class="section">${processDetails}</div>` : ""}
+          ${
+            processDetails
+              ? `
+          <div class="section description-container">
+            ${processDetails}
+          </div>`
+              : ""
+          }
           
-          ${timelineDetails ? `<div class="section">${timelineDetails}</div>` : ""}
+          ${
+            timelineDetails
+              ? `
+          <div class="section description-container">
+            ${timelineDetails}
+          </div>`
+              : ""
+          }
           
           ${quickAccessLinks ? `<div class="section links-section">${quickAccessLinks}</div>` : ""}
           
@@ -277,7 +321,6 @@ export const sendEmail = async (to, subject, templateData) => {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log("Email sent:", info.messageId);
     return info;
   } catch (error) {
     console.error("Error sending email:", error);
@@ -926,9 +969,6 @@ export const sendUserEmail = async (eventType, user, plainPassword) => {
 
 // Get recipients based on event type
 const getRecipientsForEvent = async (eventType, data) => {
-  console.log("event type", eventType);
-  console.log("data", data);
-
   const recipients = new Set();
   const params = data?.params || [];
 

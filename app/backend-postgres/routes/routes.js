@@ -168,6 +168,7 @@ import {
   upload_template_document,
   use_template_document,
   get_templates_by_tag,
+  download_template_document,
 } from "../controller/tag-controller.js";
 
 const router = express.Router();
@@ -189,6 +190,7 @@ router.get("/auto-login", autoLogin);
 router.post("/validate-auto-login", validateAutoLogin);
 router.post("/forgetPassword", loginLimiter, forget_password);
 router.post("/changePassword", change_password);
+router.get("/files/:filePath(*)", file_though_url);
 
 // WOPI endpoints
 router.get("/wopi/discovery", wopiDiscovery);
@@ -295,12 +297,13 @@ router.get("/getUserDSC", get_user_dsc);
 
 // Files & Folders
 router.post("/upload", file_upload);
+router.get("/download-template/:id", download_template_document);
 router.post("/download", file_download);
 router.post("/copyFile", file_copy);
 router.post("/cutFile", file_cut);
 router.post("/createFolder", create_folder);
 router.post("/downloadFolder", folder_download);
-router.get("/files/:filePath(*)", file_though_url);
+
 router.get("/getFileData", get_file_data);
 router.post("/accessFolder", getDocumentDetailsOnTheBasisOfPath);
 router.post(

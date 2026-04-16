@@ -90,6 +90,7 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
   }
 
   // Define the routes
+// Define the routes
   const routes = [
     {
       path: '/',
@@ -114,6 +115,13 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
       label: 'Workflows',
       icon: <IconChartDots3 size={26} />,
       active: pathname == '/workflows',
+    },
+    // ✅ MOVED HERE: Master Tags is now visible to all users
+    {
+      path: '/master/tags',
+      label: 'Master Tags',
+      icon: <IconTags size={26} />,
+      active: pathname == '/master/tags',
     },
     ...(show
       ? [
@@ -153,12 +161,6 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
             icon: <IconFile size={26} />,
             active: pathname.includes('reports'),
           },
-          {
-            path: '/master/tags',
-            label: 'Master Tags',
-            icon: <IconTags size={26} />,
-            active: pathname == '/master/tags',
-          },
         ]
       : []),
     {
@@ -186,12 +188,10 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
       dropdown: [
         { path: '/processes/work', label: 'Pending Work' },
         { path: '/processes/completed', label: 'Initiated Processes' },
-
         { path: '/processes/initiate', label: 'Initiate Process' },
       ],
       active: pathname.includes('process'),
     },
-
     {
       path: '/logs',
       label: 'Logs',

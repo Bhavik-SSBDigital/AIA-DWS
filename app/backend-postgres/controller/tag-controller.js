@@ -493,3 +493,97 @@ export const use_template_document = async (req, res) => {
     return res.status(500).json({ error: "Failed to use template document" });
   }
 };
+
+// ============================================================================
+// 4. DOWNLOAD TEMPLATE DOCUMENT
+// ============================================================================
+export const download_template_document = async (req, res) => {
+  try {
+    // 1. Verify User
+    const authHeader =
+      req.headers["authorization"] || req.headers["x-authorization"];
+    const accessToken = authHeader?.substring(7) || req.query.token;
+
+    if (!accessToken) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized request: Missing token" });
+    }
+
+    const userData = await verifyUser(accessToken);
+    if (userData === "Unauthorized") {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized request: Invalid token" });
+    }
+
+    // 2. Extract Template ID
+    const templateId = parseInt(req.params.id, 10);
+    if (!templateId || isNaN(templateId)) {
+      return res.status(400).json({ error: "Valid template ID is required" });
+    }
+
+    // 3. Find Template in Database
+    const template = await prisma.document.findUnique({
+      where: { id: templateId },
+      include: { templateTags: true },
+    });
+
+    if (!template || template.type !== "file") {
+      return res.status(404).json({ error: "Template not found" });
+    }
+
+    // 4. Security Check: Ensure this is actually a template file inside the tags directory
+    if (!template.path.startsWith("/tags/")) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: File is not a valid template" });
+    }
+
+    // 5. Locate File on Disk
+    const fileName = basename(template.path);
+    const originalFilePath = join(
+      __dirname,
+      STORAGE_PATH,
+      template.path.substring(1),
+    );
+
+    try {
+      await fs.access(originalFilePath);
+    } catch {
+      return res
+        .status(404)
+        .json({ message: "Template file not found in storage" });
+    }
+
+    // 6. Set appropriate Headers and Stream File
+    const fileExtension = extname(fileName).slice(1).toLowerCase();
+
+    // Basic MIME types, default to octet-stream for unknown
+    const mimeTypes = {
+      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      pdf: "application/pdf",
+      txt: "text/plain",
+      csv: "text/csv",
+    };
+
+    const contentType = mimeTypes[fileExtension] || "application/octet-stream";
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${encodeURIComponent(fileName)}"`,
+    );
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+    // Send the file back directly
+    res.sendFile(originalFilePath);
+  } catch (error) {
+    console.error("Error downloading template:", error);
+    return res
+      .status(500)
+      .json({ error: "Internal server error during template download" });
+  }
+};

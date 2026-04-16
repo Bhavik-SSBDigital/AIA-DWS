@@ -21,15 +21,42 @@ const app = express();
 // ✅ VAPT FIX #22: Server Version Disclosure
 app.disable("x-powered-by");
 
-// ✅ VAPT FIX #21 & #13: Applies critical security headers (X-Frame-Options, X-Content-Type-Options, HSTS)
+// ✅ VAPT FIX #21 & #13: Applies critical security headers
 app.use(
   helmet({
     contentSecurityPolicy: false, // Disabled to prevent blocking existing React inline scripts
     crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // <-- CRITICAL FIX: Allows the cross-origin file read
+    crossOriginOpenerPolicy: false, // <-- ADD THIS: Stops Chrome from blocking new tabs
+    frameguard: false,
   }),
 );
 
-// Middleware to log incoming request URLs
+// ==========================================
+// 🌐 STRICT CORS CONFIGURATION (CRITICAL FIX FOR blocked:origin)
+// ==========================================
+const corsOptions = {
+  origin: [
+    "http://localhost:3000",
+    "https://ai-audit.aia.local", // Matches the domain, not the specific path
+  ],
+  credentials: true, // Required to pass authorization tokens and cookies
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "x-authorization",
+    "X-WOPI-Override",
+    "X-WOPI-Lock",
+    "Origin",
+    "Accept",
+    "X-Requested-With",
+  ],
+};
+
+app.use(cors(corsOptions));
+
+// Middleware to log incoming request URLs (Uncomment for debugging)
 // app.use((req, res, next) => {
 //   console.log(`Request received at: ${req.method} ${req.url}`);
 //   next();
@@ -42,7 +69,6 @@ app.use(
 // );
 
 // Other Middleware
-app.use(cors());
 app.use(express.json()); // For JSON-based APIs
 app.use(express.static(path.join(__dirname, "build")));
 app.use("/", router);
@@ -70,7 +96,7 @@ app.use((req, res, next) => {
 
 // Catch 500s (Internal Server Errors) so Express doesn't leak stack traces or its name
 app.use((err, req, res, next) => {
-  console.error("System error encountered"); // Safely logged internally
+  console.error("System error encountered", err); // Safely logged internally
   res.status(500).json({ message: "Internal server error" });
 });
 

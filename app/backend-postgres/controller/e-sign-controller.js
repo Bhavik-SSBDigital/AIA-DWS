@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
 import fs from "fs/promises";
 import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
+import puppeteer from "puppeteer";
 import path from "path";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
@@ -25,7 +26,7 @@ const execPromise = promisify(exec);
 const envVariables = process.env;
 
 // Unchanged Helper Functions
-async function executePythonScript(
+export async function executePythonScript(
   pythonEnvPath,
   pythonScriptPath,
   absDocumentPath,
@@ -941,6 +942,47 @@ async function clear_signature_at_coordinates(
   });
 }
 
+function sanitizeText(text) {
+  if (!text) return "";
+
+  return text
+    .replace(/[\u00A0\u202F\u2007]/g, " ") // weird spaces
+    .replace(/[^\x20-\x7E]/g, "") // remove non WinAnsi
+    .replace(/[\n\r\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function wrapText(text, font, fontSize, maxWidth) {
+  text = sanitizeText(text);
+  if (!text) return [];
+
+  const words = text.split(" ");
+  const lines = [];
+  let currentLine = words[0] || "";
+
+  for (let i = 1; i < words.length; i++) {
+    const testLine = currentLine + " " + words[i];
+
+    let width;
+    try {
+      width = font.widthOfTextAtSize(testLine, fontSize);
+    } catch {
+      continue; // skip bad characters safely
+    }
+
+    if (width < maxWidth) {
+      currentLine = testLine;
+    } else {
+      lines.push(currentLine);
+      currentLine = words[i];
+    }
+  }
+
+  lines.push(currentLine);
+  return lines;
+}
+
 async function print_signature_after_content_on_the_last_page(
   pdfDoc,
   lastPage,
@@ -955,13 +997,13 @@ async function print_signature_after_content_on_the_last_page(
   p12Path,
   p12password,
 ) {
-  // 1. Get exact visual coordinates from Python
   const absDocumentPath = path.join(
     __dirname,
     "../../../../",
     "storage",
     documentPath,
   );
+
   const lastContentCoordinates = await executePythonScript(
     pythonEnvPath,
     pythonScriptPath,
@@ -972,169 +1014,221 @@ async function print_signature_after_content_on_the_last_page(
   const startingYFromTop = lastContentCoordinates.last_y || pageHeight;
   const availableSpaceAtBottom = Math.max(0, pageHeight - startingYFromTop);
 
-  // 2. Prepare Signature Image Dimensions
   const signatureImageBytes = await fs.readFile(jpegImagePath);
   const signatureImage = await pdfDoc.embedJpg(signatureImageBytes);
+
   const signatureImageWidth = 200;
   const signatureImageHeight = 75;
+
   const fontSize = 12;
-  const textPadding = 15;
+  const lineSpacing = fontSize + 5;
+  const MAX_WIDTH = 300;
+  const LEFT_MARGIN = 50;
+  const SAFETY_MARGIN = 120;
 
-  // Total height of the signature block
-  const requiredHeight = signatureImageHeight + fontSize * 3 + textPadding * 3;
+  // ✅ sanitize
+  const safeUsername = sanitizeText(username);
+  const safeTimestamp = sanitizeText(timestamp);
+  const safeRemarks = sanitizeText(remarks);
 
-  // THE FIX: Add a 40-point buffer so the signature doesn't touch the document text
-  const SAFETY_MARGIN = 40;
+  // ✅ wrap text (ORDER CHANGED)
+  const signedByLines = wrapText(
+    `Signed By: ${safeUsername}`,
+    helveticaFont,
+    fontSize,
+    MAX_WIDTH,
+  );
 
-  // 3. Page Setup & Rotation Detection
-  const pageRotation = lastPage.getRotation().angle;
-  let targetPage = lastPage;
-  let currentRotation = pageRotation;
-  let isNewPage = false;
+  const timestampLines = wrapText(
+    `Timestamp: ${safeTimestamp}`,
+    helveticaFont,
+    fontSize,
+    MAX_WIDTH,
+  );
 
-  // If there isn't enough space for the signature PLUS the safety margin, add a new page
-  if (availableSpaceAtBottom < requiredHeight + SAFETY_MARGIN) {
-    targetPage = pdfDoc.addPage();
-    currentRotation = 0; // New pages are never rotated
-    isNewPage = true;
-  }
+  const remarksLines = wrapText(
+    `Remarks: ${safeRemarks}`,
+    helveticaFont,
+    fontSize,
+    MAX_WIDTH,
+  );
 
-  // 4. Mathematical Translation Helpers for pdf-lib Quadrants
-  const drawRotatedText = (page, text, vx, vy, rotationAngle, font, size) => {
-    const W = page.getWidth();
-    const H = page.getHeight();
-    let rawX, rawY, drawRot;
+  const drawRotatedText = (page, text, x, y, rotation, font, size) => {
+    try {
+      const W = page.getWidth();
+      const H = page.getHeight();
 
-    if (rotationAngle === 0) {
-      rawX = vx;
-      rawY = vy;
-      drawRot = 0;
-    } else if (rotationAngle === 90) {
-      rawX = W - vy;
-      rawY = vx;
-      drawRot = 90;
-    } else if (rotationAngle === 270 || rotationAngle === -90) {
-      rawX = vy;
-      rawY = H - vx;
-      drawRot = -90;
-    } else if (rotationAngle === 180 || rotationAngle === -180) {
-      rawX = W - vx;
-      rawY = H - vy;
-      drawRot = 180;
+      let rawX, rawY, rot;
+
+      if (rotation === 0) {
+        rawX = x;
+        rawY = y;
+        rot = 0;
+      } else if (rotation === 90) {
+        rawX = W - y;
+        rawY = x;
+        rot = 90;
+      } else if (rotation === 270 || rotation === -90) {
+        rawX = y;
+        rawY = H - x;
+        rot = -90;
+      } else {
+        rawX = W - x;
+        rawY = H - y;
+        rot = 180;
+      }
+
+      page.drawText(text, {
+        x: rawX,
+        y: rawY,
+        size,
+        font,
+        color: rgb(0, 0, 0),
+        rotate: degrees(rot),
+      });
+    } catch (e) {
+      console.warn("Skipped bad text:", text);
     }
-
-    page.drawText(text, {
-      x: rawX,
-      y: rawY,
-      size: size,
-      font: font,
-      color: rgb(0, 0, 0),
-      rotate: degrees(drawRot),
-    });
   };
 
-  const drawRotatedImage = (page, img, vx, vy, imgW, imgH, rotationAngle) => {
+  const drawRotatedImage = (page, img, x, y, w, h, rotation) => {
     const W = page.getWidth();
     const H = page.getHeight();
-    let rawX, rawY, drawRot;
 
-    if (rotationAngle === 0) {
-      rawX = vx;
-      rawY = vy;
-      drawRot = 0;
-    } else if (rotationAngle === 90) {
-      rawX = W - vy;
-      rawY = vx;
-      drawRot = 90;
-    } else if (rotationAngle === 270 || rotationAngle === -90) {
-      rawX = vy;
-      rawY = H - vx;
-      drawRot = -90;
-    } else if (rotationAngle === 180 || rotationAngle === -180) {
-      rawX = W - vx;
-      rawY = H - vy;
-      drawRot = 180;
+    let rawX, rawY, rot;
+
+    if (rotation === 0) {
+      rawX = x;
+      rawY = y;
+      rot = 0;
+    } else if (rotation === 90) {
+      rawX = W - y;
+      rawY = x;
+      rot = 90;
+    } else if (rotation === 270 || rotation === -90) {
+      rawX = y;
+      rawY = H - x;
+      rot = -90;
+    } else {
+      rawX = W - x;
+      rawY = H - y;
+      rot = 180;
     }
 
     page.drawImage(img, {
       x: rawX,
       y: rawY,
-      width: imgW,
-      height: imgH,
-      rotate: degrees(drawRot),
+      width: w,
+      height: h,
+      rotate: degrees(rot),
     });
   };
 
-  let maxWidth = signatureImageWidth;
-  const calculateMaxWidth = (text) => {
-    const textWidth = helveticaFont.widthOfTextAtSize(text, fontSize);
-    maxWidth = Math.max(maxWidth, textWidth);
-  };
+  let currentPage = lastPage;
+  let rotation = lastPage.getRotation().angle;
 
-  // 5. Calculate Starting Visual Y (Applying the Safety Margin)
-  let visualY = isNewPage
-    ? targetPage.getHeight() - requiredHeight - 50
-    : availableSpaceAtBottom - requiredHeight - SAFETY_MARGIN; // Pushes the block down
+  let startY =
+    availableSpaceAtBottom > 150 ? availableSpaceAtBottom - SAFETY_MARGIN : -1;
 
-  // 6. Draw Elements (Stacking visually from bottom to top)
-  let currentVisualY = visualY;
+  if (startY < 150) {
+    currentPage = pdfDoc.addPage();
+    rotation = 0;
+    startY = currentPage.getHeight() - 90;
+  }
 
-  drawRotatedText(
-    targetPage,
-    `Remarks: ${remarks}`,
-    50,
-    currentVisualY,
-    currentRotation,
-    helveticaFont,
-    fontSize,
-  );
-  calculateMaxWidth(`Remarks: ${remarks}`);
+  let currentY = startY;
 
-  currentVisualY += fontSize + textPadding;
-  drawRotatedText(
-    targetPage,
-    `Timestamp: ${timestamp}`,
-    50,
-    currentVisualY,
-    currentRotation,
-    helveticaFont,
-    fontSize,
-  );
-  calculateMaxWidth(`Timestamp: ${timestamp}`);
+  // ✅ DRAW SIGNATURE FIRST (TOP)
+  if (currentY < signatureImageHeight + 20) {
+    currentPage = pdfDoc.addPage();
+    rotation = 0;
+    currentY = currentPage.getHeight() - 100;
+  }
 
-  currentVisualY += fontSize + textPadding;
-  drawRotatedText(
-    targetPage,
-    `Signed By: ${username}`,
-    50,
-    currentVisualY,
-    currentRotation,
-    helveticaFont,
-    fontSize,
-  );
-  calculateMaxWidth(`Signed By: ${username}`);
-
-  currentVisualY += fontSize + textPadding;
   drawRotatedImage(
-    targetPage,
+    currentPage,
     signatureImage,
-    50,
-    currentVisualY,
+    LEFT_MARGIN,
+    currentY,
     signatureImageWidth,
     signatureImageHeight,
-    currentRotation,
+    rotation,
   );
 
-  // 7. Save and Return
+  currentY -= signatureImageHeight + 4;
+
+  // ✅ Signed By
+  for (const line of signedByLines) {
+    if (currentY < 50) {
+      currentPage = pdfDoc.addPage();
+      rotation = 0;
+      currentY = currentPage.getHeight() - 50;
+    }
+
+    drawRotatedText(
+      currentPage,
+      line,
+      LEFT_MARGIN,
+      currentY,
+      rotation,
+      helveticaFont,
+      fontSize,
+    );
+
+    currentY -= lineSpacing;
+  }
+
+  // ✅ Timestamp
+  for (const line of timestampLines) {
+    if (currentY < 50) {
+      currentPage = pdfDoc.addPage();
+      rotation = 0;
+      currentY = currentPage.getHeight() - 50;
+    }
+
+    drawRotatedText(
+      currentPage,
+      line,
+      LEFT_MARGIN,
+      currentY,
+      rotation,
+      helveticaFont,
+      fontSize,
+    );
+
+    currentY -= lineSpacing;
+  }
+
+  // ✅ Remarks LAST (bottom, can span pages)
+  for (const line of remarksLines) {
+    if (currentY < 50) {
+      currentPage = pdfDoc.addPage();
+      rotation = 0;
+      currentY = currentPage.getHeight() - 50;
+    }
+
+    drawRotatedText(
+      currentPage,
+      line,
+      LEFT_MARGIN,
+      currentY,
+      rotation,
+      helveticaFont,
+      fontSize,
+    );
+
+    currentY -= lineSpacing;
+  }
+
   const pdfBytes = await pdfDoc.save();
   await fs.writeFile(absDocumentPath, pdfBytes);
 
   return {
-    x: 50,
-    y: visualY,
-    width: maxWidth,
-    height: requiredHeight,
-    newlyAdded: isNewPage,
+    x: LEFT_MARGIN,
+    y: currentY,
+    width: MAX_WIDTH,
+    height: 200,
+    newlyAdded: true,
   };
 }
 

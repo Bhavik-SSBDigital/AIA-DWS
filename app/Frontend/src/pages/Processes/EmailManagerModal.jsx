@@ -17,7 +17,7 @@ export default function EmailManagerModal({ isOpen, onClose, processId, processN
   const [emailInput, setEmailInput] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false); // New state for custom dropdown
   
-  const [subject, setSubject] = useState(`Documents for completed process: ${processName}`);
+  const [subject, setSubject] = useState(''); // Modified: Start empty
   const [body, setBody] = useState('');
   const [includeAttachments, setIncludeAttachments] = useState(true);
   const [sending, setSending] = useState(false);
@@ -42,7 +42,7 @@ export default function EmailManagerModal({ isOpen, onClose, processId, processN
       fetchData();
       setCurrentSendList([]);
       setEmailInput('');
-      setSubject(`Documents for completed process: ${processName}`);
+      setSubject(''); // Modified: Start empty when opened
       setBody('');
     }
   }, [isOpen, processId]);
@@ -85,7 +85,8 @@ export default function EmailManagerModal({ isOpen, onClose, processId, processN
       toast.error("Please add at least one recipient to the list");
       return;
     }
-    if (!subject) {
+    // Added safety check for empty subject
+    if (!subject || subject.trim() === '') {
       toast.error("Please enter a subject");
       return;
     }
@@ -102,6 +103,7 @@ export default function EmailManagerModal({ isOpen, onClose, processId, processN
       toast.success("Emails sent successfully!");
       
       setCurrentSendList([]);
+      setSubject(''); // Reset subject back to empty on success
       setBody('');
       fetchData();
       setActiveTab('history');
@@ -231,11 +233,15 @@ export default function EmailManagerModal({ isOpen, onClose, processId, processN
 
               {/* Email Content */}
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">Subject *</label>
+                <label className="block text-sm font-bold text-slate-700 mb-1">
+                  Subject <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
+                  placeholder="Enter a subject for this email"
+                  required
                   className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
               </div>
@@ -271,7 +277,7 @@ export default function EmailManagerModal({ isOpen, onClose, processId, processN
                   variant="primary" 
                   text={sending ? "Sending..." : `Send to ${currentSendList.length} recipient(s)`} 
                   click={handleSendEmailBlast} 
-                  disabled={sending || currentSendList.length === 0} 
+                  disabled={sending || currentSendList.length === 0 || subject.trim() === ''} 
                 />
               </div>
             </div>

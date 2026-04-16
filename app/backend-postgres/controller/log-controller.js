@@ -49,8 +49,6 @@ async function getAssignmentDetails(stepInstanceId, processId) {
           workflowStep: { select: { stepName: true } },
         },
       });
-
-      console.log("step instance", stepInstance);
     } else {
       // Find the earliest ProcessStepInstance for the process
       stepInstance = await prisma.processStepInstance.findFirst({
@@ -87,7 +85,7 @@ async function getAssignmentDetails(stepInstanceId, processId) {
           where: { id: stepInstance.assignedTo },
           select: { username: true },
         });
-        console.log("user", user);
+
         role = user?.username || "N/A";
       }
     }

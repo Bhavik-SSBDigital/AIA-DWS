@@ -655,4 +655,26 @@ export const getPhysicalRequestMessages = async (id) => {
   return apiClient.get(`/getPhysicalRequestMessages/${id}`);
 };
 
+// Add this to your common/Apis.js file
+
+export const DownloadTemplate = async (templateId, fileName) => {
+  try {
+    const response = await apiClient.get(`/download-template/${templateId}`, {
+      responseType: 'blob', // Important: Treat the response as a file buffer
+    });
+
+    // Create a temporary link to force the browser to download the blob
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    throw error;
+  }
+};
+
 export default apiClient;

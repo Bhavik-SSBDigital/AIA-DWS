@@ -314,7 +314,7 @@ export const sendManualEmail = async (req, res) => {
                 body
                   ? `
               <div class="message-box">
-                <div class="message-title">Additional Message</div>
+                <div class="message-title">Quick Note</div>
                 <div class="message-content">${body.replace(/\n/g, "<br/>")}</div>
               </div>`
                   : ""
@@ -322,14 +322,6 @@ export const sendManualEmail = async (req, res) => {
 
               <h3 class="section-title">Process Summary</h3>
               <table class="details-table">
-                <tr><th>Process Name</th><td>${processInstance.name}</td></tr>
-                <tr><th>Process ID</th><td><span style="font-family: monospace; color: #64748b;">${processInstance.id}</span></td></tr>
-                <tr><th>Status</th><td>
-                  <span style="color: ${processInstance.status === "COMPLETED" ? "#16a34a" : processInstance.status === "REJECTED" ? "#dc2626" : "#d97706"};">
-                    ${processInstance.status}
-                  </span>
-                </td></tr>
-                <tr><th>Completed At</th><td>${processInstance.updatedAt ? new Date(processInstance.updatedAt).toLocaleString() : "N/A"}</td></tr>
                 <tr><th>Initiator</th><td>${processInstance.initiator.username}</td></tr>
                 <tr><th>Description</th><td>${processInstance.description || "N/A"}</td></tr>
                 ${

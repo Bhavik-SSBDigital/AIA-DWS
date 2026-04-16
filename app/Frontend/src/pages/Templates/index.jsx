@@ -6,6 +6,7 @@ import {
   createTemplateDocument,
   uploadTemplateFile,
   ViewDocument,
+  DownloadTemplate
 } from '../../common/Apis';
 import CustomButton from '../../CustomComponents/CustomButton';
 import { IconEye, IconPlus, IconUpload } from '@tabler/icons-react';

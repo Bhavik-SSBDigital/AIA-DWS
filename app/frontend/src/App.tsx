@@ -140,6 +140,15 @@ function App() {
             </DefaultLayout>
           }
         />
+       <Route
+  path="/master/tags"
+  element={
+    <DefaultLayout>
+      <PageTitle title="Tags" />
+      <TagsMasterPage />
+    </DefaultLayout>
+  }
+/>
         <Route
           path="/timeline/:id"
           element={
@@ -368,17 +377,7 @@ function App() {
             </AdminRoute>
           }
         />
-        <Route
-          path="/master/tags"
-          element={
-            <AdminRoute>
-              <DefaultLayout>
-                <PageTitle title="Tags" />
-                <TagsMasterPage />
-              </DefaultLayout>
-            </AdminRoute>
-          }
-        />
+
         <Route
           path="/branches/edit/:id"
           element={
