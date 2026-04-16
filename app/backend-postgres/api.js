@@ -35,12 +35,12 @@ app.use(
 // ==========================================
 // 🌐 STRICT CORS CONFIGURATION (CRITICAL FIX FOR blocked:origin)
 // ==========================================
+// ==========================================
+// 🌐 STRICT CORS CONFIGURATION (CRITICAL FIX FOR blocked:origin)
+// ==========================================
 const corsOptions = {
-  origin: [
-    "http://localhost:3000",
-    "https://ai-audit.aia.local", // Matches the domain, not the specific path
-  ],
-  credentials: true, // Required to pass authorization tokens and cookies
+  origin: ["http://localhost:3000", "https://ai-audit.aia.local"],
+  credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
   allowedHeaders: [
     "Content-Type",
@@ -51,6 +51,16 @@ const corsOptions = {
     "Origin",
     "Accept",
     "X-Requested-With",
+    // Add all the custom headers expected by file_upload controller below:
+    "x-file-name",
+    "x-current-chunk",
+    "x-total-chunks",
+    "x-chunk-size",
+    "x-involved-in-process",
+    "x-tags",
+    "x-department-name",
+    "x-file-id",
+    "x-file-path",
   ],
 };
 
