@@ -10,28 +10,28 @@ const prisma = new PrismaClient();
 
 // Configure email transporter
 
-export const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: env.EMAIL_FROM,
-    pass: env.EMAIL_PASS,
-  },
-});
 // export const transporter = nodemailer.createTransport({
-//   host: process.env.SMTP_HOST,
-//   port: parseInt(process.env.SMTP_PORT || "25"),
-//   secure: false, // true for 465, false for other ports
-//   // auth: {
-//   //   user: process.env.SMTP_USER,
-//   //   pass: process.env.SMTP_PASSWORD,
-//   // },
-//   // Recommended: Increase timeout for corporate SMTP servers
-//   connectionTimeout: 10000, // 10 seconds
-//   socketTimeout: 15000, // 15 seconds
-//   // Optional: For debugging
-//   // logger: true,
-//   // debug: true
+//   service: "gmail",
+//   auth: {
+//     user: env.EMAIL_FROM,
+//     pass: env.EMAIL_PASS,
+//   },
 // });
+export const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || "25"),
+  secure: false, // true for 465, false for other ports
+  // auth: {
+  //   user: process.env.SMTP_USER,
+  //   pass: process.env.SMTP_PASSWORD,
+  // },
+  // Recommended: Increase timeout for corporate SMTP servers
+  connectionTimeout: 10000, // 10 seconds
+  socketTimeout: 15000, // 15 seconds
+  // Optional: For debugging
+  // logger: true,
+  // debug: true
+});
 
 const formatTags = (tags) => {
   if (!tags || tags.length === 0) return "<span>None</span>";
