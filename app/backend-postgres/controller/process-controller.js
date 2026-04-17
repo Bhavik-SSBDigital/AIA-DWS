@@ -888,6 +888,7 @@ export const initiate_process = async (req, res, next) => {
       processId: process.id,
     });
   } catch (error) {
+    console.log("error initiating process", error);
     return res.status(500).json({
       message: "Error initiating the process",
       error: "Error initiating the process",
