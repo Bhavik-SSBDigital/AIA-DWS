@@ -1,49 +1,53 @@
 import express from "express";
+import http from "http";
 import cors from "cors";
-import helmet from "helmet";
+import helmet from "helmet"; // ✅ VAPT FIX #21: Missing HTTP Headers
 import router from "./routes/routes.js";
+import db from "./db.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import dotenv from "dotenv";
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const app = express();
+dotenv.config();
+
 const PORT = process.env.PORT;
 
-// ==========================================
-// ✅ BASIC SECURITY
-// ==========================================
+const app = express();
+
+// ✅ VAPT FIX #22: Server Version Disclosure
 app.disable("x-powered-by");
 
-// ==========================================
-// ✅ HELMET CONFIG (CRITICAL FOR COLLABORA)
-// ==========================================
+// ✅ VAPT FIX #21 & #13: Applies critical security headers
 app.use(
   helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false, // 🚨 MUST be disabled
-    crossOriginOpenerPolicy: false,
-    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: false, // Disabled to prevent blocking existing React inline scripts
+    crossOriginEmbedderPolicy: false, // Disables COEP header entirely
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // <-- CRITICAL FIX: Allows the cross-origin file read
+    crossOriginOpenerPolicy: false, // <-- ADD THIS: Stops Chrome from blocking new tabs
     frameguard: false,
   }),
 );
 
-// ==========================================
-// ✅ FORCE REMOVE COEP (IMPORTANT)
-// ==========================================
+// ✅ Explicitly strip COEP globally so Collabora iframe is never blocked
 app.use((req, res, next) => {
   res.removeHeader("Cross-Origin-Embedder-Policy");
+  next();
+});
+
+// ✅ Allow Collabora to load documents cross-origin
+app.use("/wopi", (req, res, next) => {
+  res.removeHeader("Cross-Origin-Embedder-Policy");
   res.removeHeader("Cross-Origin-Opener-Policy");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   next();
 });
 
 // ==========================================
-// ✅ CORS CONFIG (INCLUDE COLLABORA + PROD)
+// 🌐 STRICT CORS CONFIGURATION (CRITICAL FIX FOR blocked:origin)
 // ==========================================
 const corsOptions = {
   origin: [
@@ -63,6 +67,7 @@ const corsOptions = {
     "Origin",
     "Accept",
     "X-Requested-With",
+    // Add all the custom headers expected by file_upload controller below:
     "x-file-name",
     "x-current-chunk",
     "x-total-chunks",
@@ -77,35 +82,24 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// ==========================================
-// ✅ WOPI-SPECIFIC FIX (CRITICAL)
-// ==========================================
-app.use("/wopi", (req, res, next) => {
-  res.removeHeader("Cross-Origin-Embedder-Policy");
-  res.removeHeader("Cross-Origin-Opener-Policy");
-  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  next();
-});
+// Middleware to log incoming request URLs (Uncomment for debugging)
+// app.use((req, res, next) => {
+//   console.log(`Request received at: ${req.method} ${req.url}`);
+//   next();
+// });
 
-// ==========================================
-// ✅ BODY PARSING
-// ==========================================
-app.use(express.json());
+// Apply express.raw specifically for WOPI POST and PUT requests
+// app.use(
+//   "/wopi/files/:id/contents",
+//   express.raw({ type: "*/*", limit: "50mb" }) // Use */* to handle any Content-Type
+// );
 
-// ==========================================
-// ✅ STATIC FILES
-// ==========================================
+// Other Middleware
+app.use(express.json()); // For JSON-based APIs
 app.use(express.static(path.join(__dirname, "build")));
-
-// ==========================================
-// ✅ ROUTES
-// ==========================================
 app.use("/", router);
 
-// ==========================================
-// ✅ WOPI OPTIONS HANDLER
-// ==========================================
+// Add support for OPTIONS requests (include PUT for WOPI)
 app.options("/wopi/files/:id", (req, res) => {
   res
     .set({
@@ -117,28 +111,21 @@ app.options("/wopi/files/:id", (req, res) => {
     .send();
 });
 
-// ==========================================
-// ✅ REACT FALLBACK
-// ==========================================
+// Serve React app
 app.get("*", (req, res) => {
   res.sendFile(path.resolve(__dirname, "build", "index.html"));
 });
 
-// ==========================================
-// ✅ ERROR HANDLING
-// ==========================================
-app.use((req, res) => {
+app.use((req, res, next) => {
   res.status(404).json({ message: "Resource not found" });
 });
 
+// Catch 500s (Internal Server Errors) so Express doesn't leak stack traces or its name
 app.use((err, req, res, next) => {
-  console.error("System error encountered", err);
+  console.error("System error encountered", err); // Safely logged internally
   res.status(500).json({ message: "Internal server error" });
 });
 
-// ==========================================
-// ✅ START SERVER
-// ==========================================
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log("listening on", `${PORT}`);
 });
