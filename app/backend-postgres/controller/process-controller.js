@@ -767,7 +767,16 @@ export const initiate_process = async (req, res, next) => {
                           ? email.bcc
                           : [email.bcc]
                         : [],
-                      date: email.date ? new Date(email.date) : new Date(),
+                      date: (() => {
+                        if (!email.date) return new Date();
+                        // Normalize Google-style "Mon, Mar 30, 2026 at 12:36 PM" → "Mon, Mar 30, 2026 12:36 PM"
+                        const normalized = String(email.date).replace(
+                          " at ",
+                          " ",
+                        );
+                        const parsed = new Date(normalized);
+                        return isNaN(parsed.getTime()) ? new Date() : parsed;
+                      })(),
                       bodyText: email.body_plain || email.bodyText || "",
                       bodyHtml: email.bodyHtml || email.body_html || "",
                       attachments: email.attachments || [],
