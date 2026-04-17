@@ -25,37 +25,21 @@ app.disable("x-powered-by");
 app.use(
   helmet({
     contentSecurityPolicy: false, // Disabled to prevent blocking existing React inline scripts
-    crossOriginEmbedderPolicy: false, // Disables COEP header entirely
+    crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" }, // <-- CRITICAL FIX: Allows the cross-origin file read
     crossOriginOpenerPolicy: false, // <-- ADD THIS: Stops Chrome from blocking new tabs
     frameguard: false,
   }),
 );
 
-// ✅ Explicitly strip COEP globally so Collabora iframe is never blocked
-app.use((req, res, next) => {
-  res.removeHeader("Cross-Origin-Embedder-Policy");
-  next();
-});
-
-// ✅ Allow Collabora to load documents cross-origin
-app.use("/wopi", (req, res, next) => {
-  res.removeHeader("Cross-Origin-Embedder-Policy");
-  res.removeHeader("Cross-Origin-Opener-Policy");
-  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-  next();
-});
-
+// ==========================================
+// 🌐 STRICT CORS CONFIGURATION (CRITICAL FIX FOR blocked:origin)
+// ==========================================
 // ==========================================
 // 🌐 STRICT CORS CONFIGURATION (CRITICAL FIX FOR blocked:origin)
 // ==========================================
 const corsOptions = {
-  origin: [
-    "http://localhost:3000",
-    "https://ai-audit.aia.local",
-    "https://collabora.aia-engineering.com",
-    "https://dwsauditprd.aia-engineering.com",
-  ],
+  origin: ["http://localhost:3000", "https://ai-audit.aia.local"],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
   allowedHeaders: [
