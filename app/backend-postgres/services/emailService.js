@@ -55,7 +55,7 @@ const generateAutoLoginToken = (
       timestamp: Date.now(), // To prevent replay attacks
     },
     env.SECRET_ACCESS_KEY,
-    { expiresIn: "24h" },
+    { expiresIn: "7d" },
   );
 };
 
@@ -96,7 +96,7 @@ const generateOneTimeToken = (userId, resourceType, resourceId) => {
 };
 
 // Generate secure tokens for public access
-const generateAccessToken = (payload, expiresIn = "24h") => {
+const generateAccessToken = (payload, expiresIn = "7d") => {
   return jwt.sign(payload, env.SECRET_ACCESS_KEY, { expiresIn });
 };
 
