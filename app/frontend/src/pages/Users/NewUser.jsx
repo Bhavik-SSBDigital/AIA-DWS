@@ -3,7 +3,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { Autocomplete, TextField as MuiTextField } from '@mui/material';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { CreateUser, EditUser, GetRoles, GetUser } from '../../common/Apis';
+import { CreateUser, EditUser, GetAllRoles, GetUser } from '../../common/Apis';
 import TopLoader from '../../common/Loader/TopLoader';
 import CustomCard from '../../CustomComponents/CustomCard';
 import CustomButton from '../../CustomComponents/CustomButton';
@@ -35,7 +35,7 @@ export default function NewUser() {
   useEffect(() => {
     const fetchRoles = async () => {
       try {
-        const { data } = await GetRoles();
+        const { data } = await GetAllRoles();
         setRoles(data.roles);
       } catch (error) {
         console.error(error);

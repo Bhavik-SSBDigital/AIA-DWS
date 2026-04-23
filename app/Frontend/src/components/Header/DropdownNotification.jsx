@@ -10,26 +10,23 @@ const DropdownNotification = () => {
 
   const getNotifications = async () => {
     try {
-      const res = await GetNotifications();
+      // Calculate the date 15 days ago to send to the backend
+      const fifteenDaysAgo = new Date();
+      fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+
+      // Pass pagination and date filters directly to your new backend
+      const res = await GetNotifications({
+        page: 1,
+        pageSize: 50, // Fetch up to 50 for the dropdown
+        createdDateFrom: fifteenDaysAgo.toISOString(),
+      });
+
       if (res.status === 200) {
-        const now = new Date();
-
-        const filtered = (res.data || []).filter((n) => {
-          const createdAt = new Date(n.createdAt);
-          const diffInDays =
-            (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
-          return diffInDays <= 15;
-        });
-
-        setNotifications(filtered);
-        // const sorted = filtered.sort((a, b) => {
-        //   if (a.isRejected === b.isRejected) {
-        //     return new Date(b.createdAt) - new Date(a.createdAt);
-        //   }
-        //   return a.isRejected ? -1 : 1;
-        // });
-
-        // setNotifications(sorted);
+        // The backend now returns { data, total, page, pageSize }
+        // So we need to access res.data.data
+        const fetchedNotifications = res.data?.data || [];
+        
+        setNotifications(fetchedNotifications);
       }
     } catch (error) {
       console.error('Failed to fetch notifications', error);
@@ -86,52 +83,55 @@ const DropdownNotification = () => {
         {/* Header */}
         <div className="px-5 py-4 border-b border-gray-100">
           <h5 className="text-sm font-semibold text-gray-800">Notifications</h5>
-          {/* <p className="text-xs text-gray-500 mt-1">Last 15 days updates</p> */}
         </div>
 
         {/* Notification List */}
         <ul className="max-h-[400px] overflow-y-auto divide-y divide-gray-100">
           {notifications.length > 0 ? (
-            notifications.map((item) => (
-              <li
-                key={item.processId}
-                className={`px-5 py-4 transition-all duration-200 cursor-pointer
-                ${
-                  item.isRejected
-                    ? 'bg-red-50 hover:bg-red-100'
-                    : 'hover:bg-gray-50'
-                }`}
-              >
-                <div className="flex justify-between items-start gap-3">
-                  <div className="flex-1">
-                    <p
-                      className={`text-sm font-semibold ${
-                        item.isRejected ? 'text-red-600' : 'text-gray-900'
-                      }`}
-                    >
-                      {item.processName}
-                    </p>
+            notifications.map((item) => {
+              // Extract rejection status based on backend changes
+              const isRejected = item.status === "REJECTED";
 
-                    <p className="text-xs text-gray-500 mt-1">
-                      {new Date(item.createdAt).toLocaleString()}
-                    </p>
+              return (
+                <li
+                  key={item.processId}
+                  className={`px-5 py-4 transition-all duration-200 cursor-pointer ${
+                    isRejected
+                      ? 'bg-red-50 hover:bg-red-100'
+                      : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="flex justify-between items-start gap-3">
+                    <div className="flex-1">
+                      <p
+                        className={`text-sm font-semibold ${
+                          isRejected ? 'text-red-600' : 'text-gray-900'
+                        }`}
+                      >
+                        {item.processName}
+                      </p>
+
+                      <p className="text-xs text-gray-500 mt-1">
+                        {new Date(item.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+
+                    {isRejected && (
+                      <span className="shrink-0 px-2.5 py-1 text-xs font-medium rounded-full bg-red-600 text-white">
+                        Rejected
+                      </span>
+                    )}
                   </div>
 
-                  {item.isRejected && (
-                    <span className="shrink-0 px-2.5 py-1 text-xs font-medium rounded-full bg-red-600 text-white">
-                      Rejected
-                    </span>
-                  )}
-                </div>
-
-                <div className="mt-3">
-                  <CustomButton
-                    click={() => handleView(item.processId)}
-                    text="View"
-                  />
-                </div>
-              </li>
-            ))
+                  <div className="mt-3">
+                    <CustomButton
+                      click={() => handleView(item.processId)}
+                      text="View"
+                    />
+                  </div>
+                </li>
+              );
+            })
           ) : (
             <li className="px-6 py-12 text-center">
               <div className="text-sm text-gray-600 font-medium">

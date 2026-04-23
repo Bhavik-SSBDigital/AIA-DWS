@@ -86,6 +86,27 @@ export const exportFileLogs = async (fromDate, toDate) => {
   });
 };
 
+export const getProcessesForUserPaginated = async (data) => {
+  return apiClient.get('/getProcessesForUser');
+};
+
+export const getTagEmails = async (tagId) => {
+  return apiClient.get(`/tags/${tagId}/emails`);
+};
+
+export const addTagEmails = async (tagId, emails) => {
+  return apiClient.post(`/tags/${tagId}/emails`, { emails });
+};
+
+export const deleteTagEmail = async (tagId, emailId) => {
+  return apiClient.delete(`/tags/${tagId}/emails/${emailId}`);
+};
+
+// All processes listing (admin sees all, normal user sees own)
+export const GetAllProcessesForListing = async () => {
+  return apiClient.get('/getAllProcessesForListing');
+};
+
 // department endpoints
 export const getDepartments = async (fromAdmin) => {
   return apiClient.get('/getdepartments', {
@@ -144,7 +165,7 @@ export const GetRoles = async (fromAdmin) => {
   });
 };
 export const GetAllRoles = async () => {
-  return apiClient.get('/getRoles', { params: { isRootLevel: false } });
+  return apiClient.get('/getRoles', {});
 };
 export const GetRootLevelRoles = async () => {
   return apiClient.get('/getRoles', { params: { isRootLevel: true } });
@@ -206,6 +227,10 @@ export const removeEmailRecipient = async (processId, email) => {
     data: { email },
   });
 };
+
+export const GetSidebarConfig = () => apiClient.get('/sidebar-config');
+export const SaveSidebarConfig = (config) =>
+  apiClient.post('/sidebar-config', { config });
 
 export const getSentEmails = async (processId) => {
   return apiClient.get(`/process/sent-emails/${processId}`);
@@ -429,9 +454,8 @@ export const RemoveBookmark = async (documentId) => {
 export const ProcessInitiate = async (data) => {
   return apiClient.post('/initiateProcess', data);
 };
-export const GetProcessesList = async () => {
-  return apiClient.get('/getUserProcesses');
-};
+export const GetProcessesList = (params) =>
+  apiClient.post('/getUserProcesses', params);
 export const GetProcessData = async (id) => {
   return apiClient.get(`/viewProcess/${id}`);
 };
@@ -447,9 +471,12 @@ export const CreateQuery = async (data) => {
 export const removeProcessNotification = async (id) => {
   return apiClient.post(`/removeProcessNotification/${id}`);
 };
-export const GetCompletedProcessList = async () => {
-  return apiClient.get(`/getCompletedProcesses`);
-};
+export const GetCompletedProcessList = (params = {}) =>
+  apiClient.get('/processes/initiated', { params });
+
+export const GetAllProcessesForAdmin = (params = {}) =>
+  apiClient.get('/api/processes/admin-all', { params });
+
 export const ReOpenProcess = async (data) => {
   return apiClient.post('/reopenProcess', data);
 };
@@ -577,8 +604,10 @@ export const getTimelineData = async (id) => {
 };
 
 // notifications
-export const GetNotifications = async () => {
-  return apiClient.get(`/getUserProcesses`);
+// In your Apis.js file
+export const GetNotifications = async (payload = {}) => {
+  // Changed to .post() to match router.post("/getUserProcesses")
+  return apiClient.post(`/getUserProcesses`, payload);
 };
 
 // templets (Legacy)
@@ -611,6 +640,11 @@ export const getTemplatesByTag = async (tagId) => {
 
 export const createTemplateDocument = async (payload) => {
   return apiClient.post('/createTemplateDocument', payload);
+};
+
+export const DeleteTemplate = async (id) => {
+  // The ID must be part of the URL route you set up earlier
+  return await apiClient.delete(`/templates/${id}`);
 };
 
 export const uploadTemplateFile = async (formData) => {

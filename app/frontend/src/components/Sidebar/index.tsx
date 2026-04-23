@@ -18,213 +18,238 @@ import {
   IconSearch,
   IconFile,
   IconTags,
+  IconSettings,
 } from '@tabler/icons-react';
 import { defaultPath } from '../../Slices/PathSlice';
 import { useDispatch } from 'react-redux';
-import { getRecommendations } from '../../common/Apis';
+import { getRecommendations, GetSidebarConfig } from '../../common/Apis';
+import { DEFAULT_SIDEBAR_CONFIG } from '../../pages/SidebarSettings';
 
 interface SidebarProps {
   sidebarOpen: boolean;
   setSidebarOpen: (arg: boolean) => void;
 }
 
+const CACHE_KEY = 'sidebarConfig_v1';
+const CACHE_TTL = 5 * 60 * 1000;
+
+function getRoleTypeKey(isAdmin: boolean, isRootUser: boolean): string {
+  if (isRootUser) return 'rootLevelUser';
+  if (isAdmin)    return 'adminUser';
+  return 'normalUser';
+}
+
+const ProcessIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+    <path d="M3 7m0 2a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2z" />
+    <path d="M8 7v-2a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v2" />
+    <path d="M12 12l0 .01" />
+    <path d="M3 13a20 20 0 0 0 18 0" />
+  </svg>
+);
+
 const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
-  const [open, setOpen] = useState<string>('');
-  const { show, recommendationsLength, setRecommendationsLength } =
-    sessionData();
-  const location = useLocation();
+  const [open, setOpen]                             = useState<string>('');
+  const [sidebarConfig, setSidebarConfig]           = useState<Record<string, string[]>>(DEFAULT_SIDEBAR_CONFIG);
+  const { show, recommendationsLength, setRecommendationsLength } = sessionData();
+  const location   = useLocation();
   const { pathname } = location;
-  const username = sessionStorage.getItem('username');
-  const isPhysicalDocumentKeeper =
-    sessionStorage.getItem('isKeeperOfPhysicalDocs') === 'true';
+  const username   = sessionStorage.getItem('username') || '';
+
+  const isAdmin    = sessionStorage.getItem('isAdmin')    === 'true';
+  const isRootUser = sessionStorage.getItem('specialUser') === 'true'
+                  || sessionStorage.getItem('isRootUser')  === 'true';
+
+  const roleTypeKey = getRoleTypeKey(isAdmin, isRootUser);
 
   const trigger = useRef<any>(null);
   const sidebar = useRef<any>(null);
 
   const storedSidebarExpanded = sessionStorage.getItem('sidebar-expanded');
-  const [sidebarExpanded, setSidebarExpanded] = useState(
-    storedSidebarExpanded === 'true',
-  );
+  const [sidebarExpanded, setSidebarExpanded] = useState(storedSidebarExpanded === 'true');
 
-  // Close on click outside
   useEffect(() => {
-    const clickHandler = ({ target }: MouseEvent) => {
+    const loadConfig = async () => {
+      try {
+        const raw = sessionStorage.getItem(CACHE_KEY);
+        if (raw) {
+          const { data, ts } = JSON.parse(raw);
+          if (Date.now() - ts < CACHE_TTL) {
+            setSidebarConfig(data);
+            return;
+          }
+        }
+        const res = await GetSidebarConfig();
+        if (res?.data?.config) {
+          setSidebarConfig(res.data.config);
+          sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data: res.data.config, ts: Date.now() }));
+        }
+      } catch {
+      }
+    };
+    loadConfig();
+  }, []);
+
+  const canSee = (key: string) => (sidebarConfig[roleTypeKey] || []).includes(key);
+
+  useEffect(() => {
+    const handler = ({ target }: MouseEvent) => {
       if (!sidebar.current || !trigger.current) return;
-      if (
-        !sidebarOpen ||
-        sidebar.current.contains(target) ||
-        trigger.current.contains(target)
-      )
-        return;
+      if (!sidebarOpen || sidebar.current.contains(target) || trigger.current.contains(target)) return;
       setSidebarOpen(false);
     };
-    document.addEventListener('click', clickHandler);
-    return () => document.removeEventListener('click', clickHandler);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
   }, [sidebarOpen]);
 
-  // Close if the esc key is pressed
   useEffect(() => {
-    const keyHandler = ({ keyCode }: KeyboardEvent) => {
+    const handler = ({ keyCode }: KeyboardEvent) => {
       if (!sidebarOpen || keyCode !== 27) return;
       setSidebarOpen(false);
     };
-    document.addEventListener('keydown', keyHandler);
-    return () => document.removeEventListener('keydown', keyHandler);
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
   }, [sidebarOpen]);
 
   useEffect(() => {
     sessionStorage.setItem('sidebar-expanded', sidebarExpanded.toString());
-    document
-      .querySelector('body')
-      ?.classList.toggle('sidebar-expanded', sidebarExpanded);
+    document.querySelector('body')?.classList.toggle('sidebar-expanded', sidebarExpanded);
   }, [sidebarExpanded]);
 
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
-  function truncateUsername(username: string, maxLength = 12) {
-    if (!username || typeof username !== 'string') return '';
-    return username.length <= maxLength
-      ? username
-      : `${username.substring(0, maxLength)}...`;
+  function truncateUsername(u: string, maxLength = 12) {
+    if (!u) return '';
+    return u.length <= maxLength ? u : `${u.substring(0, maxLength)}...`;
   }
 
-  // Define the routes
-// Define the routes
+  useEffect(() => {
+    (async () => {
+      try {
+        const response = await getRecommendations();
+        setRecommendationsLength(response?.data?.recommendations?.length);
+      } catch {}
+    })();
+  }, []);
+
+  const processSubItems = [
+    canSee('processWork')      && { path: '/processes/work',      label: 'Pending Work'       },
+    canSee('processInitiated') && { path: '/processes/initiated', label: 'Initiated Processes' },
+    canSee('processInitiate')  && { path: '/processes/initiate',  label: 'Initiate Process'   },
+  ].filter(Boolean) as { path: string; label: string }[];
+
+  const showProcessGroup = processSubItems.length > 0;
+
   const routes = [
-    {
+    canSee('dashboard') && {
       path: '/',
       label: 'Dashboard',
       icon: <IconBrandSpeedtest size={26} />,
-      active: pathname == '/',
+      active: pathname === '/',
     },
-    {
+    canSee('files') && {
       path: '/files',
       label: 'File System',
       icon: <IconFolderOpen size={26} />,
-      active: pathname == '/files',
+      active: pathname === '/files',
     },
-    {
+    canSee('search') && {
       path: '/search',
       label: 'Deep Search',
       icon: <IconSearch size={26} />,
-      active: pathname == '/search',
+      active: pathname === '/search',
     },
-    {
+    canSee('workflows') && {
       path: '/workflows',
       label: 'Workflows',
       icon: <IconChartDots3 size={26} />,
-      active: pathname == '/workflows',
+      active: pathname === '/workflows',
     },
-    // ✅ MOVED HERE: Master Tags is now visible to all users
-    {
+    canSee('masterTags') && {
       path: '/master/tags',
       label: 'Master Tags',
       icon: <IconTags size={26} />,
-      active: pathname == '/master/tags',
+      active: pathname === '/master/tags',
     },
-    ...(show
-      ? [
-          {
-            path: '/department',
-            label: 'Departments',
-            icon: <IconBuildingEstate size={26} />,
-            dropdown: [
-              { path: '/departments/list', label: 'List Departments' },
-              { path: '/departments/createNew', label: 'Create Department' },
-            ],
-            active: pathname.includes('departments'),
-          },
-          {
-            path: '/roles',
-            label: 'Roles',
-            icon: <IconUserSquareRounded size={26} />,
-            dropdown: [
-              { path: '/roles/list', label: 'List Roles' },
-              { path: '/roles/createNew', label: 'Create Role' },
-            ],
-            active: pathname.includes('roles'),
-          },
-          {
-            path: '/users',
-            label: 'Users',
-            icon: <IconUser size={26} />,
-            dropdown: [
-              { path: '/users/list', label: 'List Users' },
-              { path: '/users/createNew', label: 'Create User' },
-            ],
-            active: pathname.includes('users'),
-          },
-          {
-            path: '/reports',
-            label: 'Reports',
-            icon: <IconFile size={26} />,
-            active: pathname.includes('reports'),
-          },
-        ]
-      : []),
-    {
+    canSee('departments') && {
+      path: '/department',
+      label: 'Departments',
+      icon: <IconBuildingEstate size={26} />,
+      dropdown: [
+        { path: '/departments/list',      label: 'List Departments' },
+        { path: '/departments/createNew', label: 'Create Department' },
+      ],
+      active: pathname.includes('departments'),
+    },
+    canSee('roles') && {
+      path: '/roles',
+      label: 'Roles',
+      icon: <IconUserSquareRounded size={26} />,
+      dropdown: [
+        { path: '/roles/list',      label: 'List Roles'  },
+        { path: '/roles/createNew', label: 'Create Role' },
+      ],
+      active: pathname.includes('roles'),
+    },
+    canSee('users') && {
+      path: '/users',
+      label: 'Users',
+      icon: <IconUser size={26} />,
+      dropdown: [
+        { path: '/users/list',      label: 'List Users'  },
+        { path: '/users/createNew', label: 'Create User' },
+      ],
+      active: pathname.includes('users'),
+    },
+    canSee('reports') && {
+      path: '/reports',
+      label: 'Reports',
+      icon: <IconFile size={26} />,
+      active: pathname.includes('reports'),
+    },
+    showProcessGroup && {
       path: '/processes',
       label: 'Processes',
-      icon: (
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="28"
-          height="28"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-          <path d="M3 7m0 2a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2z" />
-          <path d="M8 7v-2a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v2" />
-          <path d="M12 12l0 .01" />
-          <path d="M3 13a20 20 0 0 0 18 0" />
-        </svg>
-      ),
-      dropdown: [
-        { path: '/processes/work', label: 'Pending Work' },
-        { path: '/processes/completed', label: 'Initiated Processes' },
-        { path: '/processes/initiate', label: 'Initiate Process' },
-      ],
-      active: pathname.includes('process'),
+      icon: <ProcessIcon />,
+      dropdown: processSubItems,
+      // FIXED: Only active if one of its specific dropdown sub-paths is currently active
+      active: processSubItems.some(sub => pathname.startsWith(sub.path)), 
     },
-    {
+    (isAdmin || isRootUser) && {
+      path: '/admin/processes/list',
+      label: 'All Processes (Admin)',
+      icon: <IconFile size={26} />,
+      // FIXED: Restrict this to strictly matching the admin processes path
+      active: pathname.startsWith('/admin/processes'),
+    },
+    canSee('logs') && {
       path: '/logs',
       label: 'Logs',
       icon: <IconHistory size={26} />,
       active: pathname.includes('logs'),
     },
-    {
+    canSee('recommendations') && {
       path: '/recommendations',
       label: 'Recommendations',
       icon: <IconDeviceIpadHorizontalQuestion size={26} />,
       active: pathname.includes('recommendation'),
+      badge: recommendationsLength,
     },
-  ].filter(Boolean); // Filter out any false values
+    (isAdmin || isRootUser) && {
+      path: '/settings/sidebar',
+      label: 'Sidebar Settings',
+      icon: <IconSettings size={26} />,
+      active: pathname === '/settings/sidebar',
+    },
+  ].filter(Boolean) as any[];
 
-  useEffect(() => {
-    const getRecommendationLength = async () => {
-      try {
-        const response = await getRecommendations();
-        // VAPT FIX #18: Removed console logs
-        setRecommendationsLength(response?.data?.recommendations?.length);
-      } catch (error) {
-        // VAPT FIX #18: Removed console logs
-      }
-    };
-    getRecommendationLength();
-  }, []);
   return (
     <aside
       ref={sidebar}
-      style={{
-        width: '280px',
-        // background: 'linear-gradient(63deg, #08203e, #557c93)',
-      }}
+      style={{ width: '280px' }}
       className={`absolute bg-sidebar-gradient-9 left-0 top-0 z-99 flex h-screen w-72.5 flex-col overflow-y-hidden bg-black duration-300 ease-linear dark:bg-boxdark lg:static lg:translate-x-0 ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       }`}
@@ -238,6 +263,7 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
       >
         <IconSquareLetterX color="white" />
       </button>
+
       <Tooltip title={username}>
         <Button
           onClick={() => navigate('/profile')}
@@ -255,11 +281,12 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
           {truncateUsername(username)}
         </Button>
       </Tooltip>
+
       <div className="no-scrollbar flex flex-col overflow-y-auto duration-300 ease-linear">
         <nav className="py-1 px-1">
           <ul className="mb-6 flex flex-col gap-0.5 p-1">
             {routes.map((route, index) => {
-              if (route.dropdown) {
+              if (route.dropdown && route.dropdown.length > 0) {
                 return (
                   <SidebarLinkGroup key={index} activeCondition={route.active}>
                     {() => (
@@ -272,15 +299,12 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
                           onClick={(e) => {
                             e.preventDefault();
                             sidebarExpanded
-                              ? setOpen((prev) =>
-                                  prev === route.path ? '' : route.path,
-                                )
+                              ? setOpen(prev => prev === route.path ? '' : route.path)
                               : setSidebarExpanded(true);
                           }}
                         >
                           {route.icon}
                           {route.label}
-
                           <IconCaretDown
                             size={18}
                             className={`absolute right-4 top-1/2 -translate-y-1/2 transform fill-current duration-300 ease-in-out ${
@@ -290,7 +314,7 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
                         </NavLink>
                         {open === route.path && (
                           <Stack gap={1} sx={{ ml: 4.2, mt: 1, mb: 1 }}>
-                            {route.dropdown.map((subRoute, subIndex) => (
+                            {route.dropdown.map((subRoute: any, subIndex: number) => (
                               <NavLink
                                 key={subIndex}
                                 to={subRoute.path}
@@ -330,12 +354,11 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
                   <span className="duration-300 ease-in-out transform group-hover:scale-105">
                     {route.label}
                   </span>
-                  {route.path === '/recommendations' &&
-                    recommendationsLength > 0 && (
-                      <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-semibold text-white">
-                        {recommendationsLength}
-                      </span>
-                    )}
+                  {route.badge > 0 && (
+                    <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-semibold text-white">
+                      {route.badge}
+                    </span>
+                  )}
                 </NavLink>
               );
             })}

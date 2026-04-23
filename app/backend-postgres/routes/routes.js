@@ -7,7 +7,11 @@ import multer from "multer";
 import rateLimit from "express-rate-limit";
 
 // ✅ IMPORT BOTH AUTH AND ADMIN MIDDLEWARE
-import { requireAuth, requireAdmin } from "../utility/verifyUser.js";
+import {
+  requireAuth,
+  requireAdmin,
+  requireStrictAdmin,
+} from "../utility/verifyUser.js";
 
 import { extractEMLDetails } from "../controller/eml-extract-controller.js";
 import {
@@ -101,6 +105,10 @@ import {
   getRootDocumentsForEdit,
 } from "../controller/project-controller.js";
 import {
+  get_sidebar_config,
+  save_sidebar_config,
+} from "../controller/sidebar-controller.js";
+import {
   add_role,
   get_role,
   edit_role,
@@ -138,6 +146,7 @@ import {
   upload_documents_in_process,
   delete_document_in_process,
   attach_po_numbers,
+  get_all_processes_for_admin,
 } from "../controller/process-controller.js";
 import { pick_process_step } from "../controller/process-step-claim.js";
 import { upload_signature } from "../controller/image-controller.js";
@@ -169,6 +178,11 @@ import {
   use_template_document,
   get_templates_by_tag,
   download_template_document,
+  add_tag_emails,
+  get_tag_email_strings,
+  get_tag_emails,
+  delete_tag_email,
+  delete_template_document,
 } from "../controller/tag-controller.js";
 
 const router = express.Router();
@@ -229,9 +243,9 @@ router.use(requireAuth);
 // 👑 ADMIN-ONLY ROUTES
 // ==========================================
 // Users
-router.post("/signup", requireAdmin, sign_up);
-router.post("/createAdmin", requireAdmin, create_admin);
-router.post("/deleteUser/:id", requireAdmin, deactivate_user);
+router.post("/signup", requireStrictAdmin, sign_up);
+router.post("/createAdmin", create_admin);
+router.post("/deleteUser/:id", requireStrictAdmin, deactivate_user);
 
 router.get("/process/email-recipients/:processId", getEmailRecipients);
 router.post("/process/email-recipients/:processId", addEmailRecipients);
@@ -241,13 +255,17 @@ router.get("/process/sent-emails/:processId", getSentEmails);
 router.post("/process/send-email/:processId", sendManualEmail);
 
 // Departments
-router.post("/addDepartment", requireAdmin, add_department);
-router.delete("/deleteDepartment/:id", requireAdmin, deactivate_department);
+router.post("/addDepartment", requireStrictAdmin, add_department);
+router.delete(
+  "/deleteDepartment/:id",
+  requireStrictAdmin,
+  deactivate_department,
+);
 
 // Roles
-router.post("/addRole", requireAdmin, add_role);
-router.put("/editRole/:id", requireAdmin, edit_role);
-router.delete("/deleteRole/:id", requireAdmin, deactivate_role);
+router.post("/addRole", requireStrictAdmin, add_role);
+router.put("/editRole/:id", requireStrictAdmin, edit_role);
+router.delete("/deleteRole/:id", requireStrictAdmin, deactivate_role);
 
 // Admin Logs & Permissions
 router.get("/downloadLoginLogs", requireAdmin, download_login_logs);
@@ -333,12 +351,16 @@ router.post("/generateDocumentName", generateDocumentNameController);
 
 // Workflows
 
-router.post("/workflows/addWorkflow", requireAdmin, add_workflow);
-router.put("/workflows/editWorkflow/:workflowId", requireAdmin, edit_workflow);
+router.post("/workflows/addWorkflow", requireStrictAdmin, add_workflow);
+router.put(
+  "/workflows/editWorkflow/:workflowId",
+  requireStrictAdmin,
+  edit_workflow,
+);
 router.get("/workflows/viewWorkflow/:workflowId", view_workflow);
 router.delete(
   "/workflows/deleteWorkflow/:workflowId",
-  requireAdmin,
+  requireStrictAdmin,
   delete_workflow,
 );
 router.get("/workflows/getWorkflows", get_workflows);
@@ -357,7 +379,11 @@ router.post(
   check_if_workflow_is_duplicate,
 );
 
-router.post("/createTemplateDocument", requireAdmin, create_template_document);
+router.post(
+  "/createTemplateDocument",
+  requireStrictAdmin,
+  create_template_document,
+);
 router.get("/getWorkflowTemplates/:workflowId", get_workflow_templates);
 router.post(
   "/upload-template",
@@ -371,8 +397,18 @@ router.post("/initiateProcess", initiate_process);
 router.get("/viewProcess/:processId", view_process);
 router.post("/claimProcessStep", pick_process_step);
 router.post("/completeStep", complete_process_step);
-router.get("/getUserProcesses", get_user_processes);
-router.get("/getCompletedProcesses", get_completed_initiator_processes);
+router.post("/getUserProcesses", get_user_processes);
+router.get("/api/processes/admin-all", get_all_processes_for_admin);
+
+router.get("/tags/:tagId/emails", get_tag_emails);
+router.post("/tags/:tagId/emails", add_tag_emails);
+router.delete("/tags/:tagId/emails/:emailId", delete_tag_email);
+router.get("/tags/:tagId/emails/list", get_tag_email_strings); // public, used during initiation
+
+// Unified process listing
+router.get("/getAllProcessesForListing", get_completed_initiator_processes);
+
+router.get("/processes/initiated", get_completed_initiator_processes);
 router.post("/reopenProcess", reopen_process);
 router.post("/process/attach-po", attach_po_numbers);
 router.get(
@@ -412,6 +448,9 @@ router.post("/addRequestMessage/:id", add_request_message);
 router.post("/getProjects", getRootDocumentsWithAccess);
 router.post("/getRootDocumentsForEdit", requireAdmin, getRootDocumentsForEdit);
 
+router.get("/sidebar-config", get_sidebar_config);
+router.post("/sidebar-config", save_sidebar_config);
+
 // Dashboards & Logs
 router.get("/getNumbers", getNumbers);
 router.get("/getDetails", getDetails);
@@ -419,6 +458,8 @@ router.get("/workflowAnalysis/:workflowId", getWorkflowAnalysis);
 router.get("/logs/getUserLogs", get_user_activity_logs);
 router.get("/logs/:processId/:stepInstanceId?", get_user_activity_log);
 router.get("/getProcessActivityLogs/:processId", get_process_activity_logs);
+
+router.delete("/templates/:id", delete_template_document);
 
 // Misc
 router.get("/getHighlightsInFile/:documentId", (req, res) =>

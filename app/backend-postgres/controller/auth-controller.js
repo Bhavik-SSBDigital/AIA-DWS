@@ -172,7 +172,11 @@ export const login = async (req, res) => {
       where: { id: { in: user.roles.map((role) => role.roleId) } },
     });
 
+    console.log("roles", roles);
+
     const isAdmin = roles.some((role) => role.isAdmin) || user.isAdmin;
+    const isRootLevel =
+      roles.some((role) => role.isRootLevel) || user.isRootLevel;
     const isDepartmentHead = roles.some((role) => role.isDepartmentHead);
 
     const accessToken = jwt.sign(
@@ -200,6 +204,8 @@ export const login = async (req, res) => {
       },
     });
 
+    console.log("isRootLevel", isRootLevel);
+
     res.status(200).json({
       accessToken,
       refreshToken,
@@ -210,7 +216,7 @@ export const login = async (req, res) => {
       roles: roles.map((role) => role.role),
       isAdmin,
       isDepartmentHead,
-      isRootUser: user.isRootLevel,
+      isRootUser: isRootLevel,
     });
   } catch (error) {
     console.error("Login System Error"); // ✅ VAPT FIX: Info Disclosure (No stack traces)
@@ -283,7 +289,7 @@ export const create_admin = async (req, res) => {
 
     res.status(200).json({ message: "Admin created successfully", admin });
   } catch (error) {
-    console.error("Admin Creation Error");
+    console.error("Admin Creation Error", error);
     res.status(500).json({ message: "Failed to create admin user" });
   }
 };

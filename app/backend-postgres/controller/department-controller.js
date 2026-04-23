@@ -139,7 +139,7 @@ export const get_departments = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
     const { status, type, adminId, fromAdmin } = req.query;
-    console.log("from admin", fromAdmin);
+
     const filters = {};
     if (status) filters.status = status;
     if (type) filters.type = type;

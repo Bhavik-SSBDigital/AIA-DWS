@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Route, Routes, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import Loader from './common/Loader';
+import SidebarSettings from './pages/SidebarSettings';
 import PageTitle from './components/PageTitle';
 import Profile from './pages/Profile';
 import BranchList from './pages/Branches/List';
@@ -27,7 +28,6 @@ import ForgotPass from './pages/Authentication/ForgotPass';
 import PhysicalDocuments from './pages/PhysicalDocuments/PhysicalDocuments';
 import SearchDocument from './pages/SearchDocuments/SearchDocument';
 import MeetingManager from './pages/Meeting';
-// import ForgotPassword from './pages/Authentication/ForgotPassword';
 import ChangePassword from './pages/Authentication/ChangePassword';
 import MetaData from './pages/MetaData';
 import Workflows from './pages/workflows';
@@ -44,14 +44,14 @@ import CompletedProcesses from './pages/Processes/CompletedProcesses';
 import Bookmark from './pages/Bookmark';
 import AdminReportsPage from './pages/Reports';
 import AutoLoginHandler from './components/AutoLoginHandler';
+import List from './pages/Published/List';
+import AdminProcessesList from './pages/Processes/AdminProcessesList';
 
-// ✅ VAPT FIX #20: Route Guard to prevent Client-Side Auth Bypass
 const AdminRoute = ({ children }: { children: JSX.Element }) => {
   const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
-  const isRootUser = sessionStorage.getItem('specialUser') === 'true';
+  const isRootUser = sessionStorage.getItem('specialUser') === 'true' || sessionStorage.getItem('isRootUser') === 'true';
 
   if (!isAdmin && !isRootUser) {
-    // If they aren't admin, kick them back to the dashboard immediately
     return <Navigate to="/" replace />;
   }
 
@@ -84,16 +84,13 @@ function App() {
       navigate('/auth/signin');
     }
 
-    // Block right-click context menu
     const preventContextMenu = (e: MouseEvent) => {
       e.preventDefault();
     };
 
-    // Block PrintScreen and Ctrl/Cmd + P
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key;
 
-      // Block PrintScreen key
       if (key === 'PrintScreen') {
         e.preventDefault();
         alert('Screenshots are not allowed.');
@@ -103,18 +100,15 @@ function App() {
         }, 1000);
       }
 
-      // Block Ctrl/Cmd + P
       if ((e.ctrlKey || e.metaKey) && key.toLowerCase() === 'p') {
         e.preventDefault();
         alert('Printing is disabled.');
       }
     };
 
-    // Register events
     window.addEventListener('keydown', handleKeyDown);
     document.addEventListener('contextmenu', preventContextMenu);
 
-    // Cleanup on unmount
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('contextmenu', preventContextMenu);
@@ -128,9 +122,6 @@ function App() {
       <Routes>
         <Route path="/auth/auto-login" element={<AutoLoginHandler />} />
         
-        {/* ======================================= */}
-        {/* PUBLIC / STANDARD AUTHENTICATED ROUTES  */}
-        {/* ======================================= */}
         <Route
           index
           element={
@@ -140,15 +131,15 @@ function App() {
             </DefaultLayout>
           }
         />
-       <Route
-  path="/master/tags"
-  element={
-    <DefaultLayout>
-      <PageTitle title="Tags" />
-      <TagsMasterPage />
-    </DefaultLayout>
-  }
-/>
+        <Route
+          path="/master/tags"
+          element={
+            <DefaultLayout>
+              <PageTitle title="Tags" />
+              <TagsMasterPage />
+            </DefaultLayout>
+          }
+        />
         <Route
           path="/timeline/:id"
           element={
@@ -174,6 +165,26 @@ function App() {
               <PageTitle title="Recycle Bin" />
               <RecycleBin />
             </DefaultLayout>
+          }
+        />
+        <Route
+          path="/processes/initiated"
+          element={
+            <DefaultLayout>
+              <PageTitle title="Initiated Processes" />
+              <List />
+            </DefaultLayout>
+          }
+        />
+        <Route
+          path="/settings/sidebar"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="Sidebar Settings" />
+                <SidebarSettings />
+              </DefaultLayout>
+            </AdminRoute>
           }
         />
         <Route
@@ -340,10 +351,17 @@ function App() {
           }
         />
 
-        {/* ======================================= */}
-        {/* SECURE ADMIN ROUTES (VAPT FIX #20)      */}
-        {/* ======================================= */}
-
+        <Route
+          path="/admin/processes/list"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="All Processes (Admin)" />
+                <AdminProcessesList />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
         <Route
           path="/reports"
           element={
@@ -377,7 +395,6 @@ function App() {
             </AdminRoute>
           }
         />
-
         <Route
           path="/branches/edit/:id"
           element={
@@ -488,10 +505,6 @@ function App() {
             </AdminRoute>
           }
         />
-
-        {/* ======================================= */}
-        {/* UNAUTHENTICATED ROUTES                  */}
-        {/* ======================================= */}
 
         <Route
           path="/auth/signin"

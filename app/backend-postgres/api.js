@@ -8,6 +8,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import dotenv from "dotenv";
+import { startPaymentScheduler } from "./services/paymentScheduler.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -111,5 +112,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
+  startPaymentScheduler();
   console.log("listening on", `${PORT}`);
 });

@@ -42,16 +42,31 @@ export const verifyUser = async (accessToken) => {
       return "Unauthorized";
     }
 
+    const dbUser = await prisma.user.findUnique({
+      where: { username: user.username },
+      include: { tokens: true, roles: true },
+    });
+
+    let roles = await prisma.role.findMany({
+      where: { id: { in: dbUser.roles.map((role) => role.roleId) } },
+    });
+
+    console.log("roles", roles);
+
+    const isAdmin = roles.some((role) => role.isAdmin) || user.isAdmin;
+    const isRootLevel =
+      roles.some((role) => role.isRootLevel) || user.isRootLevel;
+
     return {
       id: user.id,
       username: user.username,
       email: user.email,
-      isAdmin: user.isAdmin,
-      isRootLevel: user.isRootLevel,
+      isAdmin: isAdmin,
+      isRootLevel: isRootLevel,
       ...decodedData, // Include additional token properties, if needed
     };
   } catch (error) {
-    console.log("Error verifying user:", error.message);
+    console.log("Error verifying user:", error);
     return "Unauthorized";
   }
 };
@@ -77,6 +92,26 @@ export const requireAuth = async (req, res, next) => {
 
 // ✅ VAPT FIX #5: Middleware for Unauthorized access of File Logs
 export const requireAdmin = async (req, res, next) => {
+  const token =
+    req.headers["authorization"]?.substring(7) ||
+    req.headers["x-authorization"]?.substring(7);
+  const userData = await verifyUser(token);
+
+  console.log("user data", userData);
+  if (
+    userData === "Unauthorized" ||
+    (!userData.isAdmin && !userData.isRootLevel)
+  ) {
+    return res
+      .status(403)
+      .json({ message: "Forbidden: Admin access required" });
+  }
+
+  req.user = userData;
+  next();
+};
+
+export const requireStrictAdmin = async (req, res, next) => {
   const token =
     req.headers["authorization"]?.substring(7) ||
     req.headers["x-authorization"]?.substring(7);

@@ -12,6 +12,10 @@ import { file_delete } from "./file-controller.js";
 import { watermarkDocument } from "./watermark.js";
 import dotenv from "dotenv";
 import { sendProcessNotification } from "../services/emailService.js";
+import {
+  createPaymentSchedule,
+  handleOnApprovalPayment,
+} from "../services/paymentScheduler.js";
 import fs from "fs/promises";
 
 dotenv.config();
@@ -892,6 +896,21 @@ export const initiate_process = async (req, res, next) => {
       }
     } catch (emailError) {}
 
+    const { paymentMode, paymentDate, processTagId } = req.body;
+
+    try {
+      if (paymentMode === "ON_APPROVAL" || paymentMode === "ON_DATE") {
+        await createPaymentSchedule(
+          process.id,
+          processTagId || null,
+          paymentMode,
+          paymentMode === "ON_DATE" ? paymentDate : null,
+        );
+      }
+    } catch (error) {
+      console.log("Error creating payment schedule:", error);
+    }
+
     return res.status(200).json({
       message: `Process with the name ${processName} initiated successfully`,
       processId: process.id,
@@ -1505,7 +1524,8 @@ function buildSimpleThreadTree(emails) {
 
 export const view_process = async (req, res) => {
   try {
-    const { processId } = req.params;
+    let { processId } = req.params;
+    processId = String(processId);
     const accessToken = req.headers["authorization"]?.substring(7);
     const userData = await verifyUser(accessToken);
 
@@ -1520,6 +1540,9 @@ export const view_process = async (req, res) => {
       });
     }
 
+    // ── Admin/Root privilege flag ────────────────────────────────────────────
+    const isPrivileged = userData.isAdmin || userData.isRootLevel;
+
     const retry = async (fn, retries = 3, delay = 1000) => {
       for (let i = 0; i < retries; i++) {
         try {
@@ -1531,6 +1554,8 @@ export const view_process = async (req, res) => {
         }
       }
     };
+
+    console.log("process id", processId);
 
     // Fetch ProcessInstance with minimal relations
     const process = await retry(() =>
@@ -1563,6 +1588,22 @@ export const view_process = async (req, res) => {
         },
       });
     }
+
+    // ── Determine if this user is read-only ──────────────────────────────────
+    // A user is read-only when they are privileged but NOT the initiator and NOT
+    // directly assigned to any step in this process.
+    const isDirectlyAssigned = isPrivileged
+      ? await prisma.processStepInstance.findFirst({
+          where: { processId, assignedTo: userData.id },
+          select: { id: true },
+        })
+      : true; // non-privileged: treat as assigned (normal flow)
+
+    const isReadOnly = Boolean(
+      isPrivileged &&
+      process.initiatorId !== userData.id &&
+      !isDirectlyAssigned,
+    );
 
     // Fetch email threads for the process
     const emailThreads = await retry(() =>
@@ -1688,7 +1729,7 @@ export const view_process = async (req, res) => {
       };
     });
 
-    // Fetch documents separately
+    // Fetch documents separately (Privileged or not, all authorized users get documents)
     const documents = await retry(() =>
       prisma.processDocument.findMany({
         where: { processId: process.id },
@@ -1714,33 +1755,25 @@ export const view_process = async (req, res) => {
       }),
     );
 
-    // Fetch stepInstances separately
-    const stepInstances = await retry(() =>
-      prisma.processStepInstance.findMany({
-        where: {
-          processId: process.id,
-          assignedTo: userData.id,
-          status: {
-            in: [
-              "IN_PROGRESS",
-              "FOR_RECIRCULATION",
-              "APPROVED",
-              "FOR_RECOMMENDATION",
-            ],
-          },
-        },
-        include: {
-          workflowStep: {
-            select: {
-              id: true,
-              stepName: true,
-              stepNumber: true,
-              stepType: true,
+    // Fetch stepInstances separately: Read-only admins get [] so they can't take action
+    const stepInstances = isReadOnly
+      ? []
+      : await retry(() =>
+          prisma.processStepInstance.findMany({
+            where: {
+              processId: process.id,
+              assignedTo: userData.id,
+              status: {
+                in: [
+                  "IN_PROGRESS",
+                  "FOR_RECIRCULATION",
+                  "APPROVED",
+                  "FOR_RECOMMENDATION",
+                ],
+              },
             },
-          },
-          workflowAssignment: {
             include: {
-              step: {
+              workflowStep: {
                 select: {
                   id: true,
                   stepName: true,
@@ -1748,27 +1781,37 @@ export const view_process = async (req, res) => {
                   stepType: true,
                 },
               },
+              workflowAssignment: {
+                include: {
+                  step: {
+                    select: {
+                      id: true,
+                      stepName: true,
+                      stepNumber: true,
+                      stepType: true,
+                    },
+                  },
+                },
+              },
+              pickedBy: { select: { id: true, username: true } },
+              processQA: {
+                where: {
+                  OR: [{ initiatorId: userData.id }, { entityId: userData.id }],
+                },
+                include: {
+                  initiator: { select: { id: true, name: true } },
+                  process: { select: { id: true, name: true } },
+                },
+              },
+              recommendations: {
+                include: {
+                  initiator: { select: { id: true, username: true } },
+                  recommender: { select: { id: true, username: true } },
+                },
+              },
             },
-          },
-          pickedBy: { select: { id: true, username: true } },
-          processQA: {
-            where: {
-              OR: [{ initiatorId: userData.id }, { entityId: userData.id }],
-            },
-            include: {
-              initiator: { select: { id: true, name: true } },
-              process: { select: { id: true, name: true } },
-            },
-          },
-          recommendations: {
-            include: {
-              initiator: { select: { id: true, username: true } },
-              recommender: { select: { id: true, username: true } },
-            },
-          },
-        },
-      }),
-    );
+          }),
+        );
 
     process.documents = documents;
     process.stepInstances = stepInstances;
@@ -2652,6 +2695,7 @@ export const view_process = async (req, res) => {
             ? "APPROVAL"
             : process.currentStep?.stepType || null,
         emailThreads: normalizedEmailThreads,
+        isReadOnly: isReadOnly, // <-- This ensures frontend knows to disable action buttons for Admins
       },
     };
 
@@ -3276,7 +3320,42 @@ export async function buildRoleHierarchyForAssignment(
   return direction === "UPWARDS" ? levels.reverse() : levels;
 }
 
-export const get_user_processes = async (req, res, next) => {
+// Bulletproof string extractor for messy JSON/Array/String fields
+// Bulletproof string extractor for messy JSON/Array/String fields
+const extractSafeStrings = (rawField) => {
+  if (!rawField) return [];
+
+  let parsed = [];
+
+  if (Array.isArray(rawField)) {
+    parsed = rawField;
+  } else if (typeof rawField === "string") {
+    try {
+      const json = JSON.parse(rawField);
+      parsed = Array.isArray(json) ? json : [json];
+    } catch {
+      parsed = rawField.split(",");
+    }
+  } else if (typeof rawField === "object") {
+    parsed = [rawField];
+  }
+
+  return parsed
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+
+      if (typeof item === "object" && item !== null) {
+        return (
+          item.label || item.name || item.value || item.tag || item.id || ""
+        );
+      }
+
+      return String(item).trim();
+    })
+    .filter(Boolean);
+};
+
+export const get_user_processes = async (req, res) => {
   try {
     const accessToken = req.headers["authorization"]?.substring(7);
     const userData = await verifyUser(accessToken);
@@ -3287,6 +3366,26 @@ export const get_user_processes = async (req, res, next) => {
 
     const userId = userData.id;
 
+    const inputParams = { ...req.query, ...req.body };
+
+    const page = Number(inputParams.page) || 1;
+    const pageSize =
+      Number(inputParams.pageSize) || Number(inputParams.limit) || 15;
+
+    const {
+      search,
+      workflowName,
+      status,
+      paymentMode,
+      poNumber,
+      tag,
+      createdDateFrom,
+      createdDateTo,
+      paymentDateFrom,
+      paymentDateTo,
+    } = inputParams;
+
+    // ───────────────── FETCH ─────────────────
     const stepInstances = await prisma.processStepInstance.findMany({
       where: {
         assignedTo: userId,
@@ -3295,74 +3394,331 @@ export const get_user_processes = async (req, res, next) => {
       include: {
         process: {
           include: {
-            workflow: {
-              select: { name: true },
-            },
-            initiator: {
-              select: { username: true },
-            },
-            // Use the correct relation name: qaChannels
+            workflow: { select: { name: true } },
+            initiator: { select: { username: true, id: true } },
             qaChannels: {
-              where: {
-                entityId: userId,
-                status: "OPEN",
-              },
+              where: { entityId: userId, status: "OPEN" },
               select: { id: true },
             },
-            // Recommendations are not directly included here; if needed, query separately
           },
         },
-        workflowAssignment: {
-          include: {
-            step: {
-              select: {
-                stepType: true,
-                stepName: true,
-                escalationTime: true,
-              },
-            },
+        workflowStep: {
+          select: {
+            stepType: true,
+            stepName: true,
+            stepNumber: true,
           },
         },
       },
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     });
 
-    const response = stepInstances.map((step) => {
-      const escalationHours =
-        step.workflowAssignment?.step?.escalationTime || 24;
-      const assignedAt = step.deadline
-        ? new Date(step.deadline.getTime() - escalationHours * 60 * 60 * 1000)
-        : null;
-
-      const hasOpenQuery = step.process.qaChannels.length > 0;
-      const isRejected = hasOpenQuery; // You can extend this to include recommendations if needed
+    // ───────────────── MAP DATA ─────────────────
+    let baseData = stepInstances.map((step) => {
+      const process = step.process;
+      const hasOpenQuery = process.qaChannels?.length > 0;
 
       return {
-        processId: step.process.id,
-        processName: step.process?.name || "Unnamed Process",
-        workflowName: step.process?.workflow?.name || "Unknown Workflow",
-        initiatorUsername: step.process?.initiator?.username || "System User",
+        id: step.id,
+        processId: process.id,
+        processName: process.name || "Unnamed Process",
+        workflowName: process.workflow?.name || "Unknown Workflow",
+        initiatorName: process.initiator?.username || "System User",
+        isOwnProcess: process.initiatorId === userId,
         createdAt: step.createdAt,
+
         actionType:
-          step.process.initiatorId === userId
+          process.initiatorId === userId
             ? "APPROVAL"
-            : step.workflowAssignment?.step?.stepType || "GENERAL",
-        stepName: step.workflowAssignment?.step?.stepName || "Pending Step",
-        currentStepAssignedAt: assignedAt,
-        assignmentId: step.assignmentId,
-        deadline: step.deadline,
-        stepInstanceId: step.id,
-        isRejected, // true if there is an open query
+            : step.workflowStep?.stepType || "GENERAL",
+
+        currentStepName: step.workflowStep?.stepName || "Pending Step",
+        stepNumber: step.workflowStep?.stepNumber || null,
+
+        status: hasOpenQuery ? "REJECTED" : step.status || "IN_PROGRESS",
+        hasOpenQuery,
+
+        paymentMode: process.paymentMode || null,
+        paymentDate: process.paymentDate || null,
+
+        // ✅ FIXED HERE
+        poNumbers: extractSafeStrings(process.poNumbers),
+        tags: extractSafeStrings(process.tags),
       };
     });
 
-    return res.json(response);
+    // ───────────────── FILTER OPTIONS ─────────────────
+    const workflowsSet = new Set();
+    const posSet = new Set();
+    const tagsSet = new Set();
+
+    baseData.forEach((item) => {
+      if (item.workflowName) workflowsSet.add(item.workflowName);
+      item.poNumbers.forEach((po) => posSet.add(po));
+      item.tags.forEach((t) => tagsSet.add(t));
+    });
+
+    const filterOptions = {
+      workflows: Array.from(workflowsSet).sort(),
+      poNumbers: Array.from(posSet).sort(),
+      tags: Array.from(tagsSet).sort(),
+    };
+
+    // ───────────────── FILTERING ─────────────────
+    if (search) {
+      const s = search.toLowerCase();
+      baseData = baseData.filter(
+        (item) =>
+          item.processName.toLowerCase().includes(s) ||
+          item.initiatorName.toLowerCase().includes(s) ||
+          item.workflowName.toLowerCase().includes(s) ||
+          item.currentStepName.toLowerCase().includes(s),
+      );
+    }
+
+    if (workflowName && workflowName !== "All") {
+      baseData = baseData.filter((item) => item.workflowName === workflowName);
+    }
+
+    if (status && status !== "All") {
+      baseData = baseData.filter((item) => item.status === status);
+    }
+
+    if (paymentMode && paymentMode !== "All") {
+      baseData = baseData.filter((item) => item.paymentMode === paymentMode);
+    }
+
+    if (poNumber && poNumber !== "All") {
+      baseData = baseData.filter((item) => item.poNumbers.includes(poNumber));
+    }
+
+    if (tag && tag !== "All") {
+      baseData = baseData.filter((item) => item.tags.includes(tag));
+    }
+
+    if (createdDateFrom) {
+      const from = new Date(createdDateFrom).getTime();
+      baseData = baseData.filter(
+        (item) => new Date(item.createdAt).getTime() >= from,
+      );
+    }
+
+    if (createdDateTo) {
+      const to = new Date(createdDateTo);
+      to.setHours(23, 59, 59, 999);
+      baseData = baseData.filter(
+        (item) => new Date(item.createdAt).getTime() <= to.getTime(),
+      );
+    }
+
+    if (paymentDateFrom) {
+      const from = new Date(paymentDateFrom).getTime();
+      baseData = baseData.filter(
+        (item) =>
+          item.paymentDate && new Date(item.paymentDate).getTime() >= from,
+      );
+    }
+
+    if (paymentDateTo) {
+      const to = new Date(paymentDateTo);
+      to.setHours(23, 59, 59, 999);
+      baseData = baseData.filter(
+        (item) =>
+          item.paymentDate &&
+          new Date(item.paymentDate).getTime() <= to.getTime(),
+      );
+    }
+
+    // ───────────────── PAGINATION ─────────────────
+    const total = baseData.length;
+    const startIndex = (page - 1) * pageSize;
+    const paginatedData = baseData.slice(startIndex, startIndex + pageSize);
+
+    return res.json({
+      data: paginatedData,
+      total,
+      page,
+      pageSize,
+      filterOptions,
+    });
   } catch (error) {
     console.error("Error in get_user_processes:", error);
-    return res.status(500).json({
-      message: "Failed to retrieve processes",
-    });
+    return res.status(500).json({ message: "Failed to retrieve processes" });
   }
 };
+
+export const get_all_processes_for_admin = async (req, res) => {
+  try {
+    // 1. Authorization check
+    if (!req.user || (!req.user.isAdmin && !req.user.isRootLevel)) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden. Admin privileges required.",
+      });
+    }
+
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      status,
+      paymentMode,
+      poNumber,
+      tag,
+      workflowName,
+      initiatorName,
+      createdDateFrom,
+      createdDateTo,
+      // Pass this flag when the frontend only needs filter options, not paginated data
+      // e.g. ?optionsOnly=true — skips the heavy findMany and only returns filter options
+      optionsOnly,
+    } = req.query;
+
+    // ── Build WHERE clause ──────────────────────────────────────────────────
+    const whereClause = buildAdminWhereClause({
+      search,
+      status,
+      paymentMode,
+      poNumber,
+      tag,
+      workflowName,
+      initiatorName,
+      createdDateFrom,
+      createdDateTo,
+    });
+
+    // ── Fetch filter options for ALL matching records (not just this page) ──
+    // We pull only the fields needed for dropdowns using a lean aggregation.
+    const filterOptionRecords = await prisma.processInstance.findMany({
+      where: whereClause,
+      select: {
+        tags: true,
+        poNumbers: true,
+        workflow: { select: { name: true } },
+        initiator: { select: { name: true, username: true } },
+        paymentSchedule: { select: { paymentMode: true } },
+      },
+    });
+
+    const filterOptions = extractFilterOptions(filterOptionRecords);
+
+    // If the caller only wants options (e.g. on initial load), return early.
+    if (optionsOnly === "true") {
+      return res.status(200).json({ success: true, filterOptions });
+    }
+
+    // ── Paginated data fetch ────────────────────────────────────────────────
+    const skip = (Number(page) - 1) * Number(limit);
+    const take = Number(limit);
+
+    const [processes, total] = await Promise.all([
+      prisma.processInstance.findMany({
+        where: whereClause,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+        include: {
+          workflow: { select: { name: true } },
+          initiator: { select: { name: true, username: true } },
+          currentStep: { select: { stepName: true } },
+          paymentSchedule: { select: { paymentDate: true, paymentMode: true } },
+        },
+      }),
+      prisma.processInstance.count({ where: whereClause }),
+    ]);
+
+    const processesWithReadOnlyFlag = processes.map((proc) => ({
+      ...proc,
+      processId: proc.id,
+      processName: proc.name,
+      workflowName: proc.workflow?.name || "N/A",
+      initiatorName:
+        proc.initiator?.name || proc.initiator?.username || "Unknown",
+      currentStepName: proc.currentStep?.stepName || "N/A",
+      paymentMode:
+        proc.paymentMode || proc.paymentSchedule?.paymentMode || null,
+      paymentDate:
+        proc.paymentDate || proc.paymentSchedule?.paymentDate || null,
+      isReadOnly: true,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      processes: processesWithReadOnlyFlag,
+      total,
+      totalPages: Math.ceil(total / Number(limit)),
+      currentPage: Number(page),
+      // Always include filterOptions so the frontend can update dropdowns
+      // after every filter change without an extra round-trip.
+      filterOptions,
+    });
+  } catch (error) {
+    console.error("Error getting processes for admin:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Error getting processes" });
+  }
+};
+
+// ── Helper: build WHERE clause ──────────────────────────────────────────────
+function buildAdminWhereClause({
+  search,
+  status,
+  paymentMode,
+  poNumber,
+  tag,
+  workflowName,
+  initiatorName,
+  createdDateFrom,
+  createdDateTo,
+}) {
+  const where = {};
+
+  if (search) {
+    where.name = { contains: search, mode: "insensitive" };
+  }
+
+  if (status && status !== "All") {
+    where.status = status;
+  }
+
+  if (paymentMode && paymentMode !== "All") {
+    where.OR = [{ paymentMode }, { paymentSchedule: { paymentMode } }];
+  }
+
+  if (poNumber && poNumber !== "All") {
+    where.poNumbers = { has: poNumber };
+  }
+
+  if (tag && tag !== "All") {
+    where.tags = { has: tag };
+  }
+
+  if (workflowName && workflowName !== "All") {
+    where.workflow = { name: workflowName };
+  }
+
+  if (initiatorName && initiatorName !== "All") {
+    where.initiator = {
+      OR: [
+        { name: { contains: initiatorName, mode: "insensitive" } },
+        { username: { contains: initiatorName, mode: "insensitive" } },
+      ],
+    };
+  }
+
+  if (createdDateFrom || createdDateTo) {
+    where.createdAt = {};
+    if (createdDateFrom) where.createdAt.gte = new Date(createdDateFrom);
+    if (createdDateTo) {
+      const toDate = new Date(createdDateTo);
+      toDate.setHours(23, 59, 59, 999);
+      where.createdAt.lte = toDate;
+    }
+  }
+
+  return where;
+}
 
 async function checkAllAssignmentsCompleted(tx, processId, stepId) {
   const assignments = await tx.workflowAssignment.findMany({
@@ -3700,6 +4056,12 @@ export const complete_process_step = async (req, res) => {
                 tags,
               ],
             });
+          }
+
+          try {
+            await handleOnApprovalPayment(stepInstance.processId);
+          } catch (error) {
+            console.error("Error handling payment on approval:", error);
           }
         }
       }
@@ -5240,569 +5602,280 @@ export const get_completed_initiator_processes = async (req, res) => {
     if (userData === "Unauthorized" || !userData?.id) {
       return res.status(401).json({
         success: false,
-        error: {
-          message: "Unauthorized request",
-          details: "Invalid or missing authorization token.",
-          code: "UNAUTHORIZED",
-        },
+        error: { message: "Unauthorized request", code: "UNAUTHORIZED" },
       });
     }
 
-    const processes = await prisma.processInstance.findMany({
-      where: {
-        initiatorId: userData.id,
-      },
-      include: {
-        initiator: {
-          select: { id: true, username: true, name: true, email: true },
+    const isPrivileged = userData.isAdmin || userData.isRootLevel;
+
+    // ── Pagination ───────────────────────────────────────────────────────────
+    const page = Math.max(0, parseInt(req.query.page ?? "1", 10) - 1);
+    const pageSize = Math.min(
+      100,
+      Math.max(5, parseInt(req.query.pageSize ?? "10", 10)),
+    );
+
+    // ── Scope flags ──────────────────────────────────────────────────────────
+    const showAll = req.query.showAll === "true";
+    const ownOnly = req.query.ownOnly === "true";
+    const optionsOnly = req.query.optionsOnly === "true";
+
+    // Non-privileged users always see only their own processes.
+    // Privileged users see all unless ownOnly=true or neither showAll nor ownOnly is set.
+    const applyOwnFilter = isPrivileged ? ownOnly : true;
+
+    // ── Filter params ────────────────────────────────────────────────────────
+    const {
+      search,
+      poSearch, // legacy – maps to poNumbers array
+      tagSearch, // legacy – maps to tags array
+      workflowName,
+      initiatorName,
+      status,
+      paymentMode,
+      createdDateFrom,
+      createdDateTo,
+      paymentDateFrom,
+      paymentDateTo,
+    } = req.query;
+
+    // ── Status filter ────────────────────────────────────────────────────────
+    let statusFilter;
+    if (status === "NOT_COMPLETED") {
+      statusFilter = { not: "COMPLETED" };
+    } else if (status && status !== "All") {
+      statusFilter = status;
+    }
+
+    // ── Resolve workflowName → workflowId ────────────────────────────────────
+    let resolvedWorkflowId;
+    if (workflowName && workflowName !== "All") {
+      const wf = await prisma.workflow.findFirst({
+        where: { name: { contains: workflowName, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (!wf) return emptyPage(res, page, pageSize);
+      resolvedWorkflowId = wf.id;
+    }
+
+    // ── Resolve initiatorName → initiatorId ──────────────────────────────────
+    let resolvedInitiatorId;
+    if (initiatorName && initiatorName !== "All" && isPrivileged) {
+      const u = await prisma.user.findFirst({
+        where: { username: { contains: initiatorName, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (!u) return emptyPage(res, page, pageSize);
+      resolvedInitiatorId = u.id;
+    }
+
+    // ── Build paymentSchedule sub-filter ─────────────────────────────────────
+    let paymentScheduleFilter;
+    const hasPaymentFilter = paymentMode || paymentDateFrom || paymentDateTo;
+    if (hasPaymentFilter) {
+      paymentScheduleFilter = {
+        is: {
+          ...(paymentMode && paymentMode !== "All" ? { paymentMode } : {}),
+          ...(paymentDateFrom || paymentDateTo
+            ? {
+                paymentDate: {
+                  ...(paymentDateFrom
+                    ? { gte: new Date(paymentDateFrom) }
+                    : {}),
+                  ...(paymentDateTo
+                    ? {
+                        lte: new Date(
+                          new Date(paymentDateTo).setHours(23, 59, 59, 999),
+                        ),
+                      }
+                    : {}),
+                },
+              }
+            : {}),
         },
-        workflow: {
-          select: {
-            id: true,
-            name: true,
-            version: true,
-          },
-        },
-        // Note: poNumbers is a String[] array in your schema, so it is automatically
-        // fetched. Adding it to "include" would cause a Prisma error.
-        currentStep: {
-          select: {
-            id: true,
-            stepName: true,
-            stepNumber: true,
-            stepType: true,
-          },
-        },
-        documents: {
-          include: {
-            document: {
-              select: {
-                id: true,
-                name: true,
-                type: true,
-                path: true,
-              },
+      };
+    }
+
+    // ── Build text search OR clause ───────────────────────────────────────────
+    const textSearchClauses = [];
+    if (search) {
+      textSearchClauses.push(
+        { name: { contains: search, mode: "insensitive" } },
+        { tags: { has: search } },
+        { poNumbers: { has: search } },
+      );
+    }
+    if (poSearch && poSearch !== "All") {
+      textSearchClauses.push({ poNumbers: { has: poSearch } });
+    }
+    if (tagSearch && tagSearch !== "All") {
+      textSearchClauses.push({ tags: { has: tagSearch } });
+    }
+
+    // ── Build main WHERE clause ───────────────────────────────────────────────
+    const whereClause = {
+      ...(applyOwnFilter ? { initiatorId: userData.id } : {}),
+      ...(resolvedInitiatorId ? { initiatorId: resolvedInitiatorId } : {}),
+      ...(resolvedWorkflowId ? { workflowId: resolvedWorkflowId } : {}),
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(paymentScheduleFilter
+        ? { paymentSchedule: paymentScheduleFilter }
+        : {}),
+      ...(createdDateFrom || createdDateTo
+        ? {
+            createdAt: {
+              ...(createdDateFrom ? { gte: new Date(createdDateFrom) } : {}),
+              ...(createdDateTo
+                ? {
+                    lte: new Date(
+                      new Date(createdDateTo).setHours(23, 59, 59, 999),
+                    ),
+                  }
+                : {}),
             },
-            signatures: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    username: true,
-                  },
-                },
-              },
-            },
-            rejections: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    username: true,
-                  },
-                },
-              },
-            },
-            documentHistory: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    name: true,
-                    username: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-        stepInstances: {
-          where: {
-            status: {
-              in: [
-                "IN_PROGRESS",
-                "FOR_RECIRCULATION",
-                "APPROVED",
-                "FOR_RECOMMENDATION",
-              ],
-            },
-          },
-          include: {
-            workflowStep: {
-              select: {
-                id: true,
-                stepName: true,
-                stepNumber: true,
-                stepType: true,
-              },
-            },
-            workflowAssignment: {
-              include: {
-                step: {
-                  select: {
-                    id: true,
-                    stepName: true,
-                    stepNumber: true,
-                    stepType: true,
-                  },
-                },
-              },
-            },
-            pickedBy: {
-              select: {
-                id: true,
-                username: true,
-              },
-            },
-            processQA: {
-              where: {
-                OR: [{ initiatorId: userData.id }, { entityId: userData.id }],
-                status: "OPEN",
-              },
-              include: {
-                initiator: {
-                  select: {
-                    id: true,
-                    name: true,
-                  },
-                },
-                process: {
-                  select: {
-                    id: true,
-                    name: true,
-                  },
-                },
-              },
-            },
-            recommendations: {
-              include: {
-                initiator: {
-                  select: { id: true, username: true },
-                },
-                recommender: {
-                  select: { id: true, username: true },
-                },
-              },
-            },
-          },
-        },
+          }
+        : {}),
+      ...(textSearchClauses.length > 0 ? { OR: textSearchClauses } : {}),
+    };
+
+    // ── Fetch filter options for ALL matching records (whole result set) ──────
+    // These are used to populate dropdowns on the frontend.
+    const filterOptionRecords = await prisma.processInstance.findMany({
+      where: whereClause,
+      select: {
+        tags: true,
+        poNumbers: true,
+        workflow: { select: { name: true } },
+        initiator: { select: { name: true, username: true } },
+        paymentSchedule: { select: { paymentMode: true } },
       },
     });
 
-    const transformedProcesses = await Promise.all(
-      processes.map(async (process) => {
-        const assigneeIds = [
-          ...new Set(
-            process.stepInstances.flatMap((step) =>
-              step.workflowAssignment?.assigneeIds?.length
-                ? step.workflowAssignment.assigneeIds
-                : [step.assignedTo],
-            ),
-          ),
-        ];
+    const filterOptions = extractFilterOptions(filterOptionRecords);
 
-        const assignees = await prisma.user.findMany({
-          where: {
-            id: { in: assigneeIds },
-          },
-          select: {
-            id: true,
-            username: true,
-          },
-        });
+    // Return early if only options are needed (e.g. initial page load).
+    if (optionsOnly) {
+      return res.status(200).json({ success: true, filterOptions });
+    }
 
-        const assigneeMap = assignees.reduce((map, user) => {
-          map[user.id] = user;
-          return map;
-        }, {});
-
-        const steps = process.stepInstances.map((step) => {
-          const assigneeIds = step.workflowAssignment?.assigneeIds?.length
-            ? step.workflowAssignment.assigneeIds
-            : [step.assignedTo];
-
-          return {
-            stepName: step.workflowAssignment?.step?.stepName ?? "Unknown Step",
-            stepNumber: step.workflowAssignment?.step?.stepNumber ?? null,
-            stepId: step.workflowAssignment?.step?.id ?? null,
-            stepType: step.workflowAssignment?.step?.stepType ?? "UNKNOWN",
-            assignees: assigneeIds.map((id) => ({
-              assigneeId: id,
-              assigneeName: assigneeMap[id]?.username ?? "Unknown User",
-            })),
-          };
-        });
-
-        const transformedDocuments = process.documents.map((doc) => {
-          const signedBy =
-            doc.signatures?.map((sig) => ({
-              signedBy: sig.user.username,
-              signedAt: sig.signedAt ? sig.signedAt.toISOString() : null,
-              remarks: sig.reason || null,
-              byRecommender: sig.byRecommender,
-              isAttachedWithRecommendation: sig.isAttachedWithRecommendation,
-            })) || [];
-
-          const rejectionDetails =
-            doc.rejections?.length > 0
-              ? {
-                  rejectedBy: doc.rejections[0].user.username,
-                  rejectionReason: doc.rejections[0].reason || null,
-                  rejectedAt: doc.rejections[0].rejectedAt
-                    ? doc.rejections[0].rejectedAt.toISOString()
-                    : null,
-                  byRecommender: doc.rejections[0].byRecommender,
-                  isAttachedWithRecommendation:
-                    doc.rejections[0].isAttachedWithRecommendation,
-                }
-              : null;
-
-          const parts = doc.document.path.split("/");
-          parts.pop();
-          const updatedPath = parts.join("/");
-
-          return {
-            id: doc.document.id,
-            name: doc.document.name,
-            type: doc.document.type,
-            path: updatedPath,
-            tags: doc.document.tags,
-            signedBy,
-            rejectionDetails,
-            isRecirculationTrigger:
-              doc.documentHistory?.some(
-                (history) => history.isRecirculationTrigger,
-              ) || false,
-            approvalCount: signedBy.length,
-            isReplacement: doc.isReplacement,
-            superseding: doc.superseding,
-            reopenCycle: doc.reopenCycle,
-          };
-        });
-
-        const processDocuments = await prisma.processDocument.findMany({
-          where: { processId: process.id },
-          include: {
-            document: {
-              select: {
-                id: true,
-                name: true,
-                path: true,
-              },
-            },
-            replacedDocument: {
-              select: {
-                id: true,
-                name: true,
-                path: true,
-              },
+    // ── Parallel: count + paginated data ─────────────────────────────────────
+    const [total, processes] = await Promise.all([
+      prisma.processInstance.count({ where: whereClause }),
+      prisma.processInstance.findMany({
+        where: whereClause,
+        orderBy: { createdAt: "desc" },
+        skip: page * pageSize,
+        take: pageSize,
+        include: {
+          initiator: { select: { id: true, username: true, name: true } },
+          workflow: { select: { id: true, name: true, version: true } },
+          currentStep: {
+            select: {
+              id: true,
+              stepName: true,
+              stepNumber: true,
+              stepType: true,
             },
           },
-        });
-
-        const documentVersioning = [];
-        const replacedDocumentIds = new Set(
-          processDocuments
-            .filter((pd) => pd.replacedDocumentId)
-            .map((pd) => pd.replacedDocumentId),
-        );
-        const latestDocuments = processDocuments.filter(
-          (pd) => !replacedDocumentIds.has(pd.documentId),
-        );
-
-        for (const latestDoc of latestDocuments) {
-          const versionChain = [];
-          let currentDoc = latestDoc;
-
-          versionChain.push({
-            id: currentDoc.document.id,
-            name: currentDoc.document.name,
-            path: currentDoc.document.path,
-            active: true,
-            isReplacement: currentDoc.isReplacement,
-            superseding: currentDoc.superseding,
-            reopenCycle: currentDoc.reopenCycle,
-          });
-
-          while (currentDoc.replacedDocumentId) {
-            const previousDoc = processDocuments.find(
-              (pd) => pd.documentId === currentDoc.replacedDocumentId,
-            );
-            if (previousDoc) {
-              versionChain.push({
-                id: previousDoc.document.id,
-                name: previousDoc.document.name,
-                path: previousDoc.document.path,
-                active: false,
-                isReplacement: previousDoc.isReplacement,
-                superseding: previousDoc.superseding,
-                reopenCycle: previousDoc.reopenCycle,
-              });
-              currentDoc = previousDoc;
-            } else {
-              break;
-            }
-          }
-
-          documentVersioning.push({
-            latestDocumentId: latestDoc.document.id,
-            versions: versionChain.reverse(),
-          });
-        }
-
-        const queryDetails = await Promise.all(
-          process.stepInstances.flatMap((step) =>
-            step.processQA.map(async (qa) => {
-              const documentHistoryIds = [
-                ...(qa.details?.documentChanges?.map(
-                  (dc) => dc.documentHistoryId,
-                ) || []),
-                ...(qa.details?.documentSummaries?.map(
-                  (ds) => ds.documentHistoryId,
-                ) || []),
-              ];
-
-              const documentHistories =
-                documentHistoryIds.length > 0
-                  ? await prisma.documentHistory.findMany({
-                      where: { id: { in: documentHistoryIds } },
-                      include: {
-                        document: {
-                          select: {
-                            id: true,
-                            name: true,
-                            type: true,
-                            path: true,
-                          },
-                        },
-                        replacedDocument: {
-                          select: {
-                            id: true,
-                            name: true,
-                            path: true,
-                          },
-                        },
-                        user: {
-                          select: {
-                            id: true,
-                            name: true,
-                            username: true,
-                          },
-                        },
-                      },
-                    })
-                  : [];
-
-              return {
-                stepInstanceId: step.id,
-                stepName: step.workflowAssignment?.step?.stepName ?? null,
-                stepNumber: step.workflowAssignment?.step?.stepNumber ?? null,
-                status: step.status,
-                taskType: qa.answer ? "RESOLVED" : "QUERY_UPLOAD",
-                queryText: qa.question,
-                answerText: qa.answer || null,
-                initiatorName: qa.initiator.name,
-                createdAt: qa.createdAt.toISOString(),
-                answeredAt: qa.answeredAt ? qa.answeredAt.toISOString() : null,
-                documentChanges:
-                  qa.details?.documentChanges?.map((dc) => {
-                    const history = documentHistories.find(
-                      (h) => h.id === dc.documentHistoryId,
-                    );
-                    return {
-                      documentId: dc.documentId,
-                      requiresApproval: dc.requiresApproval,
-                      isReplacement: dc.isReplacement,
-                      superseding: dc.superseding || false,
-                      documentHistoryId: dc.documentHistoryId,
-                      document: history?.document
-                        ? {
-                            id: history.document.id,
-                            name: history.document.name,
-                            type: history.document.type,
-                            path: history.document.path,
-                            tags: history.document.tags,
-                          }
-                        : null,
-                      actionDetails: history?.actionDetails,
-                      user: history?.user.name,
-                      createdAt: history?.createdAt.toISOString(),
-                      replacedDocument: history?.replacedDocument
-                        ? {
-                            id: history.replacedDocument.id,
-                            name: history.replacedDocument.name,
-                            path: history.replacedDocument.path,
-                          }
-                        : null,
-                      reopenCycle: history?.actionDetails?.reopenCycle || 0,
-                    };
-                  }) || [],
-                documentSummaries:
-                  qa.details?.documentSummaries?.map((ds) => {
-                    const history = documentHistories.find(
-                      (h) => h.id === ds.documentHistoryId,
-                    );
-                    return {
-                      documentId: ds.documentId,
-                      feedbackText: ds.feedbackText,
-                      documentHistoryId: ds.documentHistoryId,
-                      documentDetails: history?.document
-                        ? {
-                            id: history.document.id,
-                            name: history.document.name,
-                            path: history.document.path,
-                          }
-                        : null,
-                      user: history?.user.username,
-                      createdAt: history?.createdAt.toISOString(),
-                      reopenCycle: history?.actionDetails?.reopenCycle || 0,
-                    };
-                  }) || [],
-                assigneeDetails: qa.details?.assigneeDetails
-                  ? {
-                      assignedStepName:
-                        qa.details.assigneeDetails.assignedStepName,
-                      assignedAssigneeId:
-                        qa.details.assigneeDetails.assignedAssigneeId,
-                      assignedAssigneeName: qa.details.assigneeDetails
-                        .assignedAssigneeId
-                        ? (
-                            await prisma.user.findUnique({
-                              where: {
-                                id: parseInt(
-                                  qa.details.assigneeDetails.assignedAssigneeId,
-                                ),
-                              },
-                              select: { username: true },
-                            })
-                          )?.username || null
-                        : null,
-                    }
-                  : null,
-              };
-            }),
-          ),
-        );
-
-        const recommendationDetails = await Promise.all(
-          process.stepInstances.flatMap((step) =>
-            step.recommendations.map(async (rec) => {
-              const documentSummaries = rec.documentSummaries || [];
-              const documentResponses = rec.details?.documentResponses || [];
-              const documentIds = documentSummaries.map((ds) =>
-                parseInt(ds.documentId),
-              );
-              const documents = documentIds.length
-                ? await prisma.document.findMany({
-                    where: { id: { in: documentIds } },
-                    select: { id: true, name: true },
-                  })
-                : [];
-
-              const documentMap = documents.reduce((map, doc) => {
-                map[doc.id] = doc.name;
-                return map;
-              }, {});
-
-              const documentDetails = documentSummaries.map((ds) => {
-                const response = rec.details?.documentResponses?.find(
-                  (dr) => parseInt(dr.documentId) === parseInt(ds.documentId),
-                );
-                return {
-                  documentId: ds.documentId,
-                  documentName:
-                    documentMap[ds.documentId] || "Unknown Document",
-                  queryText: ds.queryText,
-                  answerText: response?.answerText || null,
-                };
-              });
-
-              return {
-                recommendationId: rec.id,
-                stepInstanceId: step.id,
-                stepName: step.workflowAssignment?.step?.stepName ?? null,
-                stepNumber: step.workflowAssignment?.step?.stepNumber ?? null,
-                status: rec.status,
-                recommendationText: rec.recommendationText,
-                responseText: rec.responseText || null,
-                initiatorName: rec.initiator.username,
-                recommenderName: rec.recommender.username,
-                createdAt: rec.createdAt.toISOString(),
-                respondedAt: rec.respondedAt
-                  ? rec.respondedAt.toISOString()
-                  : null,
-                documentDetails,
-              };
-            }),
-          ),
-        );
-
-        const toBePicked = process.stepInstances.some(
-          (step) =>
-            step.assignedTo === userData.id && step.status === "IN_PROGRESS",
-        );
-
-        const workflow = {
-          id: process.workflow.id,
-          name: process.workflow.name,
-          version: process.workflow.version,
-        };
-
-        // Extracting PO Numbers safely
-        let formattedPOs = [];
-        if (Array.isArray(process.poNumbers)) {
-          formattedPOs = process.poNumbers;
-        }
-
-        return {
-          processName: process.name,
-          initiatorName: process.initiator.username,
-          status: process.status,
-          createdAt: process.createdAt,
-          processId: process.id,
-          poNumbers: formattedPOs,
-          processStepInstanceId:
-            process.stepInstances.filter(
-              (item) => item.status === "IN_PROGRESS",
-            )[0]?.id || null,
-          arrivedAt:
-            process.stepInstances.filter(
-              (item) => item.status === "IN_PROGRESS",
-            )[0]?.updatedAt ||
-            process.stepInstances.filter(
-              (item) => item.status === "IN_PROGRESS",
-            )[0]?.createdAt ||
-            null,
-          updatedAt: process.updatedAt,
-          toBePicked,
-          isRecirculated: process.isRecirculated,
-          documents: transformedDocuments,
-          steps,
-          queryDetails,
-          recommendationDetails,
-          documentVersioning,
-          workflow,
-        };
+          paymentSchedule: {
+            select: { paymentMode: true, paymentDate: true, status: true },
+          },
+        },
       }),
-    );
+    ]);
+
+    const transformed = processes.map((p) => ({
+      _id: p.id,
+      name: p.name,
+      processId: p.id,
+      processName: p.name,
+      initiatorName: p.initiator?.username || "—",
+      status: p.status,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+      tags: p.tags || [],
+      poNumbers: p.poNumbers || [],
+      workflowName: p.workflow?.name || "—",
+      currentStepName: p.currentStep?.stepName || null,
+      paymentMode: p.paymentSchedule?.paymentMode || null,
+      paymentDate: p.paymentSchedule?.paymentDate || null,
+      paymentStatus: p.paymentSchedule?.status || null,
+      isOwnProcess: p.initiatorId === userData.id,
+    }));
 
     return res.status(200).json({
       success: true,
-      data: transformedProcesses,
+      data: transformed,
+      // Always return filterOptions so the frontend can refresh dropdowns
+      // whenever filters change — no separate round-trip needed.
+      filterOptions,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize),
+        hasNext: (page + 1) * pageSize < total,
+        hasPrev: page > 0,
+      },
     });
   } catch (error) {
-    console.error("Error getting completed initiator processes:", error);
+    console.error("get_completed_initiator_processes error:", error);
     return res.status(500).json({
       success: false,
-      error: {
-        message: "Failed to retrieve completed initiator processes",
-        details:
-          "Failed to retrieve completed initiator processes. Please try again later.",
-        code: "PROCESS_RETRIEVAL_ERROR",
-      },
+      error: { message: "Failed to retrieve processes" },
     });
   }
 };
+
+// ── Shared helper: empty paginated response ───────────────────────────────────
+function emptyPage(res, page, pageSize) {
+  return res.status(200).json({
+    success: true,
+    data: [],
+    filterOptions: {
+      workflows: ["All"],
+      initiators: ["All"],
+      paymentModes: ["All"],
+      tags: ["All"],
+      poNumbers: ["All"],
+    },
+    pagination: {
+      page,
+      pageSize,
+      total: 0,
+      totalPages: 0,
+      hasNext: false,
+      hasPrev: false,
+    },
+  });
+}
+
+// ── Shared helper: extract unique dropdown values from a set of records ───────
+function extractFilterOptions(records) {
+  const workflows = new Set();
+  const initiators = new Set();
+  const paymentModes = new Set();
+  const tags = new Set();
+  const poNumbers = new Set();
+
+  for (const rec of records) {
+    if (rec.workflow?.name) workflows.add(rec.workflow.name);
+    if (rec.initiator?.name) initiators.add(rec.initiator.name);
+    else if (rec.initiator?.username) initiators.add(rec.initiator.username);
+    if (rec.paymentSchedule?.paymentMode)
+      paymentModes.add(rec.paymentSchedule.paymentMode);
+    rec.tags?.forEach((t) => t && tags.add(String(t).trim()));
+    rec.poNumbers?.forEach((p) => p && poNumbers.add(String(p).trim()));
+  }
+
+  return {
+    workflows: ["All", ...workflows],
+    initiators: ["All", ...initiators],
+    paymentModes: ["All", ...paymentModes],
+    tags: ["All", ...tags],
+    poNumbers: ["All", ...poNumbers],
+  };
+}
 
 export const get_process_documents = async (req, res) => {
   try {

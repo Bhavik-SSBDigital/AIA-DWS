@@ -319,6 +319,81 @@ export const create_template_document = async (req, res) => {
 };
 
 // ============================================================================
+// 5. DELETE TEMPLATE DOCUMENT
+// ============================================================================
+export const delete_template_document = async (req, res) => {
+  try {
+    const authHeader =
+      req.headers["authorization"] || req.headers["x-authorization"];
+    const accessToken = authHeader?.substring(7);
+
+    if (!accessToken) {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized request: Missing token" });
+    }
+
+    const userData = await verifyUser(accessToken);
+    if (userData === "Unauthorized") {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized request: Invalid token" });
+    }
+
+    const templateId = parseInt(req.params.id, 10);
+    if (!templateId || isNaN(templateId)) {
+      return res.status(400).json({ error: "Valid template ID is required" });
+    }
+
+    // 1. Verify the document exists and is a template
+    const template = await prisma.document.findUnique({
+      where: { id: templateId },
+    });
+
+    if (!template) {
+      return res.status(404).json({ error: "Template not found" });
+    }
+
+    if (!template.path.startsWith("/tags/")) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: Not a valid template document" });
+    }
+
+    // 2. Delete the physical file from local storage
+    const originalFilePath = path.join(
+      __dirname,
+      "../", // Note: Ensure this matches your upload_template path logic
+      STORAGE_PATH,
+      template.path.substring(1),
+    );
+
+    try {
+      await fs.unlink(originalFilePath);
+    } catch (fsError) {
+      // If the file doesn't exist on disk, we still want to clean up the DB
+      if (fsError.code !== "ENOENT") {
+        console.error("Error deleting physical file:", fsError);
+      }
+    }
+
+    // 3. Delete the Prisma DB record
+    // Note: Due to onDelete: Cascade in your schema (e.g. DocumentAccess),
+    // related child records are automatically cleaned up.
+    await prisma.document.delete({
+      where: { id: templateId },
+    });
+
+    return res.status(200).json({ message: "Template deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting template:", error);
+    return res
+      .status(500)
+      .json({ error: "Failed to delete template document" });
+  }
+};
+
+// ============================================================================
 // 3. UPLOAD TEMPLATE DOCUMENT (Using tagId)
 // ============================================================================
 export const upload_template_document = async (req, res) => {
@@ -585,5 +660,114 @@ export const download_template_document = async (req, res) => {
     return res
       .status(500)
       .json({ error: "Internal server error during template download" });
+  }
+};
+
+// GET /tags/:tagId/emails
+export const get_tag_emails = async (req, res) => {
+  try {
+    const tagId = parseInt(req.params.tagId, 10);
+    if (isNaN(tagId))
+      return res.status(400).json({ error: "Valid tagId required" });
+
+    const tag = await prisma.tag.findUnique({
+      where: { id: tagId },
+      include: { emailList: { orderBy: { createdAt: "asc" } } },
+    });
+    if (!tag) return res.status(404).json({ error: "Tag not found" });
+
+    return res.status(200).json({ emails: tag.emailList });
+  } catch (err) {
+    console.error("get_tag_emails error:", err);
+    return res.status(500).json({ message: "Failed to fetch tag emails" });
+  }
+};
+
+// POST /tags/:tagId/emails
+export const add_tag_emails = async (req, res) => {
+  try {
+    let { emails } = req.body;
+    const tagId = parseInt(req.params.tagId, 10);
+    if (isNaN(tagId))
+      return res.status(400).json({ error: "Valid tagId required" });
+
+    if (!Array.isArray(emails) || emails.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "emails must be a non-empty array" });
+    }
+
+    // Normalize & validate emails
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    emails = [
+      ...new Set(emails.map((e) => e?.trim()?.toLowerCase()).filter(Boolean)),
+    ];
+    const invalid = emails.filter((e) => !emailRegex.test(e));
+    if (invalid.length > 0) {
+      return res
+        .status(400)
+        .json({ error: `Invalid email(s): ${invalid.join(", ")}` });
+    }
+
+    const tag = await prisma.tag.findUnique({ where: { id: tagId } });
+    if (!tag) return res.status(404).json({ error: "Tag not found" });
+
+    const result = await prisma.tagEmail.createMany({
+      data: emails.map((email) => ({ tagId, email })),
+      skipDuplicates: true,
+    });
+
+    const updated = await prisma.tagEmail.findMany({
+      where: { tagId },
+      orderBy: { createdAt: "asc" },
+    });
+
+    return res.status(201).json({
+      message: `${result.count} email(s) added`,
+      emails: updated,
+    });
+  } catch (err) {
+    console.error("add_tag_emails error:", err);
+    return res.status(500).json({ message: "Failed to add tag emails" });
+  }
+};
+
+// DELETE /tags/:tagId/emails/:emailId
+export const delete_tag_email = async (req, res) => {
+  try {
+    const tagId = parseInt(req.params.tagId, 10);
+    const emailId = parseInt(req.params.emailId, 10);
+    if (isNaN(tagId) || isNaN(emailId)) {
+      return res
+        .status(400)
+        .json({ error: "Valid tagId and emailId required" });
+    }
+
+    await prisma.tagEmail.delete({ where: { id: emailId } });
+    return res.status(200).json({ message: "Email removed from tag" });
+  } catch (err) {
+    console.error("delete_tag_email error:", err);
+    if (err.code === "P2025")
+      return res.status(404).json({ error: "Email not found" });
+    return res.status(500).json({ message: "Failed to delete tag email" });
+  }
+};
+
+// GET /tags/:tagId/emails/list  — returns just email strings (used during process initiation)
+export const get_tag_email_strings = async (req, res) => {
+  try {
+    const tagId = parseInt(req.params.tagId, 10);
+    if (isNaN(tagId))
+      return res.status(400).json({ error: "Valid tagId required" });
+
+    const records = await prisma.tagEmail.findMany({
+      where: { tagId },
+      select: { email: true },
+    });
+
+    return res.status(200).json({ emails: records.map((r) => r.email) });
+  } catch (err) {
+    console.error("get_tag_email_strings error:", err);
+    return res.status(500).json({ message: "Failed to fetch tag emails" });
   }
 };

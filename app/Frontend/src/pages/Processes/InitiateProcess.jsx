@@ -10,6 +10,7 @@ import {
   useTemplateDocument,
   ViewDocument,
   extractEMLDetails,
+  getTagEmails // Added API import
 } from '../../common/Apis';
 import { 
   IconBold, 
@@ -42,7 +43,9 @@ import {
   IconAlertCircle,
   IconCircleCheck,
   IconPrinter,
-  IconSettings
+  IconSettings,
+  IconCreditCard,
+  IconCalendarEvent
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import CustomButton from '../../CustomComponents/CustomButton';
@@ -262,6 +265,14 @@ export default function InitiateProcess() {
   const [printPref, setPrintPref] = useState('PROCESS'); 
   const [pendingSubmitData, setPendingSubmitData] = useState(null);
 
+  // STATES: Payment Tracking
+  const [paymentMode, setPaymentMode] = useState('NONE'); // 'NONE', 'ON_APPROVAL', 'ON_DATE'
+  const [paymentDate, setPaymentDate] = useState('');
+
+  // STATES: Tag Emails Tracking
+  const [tagEmails, setTagEmails] = useState([]);
+  const [fetchingEmails, setFetchingEmails] = useState(false);
+
   const defaultvalues = {
     workflowId: '',
     description: '',
@@ -373,6 +384,27 @@ export default function InitiateProcess() {
       getTemplates();
     } else {
       setTemplates([]);
+    }
+  }, [processTagId]);
+
+  // EFFECT: Fetch emails for selected tag
+  useEffect(() => {
+    if (processTagId) {
+      const fetchEmails = async () => {
+        setFetchingEmails(true);
+        try {
+          const res = await getTagEmails(processTagId);
+          setTagEmails(res?.data?.emails || []);
+        } catch (error) {
+          console.error('Error fetching tag emails:', error);
+          setTagEmails([]);
+        } finally {
+          setFetchingEmails(false);
+        }
+      };
+      fetchEmails();
+    } else {
+      setTagEmails([]);
     }
   }, [processTagId]);
 
@@ -574,6 +606,13 @@ export default function InitiateProcess() {
       toast.info('Please upload documents for process');
       return;
     }
+    
+    // Validation: If Payment On Date is selected, date is mandatory
+    if (paymentMode === 'ON_DATE' && !paymentDate) {
+      toast.error('Please select a payment date before proceeding.');
+      return;
+    }
+
     setPendingSubmitData(data);
     setShowConfirmModal(true);
   };
@@ -587,6 +626,8 @@ export default function InitiateProcess() {
       ...data,
       tag: selectedTagObj ? selectedTagObj.name : '',
       printDescriptionPref: printPref,
+      paymentMode: paymentMode, // Attached to payload
+      paymentDate: paymentMode === 'ON_DATE' ? paymentDate : null, // Attached to payload
       emailThreads: emailThreads.map((thread) => ({
         threadText: thread.threadText || 'Email thread extracted',
         emails: thread.emails || [],
@@ -855,6 +896,100 @@ export default function InitiateProcess() {
                       </p>
                     )}
                   </div>
+                  
+                  {/* PAYMENT CONFIGURATION SECTION */}
+                  <div className="flex-grow flex flex-col border-t border-slate-100 pt-6 mt-2">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 mb-4">
+                      <IconCreditCard size={18} className="text-slate-400" /> Payment & Notifications
+                    </h4>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <label className={`flex flex-col gap-1 p-4 border rounded-xl cursor-pointer transition-all ${paymentMode === 'NONE' ? 'bg-slate-50 border-slate-400 ring-1 ring-slate-400' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+                        <div className="flex items-center gap-2">
+                          <input type="radio" name="paymentMode" value="NONE" checked={paymentMode === 'NONE'} onChange={() => { setPaymentMode('NONE'); setPaymentDate(''); }} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
+                          <span className="text-sm font-bold text-slate-800">No Payment Configured</span>
+                        </div>
+                        <span className="text-xs text-slate-500 ml-6">Proceed without automated email triggers.</span>
+                      </label>
+
+                      <label className={`flex flex-col gap-1 p-4 border rounded-xl cursor-pointer transition-all ${paymentMode === 'ON_APPROVAL' ? 'bg-indigo-50 border-indigo-400 ring-1 ring-indigo-400' : 'bg-white border-slate-200 hover:border-indigo-300'}`}>
+                        <div className="flex items-center gap-2">
+                          <input type="radio" name="paymentMode" value="ON_APPROVAL" checked={paymentMode === 'ON_APPROVAL'} onChange={() => { setPaymentMode('ON_APPROVAL'); setPaymentDate(''); }} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
+                          <span className="text-sm font-bold text-slate-800">Payment on Approval</span>
+                        </div>
+                        <span className="text-xs text-slate-500 ml-6">Auto-email tags upon process completion.</span>
+                      </label>
+
+                      <label className={`flex flex-col gap-1 p-4 border rounded-xl cursor-pointer transition-all ${paymentMode === 'ON_DATE' ? 'bg-emerald-50 border-emerald-400 ring-1 ring-emerald-400' : 'bg-white border-slate-200 hover:border-emerald-300'}`}>
+                        <div className="flex items-center gap-2">
+                          <input type="radio" name="paymentMode" value="ON_DATE" checked={paymentMode === 'ON_DATE'} onChange={() => setPaymentMode('ON_DATE')} className="w-4 h-4 text-emerald-600 focus:ring-emerald-500" />
+                          <span className="text-sm font-bold text-slate-800">Payment on Date</span>
+                        </div>
+                        <span className="text-xs text-slate-500 ml-6">Schedule an email 1 day prior at 10 AM.</span>
+                      </label>
+                    </div>
+
+                    {paymentMode === 'ON_DATE' && (
+                      <div className="mt-4 flex items-center gap-4 bg-emerald-50/50 p-4 border border-emerald-100 rounded-xl animate-in fade-in slide-in-from-top-2 duration-300">
+                        <IconCalendarEvent size={24} className="text-emerald-500 shrink-0" />
+                        <div className="flex-1 max-w-sm">
+                          <label className="block text-xs font-bold text-emerald-800 uppercase tracking-wide mb-1.5">Select Payment Date</label>
+                          <input
+                            type="date"
+                            value={paymentDate}
+                            onChange={(e) => setPaymentDate(e.target.value)}
+                            min={new Date().toISOString().split("T")[0]}
+                            className="w-full bg-white border border-emerald-200 text-slate-900 text-sm px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 transition-all shadow-sm"
+                          />
+                        </div>
+                        {paymentDate && (
+                          <div className="text-xs font-medium text-emerald-700 bg-emerald-100 px-3 py-2 rounded-lg border border-emerald-200 ml-auto hidden md:block">
+                            Reminder will trigger on: <br/>
+                            <span className="font-bold">
+                              {new Date(new Date(paymentDate).getTime() - 86400000).toLocaleDateString('en-GB')} at 10:00 AM IST
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* NEW: Notification Recipients Display block */}
+                    {(paymentMode === 'ON_APPROVAL' || paymentMode === 'ON_DATE') && (
+                      <div className="mt-4 flex flex-col sm:flex-row items-start gap-4 bg-indigo-50/40 p-4 border border-indigo-100 rounded-xl animate-in fade-in slide-in-from-top-2 duration-300">
+                        <IconMail size={24} className="text-indigo-500 shrink-0 mt-0.5" />
+                        <div className="flex-1 w-full">
+                          <label className="block text-xs font-bold text-indigo-800 uppercase tracking-wide mb-2">Notification Recipients</label>
+                          
+                          {fetchingEmails ? (
+                            <p className="text-sm text-indigo-600">Loading recipients...</p>
+                          ) : tagEmails.length > 0 ? (
+                            <div className="flex flex-wrap gap-2 mb-2">
+                              {tagEmails.map((t) => (
+                                <span key={t.id} className="text-xs font-bold text-indigo-700 bg-white px-3 py-1 rounded-md border border-indigo-200 shadow-sm">
+                                  {t.email}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-indigo-600 mb-2 italic">
+                              {!processTagId 
+                                ? 'Please select a Process Tag above to load recipients.'
+                                : 'No emails found for the selected tag.'}
+                            </p>
+                          )}
+                          
+                          {/* Conditionally rendered note based on paymentMode */}
+                          <p className="text-xs text-indigo-700 font-medium mt-3">
+                            <span className="font-bold">Note: </span>
+                            {paymentMode === 'ON_APPROVAL' 
+                              ? 'These recipients will be notified upon process completion.' 
+                              : 'These recipients will be notified one day before the payment date at 10:00 AM.'}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                 </div>
               </div>
             </div>

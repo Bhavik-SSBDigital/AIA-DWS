@@ -5,7 +5,7 @@ import moment from 'moment';
 import { IconTrash, IconEdit } from '@tabler/icons-react';
 import { toast } from 'react-toastify';
 import ComponentLoader from '../../common/Loader/ComponentLoader';
-import { deleteRole, GetRoles } from '../../common/Apis';
+import { deleteRole, GetAllRoles } from '../../common/Apis';
 import CustomButtom from '../../CustomComponents/CustomButton';
 import DeleteConfirmationModal from '../../CustomComponents/DeleteConfirmation';
 import CustomCard from '../../CustomComponents/CustomCard';
@@ -24,7 +24,7 @@ const RolesList = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const { data } = await GetRoles(true);
+        const { data } = await GetAllRoles();
         setRoles(data.roles);
       } catch (error) {
         toast.error('Failed to fetch roles');

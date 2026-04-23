@@ -318,7 +318,11 @@ model ProcessInstance {
   isRecirculated   Boolean   @default(false)
   reopenCycle      Int       @default(0)
   storagePath      String    @default("")
-  
+  paymentMode        String?
+paymentDate        DateTime?
+paymentEmailSent   Boolean   @default(false)
+schedulerJobId     String?
+paymentSchedule ProcessPaymentSchedule?
   workflow         Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   initiator        User      @relation(fields: [initiatorId], references: [id], onDelete: Cascade)
   currentStep      WorkflowStep? @relation("CurrentStepRelation", fields: [currentStepId], references: [id], onDelete: Cascade)
@@ -331,6 +335,20 @@ model ProcessInstance {
   recommendations  Recommendation[]
   departmentStepProgresses DepartmentStepProgress[] @relation()
   documentHistory  DocumentHistory[] @relation("ProcessDocumentHistory")
+}
+
+model ProcessPaymentSchedule {
+  id          String    @id @default(uuid())
+  processId   String    @unique
+  tagId       Int?
+  paymentMode String    // "ON_APPROVAL" | "ON_DATE"
+  paymentDate DateTime?
+  scheduledAt DateTime?
+  emailSentAt DateTime?
+  status      String    @default("PENDING") // PENDING | SENT | CANCELLED
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  process     ProcessInstance @relation(fields: [processId], references: [id], onDelete: Cascade)
 }
 
 model EmailThread {
@@ -389,6 +407,14 @@ model AssignmentProgress {
   stepInstances     ProcessStepInstance[]
   departmentStepProgress DepartmentStepProgress? @relation("DepartmentAssignmentProgress")
   @@unique([assignmentId, processId])
+}
+
+model AppConfig {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy Int?
 }
 
 model ProcessStepInstance {
@@ -591,6 +617,17 @@ model Tag {
   name      String   @unique
   createdAt DateTime @default(now())
   templates Document[] @relation("TagTemplates")
+  emailList TagEmail[] @relation("TagEmails")   // NEW
+}
+
+model TagEmail {
+  id        Int      @id @default(autoincrement())
+  tagId     Int
+  email     String
+  createdAt DateTime @default(now())
+  tag       Tag      @relation("TagEmails", fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([tagId, email])
 }
 
 model ProcessEmail {

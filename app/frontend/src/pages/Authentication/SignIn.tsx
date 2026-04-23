@@ -67,7 +67,8 @@ const SignIn: React.FC = () => {
         sessionStorage.setItem('initiator', res.data['isInitiator']);
         sessionStorage.setItem('accessToken', res.data['accessToken']);
         sessionStorage.setItem('refreshToken', res.data['refreshToken']);
-        sessionStorage.setItem('specialUser', res.data['specialUser']);
+        sessionStorage.setItem('specialUser', res.data['isRootUser']);
+        sessionStorage.setItem('isRootUser',   res.data['isRootUser']); 
         sessionStorage.setItem('isAdmin', res.data['isAdmin']);
         sessionStorage.setItem('id', res.data['id']);
         sessionStorage.setItem(
@@ -77,6 +78,7 @@ const SignIn: React.FC = () => {
         navigate('/');
       }
     } catch (error: any) {
+      console.log("error signig in", error)
       // VAPT FIX #18: Removed console.log(error) to prevent plaintext password leak in console
       setError(error?.response?.data?.message || "Invalid credentials or server error");
     } finally {

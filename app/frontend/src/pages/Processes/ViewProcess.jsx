@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { DownloadConvertedSignedPdf } from '../../common/Apis';
+import axios from 'axios';
+import { toast } from 'react-toastify';
+import Grid2 from '@mui/material/Grid2';
+
 import {
   ClaimProcess,
   CompleteProcess,
@@ -14,9 +17,8 @@ import {
   SignDocumentAll,
   SignRevoke,
   ViewDocument,
+  DownloadConvertedSignedPdf
 } from '../../common/Apis';
-
-import Grid2 from '@mui/material/Grid2';
 
 import {
   IconEye,
@@ -45,19 +47,18 @@ import {
   IconActivity,
   IconUpload,
   IconTag,
+  IconLock
 } from '@tabler/icons-react';
 import CustomCard from '../../CustomComponents/CustomCard';
 import ComponentLoader from '../../common/Loader/ComponentLoader';
 import CustomButton from '../../CustomComponents/CustomButton';
 import ViewFile from '../view/View';
-import { toast } from 'react-toastify';
 import TopLoader from '../../common/Loader/TopLoader';
 import RemarksModal from '../../CustomComponents/RemarksModal';
 import CustomModal from '../../CustomComponents/CustomModal';
 import Query from './Actions/Query';
 import QuerySolve from './Actions/QuerySolve';
 import AskRecommend from './Actions/AskRecommend';
-import axios from 'axios';
 import { ImageConfig } from '../../config/ImageConfig';
 import ReOpenProcessModal from './Actions/ReOpenProcessModal';
 import DocumentsVersionWise from './DocumentsVersionWise';
@@ -86,6 +87,12 @@ const ViewProcess = () => {
   const [fileView, setFileView] = useState(null);
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
   const [existingQuery, setExistingQuery] = useState(null);
+
+  const [visibleDocsCount, setVisibleDocsCount] = useState(6);
+  const [visibleEmailsCount, setVisibleEmailsCount] = useState(4);
+  const [visibleQueriesCount, setVisibleQueriesCount] = useState(3);
+  const [visibleSededCount, setVisibleSededCount] = useState(3);
+  const [visibleRecsCount, setVisibleRecsCount] = useState(3);
 
   const formatDate = (date) => {
     const now = new Date();
@@ -123,7 +130,9 @@ const ViewProcess = () => {
     remarks: '',
   });
 
-  const disableActions = process?.currentStepType !== 'APPROVAL';
+  const adminViewParam = searchParams.get('adminView') === 'true';
+  const isReadOnly = (process?.isReadOnly ?? false) || adminViewParam;
+  const disableActions = isReadOnly || process?.currentStepType !== 'APPROVAL';
 
   const processDetails = [
     { label: 'Process ID', value: process?.processId },
@@ -153,14 +162,11 @@ const ViewProcess = () => {
       value: process?.description ? (
         <div
            className="w-full max-h-64 overflow-y-auto border border-slate-200 bg-white p-5 rounded-lg shadow-inner text-sm text-slate-700
-              /* Lists Styling */
               [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:mb-3 [&_ul]:space-y-1 
               [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:mb-3 [&_ol]:space-y-1 
-              /* Table Styling */
               [&_table]:w-full [&_table]:border-collapse [&_table]:mb-4 [&_table]:mt-2 [&_table]:bg-white [&_table]:block [&_table]:overflow-x-auto
               [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-100 [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-slate-800
               [&_td]:border [&_td]:border-slate-300 [&_td]:px-4 [&_td]:py-2.5 [&_td]:align-top
-              /* Typography */
               [&_b]:font-bold [&_strong]:font-bold 
               [&_i]:italic [&_em]:italic 
               [&_u]:underline
@@ -362,7 +368,6 @@ const ViewProcess = () => {
     }
   };
 
-  // --- Added Clean Handlers for Approve All Modal ---
   const toggleRemarks = () => {
     setSignAllModalOpen((prev) => ({ ...prev, withRemarks: !prev.withRemarks }));
   };
@@ -374,7 +379,6 @@ const ViewProcess = () => {
       return { ...prev, listOfDocuments: updatedDocuments };
     });
   };
-  // ----------------------------------------------------
 
   const handleViewAllSelectedFiles = async () => {
     setActionsLoading(true);
@@ -812,6 +816,18 @@ const ViewProcess = () => {
     <div className="w-full max-w-7xl mx-auto space-y-8 pb-12 p-4 sm:p-6 bg-slate-50 min-h-screen">
       {actionsLoading && <TopLoader />}
 
+      {isReadOnly && (
+        <div className="flex items-center gap-3 px-5 py-4 mb-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 shadow-sm animate-fade-in">
+          <div className="bg-amber-100 p-2 rounded-full">
+            <IconLock size={20} />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm">Administrative View</h3>
+            <p className="text-xs text-amber-700">You are viewing this process as an administrator. Modification actions are disabled because you are not assigned to this step.</p>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
         <div className="flex items-center gap-4">
           <div className="bg-blue-100 p-3 rounded-lg text-blue-600">
@@ -825,14 +841,15 @@ const ViewProcess = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
-          {!isInitiator && (
+          {!isReadOnly && !isInitiator && (
             <CustomButton
               text={'Approve'}
               click={() => openModelSignAllDoec(process?.processStepInstanceId)}
               className={'flex-1 lg:flex-none min-w-[140px] shadow-sm'}
+              disabled={disableActions}
             />
           )}
-          {!isInitiator && (
+          {!isReadOnly && !isInitiator && (
             <CustomButton
               variant={'danger'}
               text={'Reject'}
@@ -841,7 +858,7 @@ const ViewProcess = () => {
               disabled={actionsLoading || isCompleted || disableActions}
             />
           )}
-          {isCompleted && !disableActions && (
+          {!isReadOnly && isCompleted && !disableActions && (
             <CustomButton
               variant={'primary'}
               text={'Re-Open'}
@@ -850,20 +867,24 @@ const ViewProcess = () => {
               disabled={actionsLoading}
             />
           )}
-          <CustomButton
-            variant={'primary'}
-            text={'Upload Document'}
-            className={'flex-1 lg:flex-none min-w-[140px] shadow-sm hidden'}
-            click={() => setOpenModal('document-upload')}
-            disabled={actionsLoading || !isCompleted || disableActions}
-          />
-          <CustomButton
-            variant={'secondary'}
-            text={'Ask Recommendation'}
-            className={'flex-1 lg:flex-none min-w-[140px] shadow-sm'}
-            click={() => setOpenModal('recommend')}
-            disabled={actionsLoading || isCompleted || disableActions}
-          />
+          {!isReadOnly && (
+            <CustomButton
+              variant={'primary'}
+              text={'Upload Document'}
+              className={'flex-1 lg:flex-none min-w-[140px] shadow-sm hidden'}
+              click={() => setOpenModal('document-upload')}
+              disabled={actionsLoading || !isCompleted || disableActions}
+            />
+          )}
+          {!isReadOnly && (
+            <CustomButton
+              variant={'secondary'}
+              text={'Ask Recommendation'}
+              className={'flex-1 lg:flex-none min-w-[140px] shadow-sm'}
+              click={() => setOpenModal('recommend')}
+              disabled={actionsLoading || isCompleted || disableActions}
+            />
+          )}
           <CustomButton
             variant={'secondary'}
             text={'Activity Logs'}
@@ -921,7 +942,7 @@ const ViewProcess = () => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {process.emailThreads.map((thread, index) => {
+            {process.emailThreads.slice(0, visibleEmailsCount).map((thread, index) => {
               const participants = new Set();
               const threadEmails = thread.emails || [];
               const totalEmails = threadEmails.length;
@@ -941,7 +962,6 @@ const ViewProcess = () => {
 
               const participantsList = Array.from(participants).slice(0, 3);
               const hasMoreParticipants = participants.size > 3;
-              const latestEmail = threadEmails[threadEmails.length - 1];
               const firstEmail = threadEmails[0];
 
               return (
@@ -1036,6 +1056,17 @@ const ViewProcess = () => {
               );
             })}
           </div>
+
+          {process.emailThreads.length > visibleEmailsCount && (
+            <div className="text-center pt-2">
+              <button 
+                onClick={() => setVisibleEmailsCount(prev => prev + 4)} 
+                className="text-sm font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-4 py-2 rounded-full transition-colors"
+              >
+                Load More Emails ({process.emailThreads.length - visibleEmailsCount} remaining)
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -1062,7 +1093,7 @@ const ViewProcess = () => {
           </div>
 
          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {process.documents.map((doc) => {
+            {process.documents.slice(0, visibleDocsCount).map((doc) => {
               const isSelected = selectedDocs.includes(doc.id);
               const toggleSelect = () => {
                 if (doc.type !== 'pdf') return;
@@ -1132,7 +1163,6 @@ const ViewProcess = () => {
                     </div>
                   </div>
 
-                  {/* Document specific formatted description render with responsive table support */}
                   {doc.description && (
                      <div className="mb-4 mx-4 bg-slate-50 p-4 rounded-lg border border-slate-200 max-h-48 overflow-y-auto text-sm text-slate-700 shadow-inner
                             [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:mb-2 [&_ul]:space-y-1
@@ -1170,26 +1200,30 @@ const ViewProcess = () => {
                       title="Details"
                       text={<IconAlignBoxCenterMiddle size={18} className="text-white" />}
                     />
-                    <CustomButton
-                      variant="danger"
-                      className="px-2 shadow-sm"
-                      click={() =>
-                        setOpenModal({
-                          documentId: doc.id,
-                          documentName: doc.name,
-                          modal: 'delete-confirmation',
-                        })
-                      }
-                      disabled={
-                        actionsLoading ||
-                        doc?.signedBy?.length > 0 ||
-                        doc?.rejectionDetails ||
-                        !isCompleted ||
-                        disableActions
-                      }
-                      title="Delete"
-                      text={<IconTrash size={18} className="text-white" />}
-                    />
+                    
+                    {!isReadOnly && (
+                        <CustomButton
+                        variant="danger"
+                        className="px-2 shadow-sm"
+                        click={() =>
+                            setOpenModal({
+                            documentId: doc.id,
+                            documentName: doc.name,
+                            modal: 'delete-confirmation',
+                            })
+                        }
+                        disabled={
+                            actionsLoading ||
+                            doc?.signedBy?.length > 0 ||
+                            doc?.rejectionDetails ||
+                            !isCompleted ||
+                            disableActions
+                        }
+                        title="Delete"
+                        text={<IconTrash size={18} className="text-white" />}
+                        />
+                    )}
+
                     <CustomButton
                       className="px-2 shadow-sm"
                       click={() => handleDownload(doc.path, doc.name)}
@@ -1201,6 +1235,17 @@ const ViewProcess = () => {
               );
             })}
           </div>
+
+          {process.documents.length > visibleDocsCount && (
+            <div className="text-center pt-2">
+              <button 
+                onClick={() => setVisibleDocsCount(prev => prev + 6)} 
+                className="text-sm font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-4 py-2 rounded-full transition-colors"
+              >
+                Load More Documents ({process.documents.length - visibleDocsCount} remaining)
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -1217,7 +1262,7 @@ const ViewProcess = () => {
           </div>
 
           <div className="space-y-6">
-            {process?.sededDocuments.map((docGroup, index) => {
+            {process?.sededDocuments.slice(0, visibleSededCount).map((docGroup, index) => {
               const ext = docGroup?.documentWhichSuperseded?.name
                 ?.split('.')
                 .pop()
@@ -1376,6 +1421,17 @@ const ViewProcess = () => {
               );
             })}
           </div>
+
+          {process.sededDocuments.length > visibleSededCount && (
+            <div className="text-center pt-2">
+              <button 
+                onClick={() => setVisibleSededCount(prev => prev + 3)} 
+                className="text-sm font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-4 py-2 rounded-full transition-colors"
+              >
+                Load More Superseded ({process.sededDocuments.length - visibleSededCount} remaining)
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -1390,7 +1446,7 @@ const ViewProcess = () => {
           </div>
 
           <div className="space-y-6">
-            {process?.queryDetails?.map((query, index) => {
+            {process?.queryDetails?.slice(0, visibleQueriesCount).map((query, index) => {
               const isResolved = !!query.answerText;
               const assigneeName =
                 query.assigneeDetails?.assignedAssigneeName || 'Unknown User';
@@ -1639,7 +1695,7 @@ const ViewProcess = () => {
                         </div>
                       )}
 
-                      {!isResolved && (
+                      {!isResolved && !isReadOnly && (
                         <div className="mt-8 pt-6 border-t border-amber-200 flex justify-end">
                           <CustomButton
                             disabled={
@@ -1657,6 +1713,17 @@ const ViewProcess = () => {
               );
             })}
           </div>
+
+          {process.queryDetails.length > visibleQueriesCount && (
+            <div className="text-center pt-2">
+              <button 
+                onClick={() => setVisibleQueriesCount(prev => prev + 5)} 
+                className="text-sm font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-4 py-2 rounded-full transition-colors"
+              >
+                Load More Queries ({process.queryDetails.length - visibleQueriesCount} remaining)
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -1671,7 +1738,7 @@ const ViewProcess = () => {
           </div>
           
           <div className="space-y-6">
-            {process?.recommendationDetails?.map((rec, index) => (
+            {process?.recommendationDetails?.slice(0, visibleRecsCount).map((rec, index) => (
               <CustomCard key={rec.recommendationId || index} className="border border-indigo-100 shadow-sm rounded-xl p-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 mb-6 text-sm text-slate-700 bg-slate-50 p-4 rounded-lg border border-slate-100">
                   <p className="flex items-center gap-2">
@@ -1749,6 +1816,17 @@ const ViewProcess = () => {
               </CustomCard>
             ))}
           </div>
+
+          {process.recommendationDetails.length > visibleRecsCount && (
+            <div className="text-center pt-2">
+              <button 
+                onClick={() => setVisibleRecsCount(prev => prev + 3)} 
+                className="text-sm font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-4 py-2 rounded-full transition-colors"
+              >
+                Load More Recommendations ({process.recommendationDetails.length - visibleRecsCount} remaining)
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -1950,15 +2028,15 @@ const ViewProcess = () => {
       >
         <Query
           workflowId={process?.workflow?.id}
-          processId={process.processId}
-          storagePath={process.processStoragePath}
+          processId={process?.processId}
+          storagePath={process?.processStoragePath}
           steps={process?.steps}
           close={() => {
             setOpenModal('');
             setExistingQuery(null);
           }}
-          stepInstanceId={process.processStepInstanceId}
-          documents={process.documents}
+          stepInstanceId={process?.processStepInstanceId}
+          documents={process?.documents}
         />
       </CustomModal>
 
@@ -1970,7 +2048,7 @@ const ViewProcess = () => {
         className={'max-h-[95vh] overflow-auto max-w-lg w-full rounded-xl'}
       >
         <DocumentsVersionWise
-          processId={process.processId}
+          processId={process?.processId}
           close={() => setOpenModal('')}
         />
       </CustomModal>
@@ -1983,9 +2061,9 @@ const ViewProcess = () => {
         className={'max-h-[95vh] overflow-auto max-w-lg w-full rounded-xl'}
       >
         <ProcessDocumentUpload
-          processId={process.processId}
+          processId={process?.processId}
           workflowId={process?.workflow?.id}
-          issueNo={process.issueNo}
+          issueNo={process?.issueNo}
           onFinish={(data) => {
             setProcess({
               ...process,
@@ -1999,7 +2077,7 @@ const ViewProcess = () => {
       </CustomModal>
 
       <CustomModal
-        isOpen={existingQuery}
+        isOpen={!!existingQuery}
         onClose={() => {
           setExistingQuery(null);
         }}
@@ -2007,15 +2085,15 @@ const ViewProcess = () => {
       >
         <QuerySolve
           workflowId={process?.workflow?.id}
-          processId={process.processId}
-          storagePath={process.processStoragePath}
+          processId={process?.processId}
+          storagePath={process?.processStoragePath}
           close={() => {
             setExistingQuery(null);
           }}
-          stepInstanceId={process.processStepInstanceId}
+          stepInstanceId={process?.processStepInstanceId}
           queryRaiserStepInstanceId={process?.queryDetails[0]?.stepInstanceId}
           existingQuery={existingQuery}
-          documents={process.documents} 
+          documents={process?.documents} 
         />
       </CustomModal>
 
@@ -2027,13 +2105,13 @@ const ViewProcess = () => {
         className={'max-h-[95vh] overflow-auto max-w-lg w-full rounded-xl'}
       >
         <AskRecommend
-          processId={process.processId}
+          processId={process?.processId}
           close={() => {
             setOpenModal('');
           }}
           initiatorName={process?.initiatorName || ''}
-          stepInstanceId={process.processStepInstanceId}
-          documents={process.documents}
+          stepInstanceId={process?.processStepInstanceId}
+          documents={process?.documents}
         />
       </CustomModal>
 
@@ -2046,12 +2124,12 @@ const ViewProcess = () => {
       >
         <ReOpenProcessModal
           workflowId={process?.workflow?.id}
-          processId={process.processId}
-          storagePath={process.processStoragePath}
+          processId={process?.processId}
+          storagePath={process?.processStoragePath}
           close={() => {
             setOpenModal('');
           }}
-          documents={process.documents}
+          documents={process?.documents}
         />
       </CustomModal>
 
@@ -2158,7 +2236,7 @@ const ViewProcess = () => {
       />
 
       <DeleteConfirmationModal
-        isOpen={openModal.modal == 'delete-confirmation'}
+        isOpen={openModal?.modal == 'delete-confirmation'}
         onClose={() => setOpenModal('')}
         onConfirm={() =>
           DeleteDocument({
