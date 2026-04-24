@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { DataGrid } from '@mui/x-data-grid';
 import {
   Box, CircularProgress, Tabs, Tab, Autocomplete, TextField,
+  Dialog, DialogTitle, DialogContent, IconButton
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import moment from 'moment';
@@ -9,19 +10,22 @@ import { toast } from 'react-toastify';
 import {
   IconEye, IconSearch, IconRefresh, IconLoader2, IconCircleCheck,
   IconPackage, IconCalendar, IconX, IconShieldCheck, IconFilter, IconListNumbers,
+  IconPaperclip, IconMail, IconPlus, IconTrash
 } from '@tabler/icons-react';
-import { GetCompletedProcessList } from '../../common/Apis';
+import { GetCompletedProcessList, AttachPoNumbers } from '../../common/Apis';
 import CustomCard from '../../CustomComponents/CustomCard';
+import CustomModal from '../../CustomComponents/CustomModal';
+import CustomButton from '../../CustomComponents/CustomButton';
+import EmailManagerModal from '../Processes/EmailManagerModal';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUS_META = {
   IN_PROGRESS:    { label: 'In Progress', color: '#3b82f6', bg: '#eff6ff', border: '#93c5fd' },
   PENDING:        { label: 'Pending',     color: '#f59e0b', bg: '#fffbeb', border: '#fcd34d' },
   COMPLETED:      { label: 'Completed',   color: '#10b981', bg: '#f0fdf4', border: '#6ee7b7' },
-REJECTED:       { label: 'Rejected',    color: '#ef4444', bg: '#fef2f2', border: '#fca5a5' },
+  REJECTED:       { label: 'Rejected',    color: '#ef4444', bg: '#fef2f2', border: '#fca5a5' },
   PO_NO_ATTACHED: { label: 'PO Attached', color: '#8b5cf6', bg: '#f5f3ff', border: '#c4b5fd' },
 };
-
 const PAYMENT_MODE_OPTIONS = ['All', 'ON_APPROVAL', 'ON_DATE'];
 const PAGE_SIZE_OPTIONS    = [10, 15, 25, 50, 100];
 const EMPTY_OPTIONS = { workflows: ['All'], initiators: ['All'], paymentModes: ['All'], tags: ['All'], poNumbers: ['All'] };
@@ -85,7 +89,6 @@ function FilterAutocomplete({ label, value, onChange, options, placeholder = 'Ty
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function InitiatedProcesses() {
   const navigate = useNavigate();
-
   const isAdmin      = sessionStorage.getItem('isAdmin')     === 'true';
   const isRootUser   = sessionStorage.getItem('specialUser') === 'true' || sessionStorage.getItem('isRootUser') === 'true';
   const isPrivileged = isAdmin || isRootUser;
@@ -123,11 +126,20 @@ export default function InitiatedProcesses() {
   const [paymentFrom,         setPaymentFrom]         = useState('');
   const [paymentTo,           setPaymentTo]           = useState('');
 
-  // ── Dropdown options (from backend) ──────────────────────────────────────
-  // The backend returns options scoped to ALL records matching the current
-  // filters (not just the current page), so dropdowns are always accurate.
-  const [filterOptions, setFilterOptions] = useState(EMPTY_OPTIONS);
+  // ── Modals State ──────────────────────────────────────────────────────────
+  const [viewPoModalOpen, setViewPoModalOpen] = useState(false);
+  const [viewPoData, setViewPoData]           = useState([]);
+  
+  const [poModalOpen, setPoModalOpen] = useState(false);
+  const [selectedProcessId, setSelectedProcessId] = useState(null);
+  const [submittingPo, setSubmittingPo] = useState(false);
+  const [poTags, setPoTags] = useState([]);
+  const [inputValue, setInputValue] = useState('');
+  
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [selectedEmailProcess, setSelectedEmailProcess] = useState(null);
 
+  const [filterOptions, setFilterOptions] = useState(EMPTY_OPTIONS);
   const debounceSearch  = useRef(null);
   const skipFirstEffect = useRef(true);
 
@@ -187,8 +199,6 @@ export default function InitiatedProcesses() {
       paymentFrom, paymentTo, isPrivileged]);
 
   // ── Core fetch ────────────────────────────────────────────────────────────
-  // The backend now returns `filterOptions` (derived from the entire matching
-  // result set) alongside the paginated rows. We simply apply them here.
   const fetchPage = useCallback(async (paramOverrides = {}, isFirst = false) => {
     if (isFirst) setLoading(true);
     else         setFetching(true);
@@ -202,12 +212,10 @@ export default function InitiatedProcesses() {
       setRows(data.map((item, i) => ({ id: item._id || item.processId || `r-${params.page}-${i}`, ...item })));
       setTotal(pag.total ?? data.length);
 
-      // Update dropdowns from server-computed options
       if (res?.data?.filterOptions) {
         setFilterOptions(res.data.filterOptions);
       }
 
-      // Summary cards — only on first load or manual refresh
       if (isFirst || paramOverrides.isRefresh) {
         try {
           const summaryBase = [
@@ -215,6 +223,7 @@ export default function InitiatedProcesses() {
             GetCompletedProcessList({ page: 1, limit: 1, status: 'NOT_COMPLETED' }),
             GetCompletedProcessList({ page: 1, limit: 1, status: 'COMPLETED' }),
           ];
+
           const privilegedExtra = isPrivileged
             ? [
                 GetCompletedProcessList({ page: 1, limit: 1, showAll: true }),
@@ -225,9 +234,11 @@ export default function InitiatedProcesses() {
 
           const results = await Promise.all([...summaryBase, ...privilegedExtra]);
           const getTot  = (r) => r?.data?.pagination?.total || r?.data?.total || 0;
+
           setOwnTotal(getTot(results[0]));
           setOwnInProg(getTot(results[1]));
           setOwnCompleted(getTot(results[2]));
+
           if (isPrivileged) {
             setAllTotal(getTot(results[3]));
             setAllInProg(getTot(results[4]));
@@ -244,12 +255,12 @@ export default function InitiatedProcesses() {
     }
   }, [buildParams, isPrivileged]);
 
-  useEffect(() => { fetchPage({}, true); }, []); // eslint-disable-line
+  useEffect(() => { fetchPage({}, true); }, []); 
 
   useEffect(() => {
     if (skipFirstEffect.current) { skipFirstEffect.current = false; return; }
     fetchPage({ pg: page, ps: pageSize });
-  }, [ // eslint-disable-line
+  }, [
     page, pageSize, search, poSearch, tagSearch,
     selectedWorkflow, selectedInitiator, selectedStatus,
     selectedPaymentMode, createdFrom, createdTo, paymentFrom, paymentTo, activeTab,
@@ -261,9 +272,8 @@ export default function InitiatedProcesses() {
     clearTimeout(debounceSearch.current);
     debounceSearch.current = setTimeout(() => { setSearch(v); setPage(0); }, 500);
   };
-
   const handleTabChange = (_, v) => { setActiveTab(v); setPage(0); setSelectedStatus('All'); };
-
+  
   const resetFilters = () => {
     setSearchInput(''); setSearch('');
     setPoSearch('All'); setTagSearch('All');
@@ -282,13 +292,84 @@ export default function InitiatedProcesses() {
 
   const handleView = (id) => navigate(`/process/view/${id}`);
 
+  // --- Attach PO Modal & Email Logic ---
+  const handleOpenEmailModal = (process) => {
+    setSelectedEmailProcess(process);
+    setEmailModalOpen(true);
+  };
+
+  const handleOpenPoModal = (processId) => {
+    setSelectedProcessId(processId);
+    setPoTags([]);
+    setInputValue('');
+    setPoModalOpen(true);
+  };
+
+  const handleAddSinglePo = () => {
+    const trimmedInput = inputValue.trim();
+    if (!trimmedInput) return;
+    if (!/^\d{10}$/.test(trimmedInput)) {
+      toast.warning("PO Number must be exactly 10 digits.");
+      return;
+    }
+    if (poTags.includes(trimmedInput)) {
+      toast.warning("This PO Number is already added.");
+      return;
+    }
+    setPoTags(prev => [...prev, trimmedInput]);
+    setInputValue('');
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddSinglePo();
+    }
+  };
+
+  const removeTag = (tagToRemove) => {
+    setPoTags(poTags.filter(tag => tag !== tagToRemove));
+  };
+
+  const handleAttachPo = async () => {
+    let finalTags = [...poTags];
+    const trimmedInput = inputValue.trim();
+    if (trimmedInput) {
+      if (!/^\d{10}$/.test(trimmedInput)) {
+        toast.warning("The pending PO Number in the input field must be exactly 10 digits. Please add it or clear the input.");
+        return;
+      }
+      if (!poTags.includes(trimmedInput)) {
+        finalTags.push(trimmedInput);
+      }
+    }
+    if (finalTags.length === 0) {
+      toast.warning("Please add at least one 10-digit PO Number.");
+      return;
+    }
+    
+    setSubmittingPo(true);
+    try {
+      await AttachPoNumbers(selectedProcessId, finalTags);
+      toast.success(`${finalTags.length} PO Number(s) attached successfully!`);
+      setPoTags([]);
+      setInputValue('');
+      setPoModalOpen(false);
+      await fetchPage({ pg: page, ps: pageSize }, false); // refresh grid silently
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Failed to attach PO Numbers");
+    } finally {
+      setSubmittingPo(false);
+    }
+  };
+
   // ── Columns ───────────────────────────────────────────────────────────────
   const columns = [
     {
       field: 'processName', headerName: 'Process', flex: 2, minWidth: 240, disableColumnMenu: true,
       renderCell: (params) => (
         <div className="flex flex-col justify-center h-full py-2 gap-0.5">
-          <span onClick={() => handleView(params.row._id)}
+          <span onClick={() => handleView(params.row._id || params.row.processId)}
             className="text-blue-600 cursor-pointer hover:underline font-semibold text-sm truncate" title={params.value}>
             {params.value || '—'}
           </span>
@@ -334,18 +415,40 @@ export default function InitiatedProcesses() {
     },
     {
       field: 'poNumbers', headerName: 'PO Numbers', width: 150, disableColumnMenu: true,
-      renderCell: (params) => (
-        <div className="flex items-center h-full flex-wrap gap-1 py-2">
-          {params.value?.length > 0 ? (
-            <>
-              {params.value.slice(0, 2).map((po, i) => (
-                <span key={i} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 text-xs rounded font-medium">{po}</span>
-              ))}
-              {params.value.length > 2 && <span className="text-xs text-gray-400">+{params.value.length - 2}</span>}
-            </>
-          ) : <span className="text-xs text-gray-400">—</span>}
-        </div>
-      ),
+      renderCell: (params) => {
+        const pos = params.value || [];
+        if (!Array.isArray(pos) || pos.length === 0) {
+          return <span className="text-xs text-gray-400 flex items-center h-full py-2">—</span>;
+        }
+        const visiblePos = pos.slice(0, 1);
+        const hiddenCount = pos.length - visiblePos.length;
+        
+        return (
+          <div className="flex items-center gap-1.5 w-full h-full py-2">
+            {visiblePos.map((po, idx) => (
+              <div 
+                key={idx} 
+                className="flex items-center justify-center bg-indigo-50 text-indigo-700 border border-indigo-100 text-xs font-semibold px-2 py-1 rounded shadow-sm"
+              >
+                <span className="text-[10px] text-indigo-400 mr-0.5">#</span>{po}
+              </div>
+            ))}
+            
+            {hiddenCount > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewPoData(pos);
+                  setViewPoModalOpen(true);
+                }}
+                className="flex items-center justify-center bg-blue-50 text-blue-600 border border-blue-200 text-xs font-semibold px-2 py-1 rounded shadow-sm hover:bg-blue-600 hover:text-white transition-colors cursor-pointer"
+              >
+                +{hiddenCount} More
+              </button>
+            )}
+          </div>
+        );
+      }
     },
     {
       field: 'paymentMode', headerName: 'Payment', width: 145, disableColumnMenu: true,
@@ -386,13 +489,33 @@ export default function InitiatedProcesses() {
       ),
     },
     {
-      field: 'actions', headerName: '', width: 64, sortable: false, disableColumnMenu: true,
+      field: 'actions', headerName: 'Actions', width: 140, sortable: false, disableColumnMenu: true,
       renderCell: (params) => (
-        <div className="flex items-center justify-center h-full w-full">
-          <button onClick={() => handleView(params.row._id)}
+        <div className="flex items-center gap-2 h-full py-1.5">
+          <button onClick={() => handleView(params.row._id || params.row.processId)}
             className="p-1.5 bg-blue-600 hover:bg-blue-700 transition-all duration-150 rounded-md shadow-sm focus:outline-none" title="View Process">
             <IconEye size={16} color="white" />
           </button>
+
+          {params.row.status === 'COMPLETED' && (
+            <button
+              className="p-1.5 bg-emerald-500 hover:bg-emerald-600 transition-all duration-150 rounded-md shadow-sm focus:outline-none"
+              onClick={() => handleOpenPoModal(params.row._id || params.row.processId)}
+              title="Add PO Numbers"
+            >
+              <IconPaperclip color="white" size={16} />
+            </button>
+          )}
+          
+          {params.row.status === 'COMPLETED' && (
+            <button
+              className="p-1.5 bg-indigo-500 hover:bg-indigo-600 transition-all duration-150 rounded-md shadow-sm focus:outline-none"
+              onClick={() => handleOpenEmailModal(params.row)}
+              title="Send Email"
+            >
+              <IconMail color="white" size={16} />
+            </button>
+          )}
         </div>
       ),
     },
@@ -428,7 +551,6 @@ export default function InitiatedProcesses() {
   return (
     <div className="animate-fade-in">
       <CustomCard>
-
         {/* Summary & Actions */}
         <div className="flex flex-wrap items-center gap-3 mb-5">
           {isPrivileged ? (
@@ -471,7 +593,6 @@ export default function InitiatedProcesses() {
               </div>
             </>
           )}
-
           <div className="ml-auto flex items-center gap-3">
             <div className="flex items-center gap-2 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm">
               <IconListNumbers size={16} className="text-gray-400" />
@@ -514,40 +635,31 @@ export default function InitiatedProcesses() {
               </button>
             )}
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             <div className="md:col-span-2">
               <FilterInput label="Search Process" icon={<IconSearch size={14} />}
                 value={searchInput} onChange={handleSearchChange} placeholder="Search by process name..." />
             </div>
-
-            {/* Dropdown options come exclusively from backend filterOptions */}
             <FilterAutocomplete label="Workflow" value={selectedWorkflow}
               onChange={(v) => { setSelectedWorkflow(v); setPage(0); }} options={filterOptions.workflows} />
-
             {showInitiatorDropdown && (
               <FilterAutocomplete label="Initiator" value={selectedInitiator}
                 onChange={(v) => { setSelectedInitiator(v); setPage(0); }} options={filterOptions.initiators} />
             )}
-
             {showStatusDropdown && (
               <FilterAutocomplete label="Status" value={selectedStatus}
                 onChange={(v) => { setSelectedStatus(v); setPage(0); }}
                 options={['All', ...Object.keys(STATUS_META)]} getDisplayValue={getFilterDisplayValue} />
             )}
-
             <FilterAutocomplete label="Payment Mode" value={selectedPaymentMode}
               onChange={(v) => { setSelectedPaymentMode(v); setPage(0); }}
               options={PAYMENT_MODE_OPTIONS} getDisplayValue={getFilterDisplayValue} placeholder="Select mode..." />
-
             <FilterAutocomplete label="PO Number" value={poSearch}
               onChange={(v) => { setPoSearch(v); setPage(0); }}
               options={filterOptions.poNumbers} placeholder="Type or select PO..." />
-
             <FilterAutocomplete label="Process Tag" value={tagSearch}
               onChange={(v) => { setTagSearch(v); setPage(0); }}
               options={filterOptions.tags} placeholder="Type or select Tag..." />
-
             {[
               ['Created From', createdFrom, setCreatedFrom],
               ['Created To',   createdTo,   setCreatedTo],
@@ -596,13 +708,155 @@ export default function InitiatedProcesses() {
             }}
           />
         </Box>
-
         {total > 0 && (
           <div className="mt-3 text-xs font-medium text-gray-500 text-right">
             Showing {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} of {total} total processes
           </div>
         )}
       </CustomCard>
+
+      {/* --- Attach PO Modal --- */}
+      {poModalOpen && (
+        <CustomModal 
+          isOpen={poModalOpen} 
+          onClose={() => setPoModalOpen(false)} 
+          className="max-w-xl w-full rounded-2xl"
+        >
+          <div className="p-0 bg-white rounded-2xl overflow-hidden shadow-2xl">
+            <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div className="flex items-center gap-3">
+                <div className="bg-blue-100 p-2.5 rounded-xl text-blue-600 shadow-sm">
+                  <IconPaperclip size={24} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-800 leading-tight">Add PO Numbers</h2>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-0.5">
+                    Process ID: <span className="text-slate-700">{selectedProcessId}</span>
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setPoModalOpen(false)}
+                className="p-2 bg-white border border-slate-200 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-all shadow-sm"
+              >
+                <IconX size={20} stroke={2.5} />
+              </button>
+            </div>
+            <div className="p-6 space-y-5">
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-700 flex justify-between">
+                  <span>Enter PO Number</span>
+                  <span className="text-[11px] font-semibold text-slate-400">Exact 10 digits required</span>
+                </label>
+                
+                <div className="flex gap-3">
+                  <input
+                    id="po-input-field"
+                    value={inputValue}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '' || /^\d{0,10}$/.test(val)) {
+                        setInputValue(val);
+                      }
+                    }}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Type 10-digit PO Number..."
+                    className="flex-1 bg-white border border-slate-300 outline-none text-sm text-slate-700 py-2.5 px-4 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all shadow-sm"
+                  />
+                  <button
+                    onClick={handleAddSinglePo}
+                    disabled={inputValue.trim().length !== 10}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <IconPlus size={18} stroke={2.5} /> Add
+                  </button>
+                </div>
+              </div>
+              {poTags.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Added POs ({poTags.length})
+                  </h3>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl max-h-[180px] overflow-y-auto p-2 space-y-2">
+                    {poTags.map(tag => (
+                      <div 
+                        key={tag} 
+                        className="flex justify-between items-center bg-white border border-slate-200 py-2 px-3 rounded-lg shadow-sm animate-in fade-in zoom-in-95 duration-200"
+                      >
+                        <span className="text-sm font-bold text-slate-700">{tag}</span>
+                        <button 
+                          onClick={() => removeTag(tag)} 
+                          className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors"
+                          title="Remove PO"
+                        >
+                          <IconTrash size={16} stroke={2} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <CustomButton 
+                variant="secondary" 
+                text="Cancel" 
+                className="bg-white border-slate-300 text-slate-700 hover:bg-slate-100 px-6 py-2 shadow-sm"
+                click={() => setPoModalOpen(false)} 
+              />
+              <CustomButton 
+                variant="primary" 
+                text={submittingPo ? "Saving..." : "Save PO Numbers"} 
+                className="px-6 py-2 shadow-md"
+                click={handleAttachPo} 
+                disabled={submittingPo || (poTags.length === 0 && !/^\d{10}$/.test(inputValue.trim()))} 
+              />
+            </div>
+          </div>
+        </CustomModal>
+      )}
+
+      {/* --- View Multiple POs Dialog --- */}
+      <Dialog 
+        open={viewPoModalOpen} 
+        onClose={() => setViewPoModalOpen(false)}
+        PaperProps={{ sx: { borderRadius: '1rem', minWidth: '320px' } }}
+      >
+        <DialogTitle sx={{ m: 0, p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+          <div className="flex items-center gap-2">
+            <span className="text-base font-bold text-slate-800">Attached POs</span>
+            <span className="text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full text-xs font-bold">{viewPoData.length}</span>
+          </div>
+          <IconButton onClick={() => setViewPoModalOpen(false)} size="small" sx={{ color: '#94a3b8' }}>
+            <IconX size={18} stroke={2.5} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ p: 0 }}>
+          <div className="p-4 max-h-[350px] overflow-y-auto bg-white">
+            <div className="flex flex-col gap-2.5">
+              {viewPoData.map((po, idx) => (
+                <div
+                  key={idx}
+                  className="flex justify-between items-center bg-slate-50 text-slate-700 border border-slate-200 text-sm font-bold px-4 py-3 rounded-xl"
+                >
+                  <span className="text-slate-400 font-medium mr-2 text-xs uppercase tracking-wider">Entry #{idx + 1}</span>
+                  <span className="tracking-wide">{po}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* --- Email Manager Modal --- */}
+      {emailModalOpen && selectedEmailProcess && (
+        <EmailManagerModal
+          isOpen={emailModalOpen}
+          onClose={() => setEmailModalOpen(false)}
+          processId={selectedEmailProcess._id || selectedEmailProcess.processId}
+          processName={selectedEmailProcess.processName}
+        />
+      )}
     </div>
   );
 }
