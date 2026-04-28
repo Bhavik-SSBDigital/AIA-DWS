@@ -497,7 +497,7 @@ export default function InitiatedProcesses() {
             <IconEye size={16} color="white" />
           </button>
 
-          {params.row.status === 'COMPLETED' && (
+          {(params.row.status === 'COMPLETED' || params.row.status === 'PO_NO_ATTACHED') && (
             <button
               className="p-1.5 bg-emerald-500 hover:bg-emerald-600 transition-all duration-150 rounded-md shadow-sm focus:outline-none"
               onClick={() => handleOpenPoModal(params.row._id || params.row.processId)}
@@ -507,7 +507,7 @@ export default function InitiatedProcesses() {
             </button>
           )}
           
-          {params.row.status === 'COMPLETED' && (
+          {(params.row.status === 'COMPLETED' || params.row.status === 'PO_NO_ATTACHED') && (
             <button
               className="p-1.5 bg-indigo-500 hover:bg-indigo-600 transition-all duration-150 rounded-md shadow-sm focus:outline-none"
               onClick={() => handleOpenEmailModal(params.row)}
