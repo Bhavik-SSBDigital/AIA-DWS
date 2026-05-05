@@ -19,6 +19,7 @@ import {
   GetRootFolders,
   RemoveBookmark,
   ViewDocument,
+  ConvertFileToPdf, // Added the new API function here
 } from '../../common/Apis';
 import ComponentLoader from '../../common/Loader/ComponentLoader';
 import PathBar from '../../components/path/PathBar';
@@ -38,6 +39,8 @@ import {
   IconScript,
   IconBookmark,
   IconBookmarkFilled,
+  IconExchange,
+  IconAlertCircle
 } from '@tabler/icons-react';
 import ViewFile from '../view/View';
 import CustomModal from '../../CustomComponents/CustomModal';
@@ -59,6 +62,8 @@ export default function FileSysten() {
   // States
   const dispatch = useDispatch();
   const [isOpenMergePdf, setIsOpenMergePdf] = useState(false);
+  const [showConvertModal, setShowConvertModal] = useState(false);
+  const [convertFile, setConvertFile] = useState(null);
   const [departments, setDepartments] = useState([]);
   const username = sessionStorage.getItem('username');
   const [fileType, setFileType] = useState('all');
@@ -394,6 +399,46 @@ const handleDownloadFolder = async (name, path) => {
     }
   };
 
+  const handleConvertPdf = async () => {
+    if (!convertFile) {
+      toast.error('Please select a file to convert');
+      return;
+    }
+    const ext = convertFile.name.split('.').pop().toLowerCase();
+    if (!['jpg', 'jpeg', 'png', 'docx'].includes(ext)) {
+      toast.error('Invalid file type selected. Only jpg, jpeg, png, and docx are permitted.');
+      return;
+    }
+
+    setActionsLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', convertFile);
+
+      // Using the new imported Api function instead of apiClient
+      const response = await ConvertFileToPdf(formData);
+
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const cleanFileName = convertFile.name.split('.').slice(0, -1).join('.');
+      link.download = `${cleanFileName}_converted.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      toast.success('File converted and downloaded successfully!');
+      setShowConvertModal(false);
+      setConvertFile(null);
+    } catch (error) {
+      toast.error(error?.response?.data?.message || 'Failed to convert file');
+    } finally {
+      setActionsLoading(false);
+    }
+  };
+
   // create folder
   const {
     register,
@@ -583,6 +628,47 @@ const handleDownloadFolder = async (name, path) => {
       >
         <MergePdfComponent />
       </CustomModal>
+
+      {/* Convert to PDF Modal */}
+      <CustomModal isOpen={showConvertModal} onClose={() => { setShowConvertModal(false); setConvertFile(null); }} size="md">
+        <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-800">
+          <IconExchange size={24} className="text-indigo-600" />
+          Convert File to PDF
+        </h2>
+        
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 shadow-sm">
+          <IconAlertCircle size={20} className="text-red-500 shrink-0 mt-0.5" />
+          <p className="text-sm text-red-600 font-semibold leading-snug">
+            NOTE: Strictly ONLY <span className="underline">.jpg</span>, <span className="underline">.jpeg</span>, <span className="underline">.png</span>, and <span className="underline">.docx</span> files are permitted to be uploaded and converted.
+          </p>
+        </div>
+
+        <input
+          type="file"
+          accept=".jpg,.jpeg,.png,.docx"
+          onChange={(e) => setConvertFile(e.target.files[0])}
+          className="w-full border border-slate-300 rounded-lg p-2.5 mb-6 text-sm file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+        />
+
+        <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
+          <CustomButton
+            type="button"
+            variant="danger"
+            disabled={actionsLoading}
+            click={() => { setShowConvertModal(false); setConvertFile(null); }}
+            text="Cancel"
+          />
+          <CustomButton
+            type="button"
+            variant="primary"
+            text={'Convert & Download'}
+            disabled={actionsLoading || !convertFile}
+            click={handleConvertPdf}
+          />
+        </div>
+      </CustomModal>
+
+
       {/* Sidebar and Filter Button */}
       <div className="relative flex flex-col md:flex-row h-[calc(100vh-160px)] gap-1 mt-1">
         {/* Mobile Filter Button - Floating */}
@@ -725,6 +811,12 @@ const handleDownloadFolder = async (name, path) => {
               text={`Merge PDF`}
               click={() => {
                 setIsOpenMergePdf(true);
+              }}
+            />
+            <CustomButton
+              text={`Convert to PDF`}
+              click={() => {
+                setShowConvertModal(true);
               }}
             />
             <CustomButton

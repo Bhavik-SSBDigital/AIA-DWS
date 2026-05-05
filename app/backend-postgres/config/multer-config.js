@@ -20,8 +20,6 @@ const __dirname = dirname(__filename);
 // ==========================================
 // 🛡️ SECURITY: STRICT MIME-TYPE & EXTENSION MAPPINGS
 // ==========================================
-// This mapping ensures a file isn't just renamed to a safe extension.
-// It MUST match its expected MIME type.
 const diskSafeFileTypes = {
   ".docx":
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -40,7 +38,7 @@ const diskSafeFileTypes = {
   ".png": "image/png",
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
-  ".pfx": "application/x-pkcs12", // Sometimes browsers send application/octet-stream for this, we handle it below
+  ".pfx": "application/x-pkcs12",
 };
 
 // Configure Multer storage for existing functionality
@@ -63,7 +61,6 @@ const diskStorage = multer.diskStorage({
         destinationDirectory = process.env.DSC_FOLDER_PATH || "uploads/dsc";
         break;
       case "template":
-        // 🔄 FIXED: Use tagId as provided in the payload
         const { tagId } = req.body;
         if (!tagId) {
           return cb(new Error("Tag ID is required for template uploads"));
@@ -100,7 +97,6 @@ const diskStorage = multer.diskStorage({
     const purpose =
       file.fieldname === "file" ? req.body.purpose : file.fieldname;
 
-    // Use req.user if populated by requireAuth middleware, fallback to fetching
     let requestingUser = req.user;
     if (!requestingUser) {
       const accessToken =
@@ -149,19 +145,15 @@ const diskStorage = multer.diskStorage({
 // Initialize Multer with field parsing for existing functionality
 const upload = multer({
   storage: diskStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB Limit
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const mimetype = file.mimetype;
 
-    // ✅ VAPT FIX #7: XSS via File Upload
-    // 1. Check if extension is explicitly supported
     if (!diskSafeFileTypes.hasOwnProperty(ext)) {
       return cb(new Error("Security Error: Unsupported file extension"), false);
     }
 
-    // 2. Check if the MIME type matches the extension (Prevents extension spoofing)
-    // Note: Allow application/octet-stream fallback specifically for .pfx files as browsers struggle to identify them
     if (
       diskSafeFileTypes[ext] !== mimetype &&
       !(ext === ".pfx" && mimetype === "application/octet-stream")
@@ -172,7 +164,6 @@ const upload = multer({
       );
     }
 
-    // Explicitly block universally dangerous web execution types (Double Check)
     if (
       mimetype === "text/html" ||
       mimetype === "image/svg+xml" ||
@@ -190,20 +181,18 @@ const upload = multer({
   },
 });
 
-// ================== NEW CONFIGURATION FOR PDF MERGING ==================
-
+// ================== CONFIGURATION FOR PDF MERGING / CONVERTING ==================
 const memoryStorage = multer.memoryStorage();
 
 const uploadMemory = multer({
   storage: memoryStorage,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB limit per file
+    fileSize: 50 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const mimetype = file.mimetype;
 
-    // ✅ VAPT FIX #7: XSS via File Upload (Removed .html and .htm entirely)
     const supportedMemoryExtensions = [
       ".pdf",
       ".jpg",
@@ -236,12 +225,13 @@ const uploadMemory = multer({
 
     if (!supportedMemoryExtensions.includes(ext)) {
       return cb(
-        new Error(`Security Error: Unsupported file type for merging: ${ext}`),
+        new Error(
+          `Security Error: Unsupported file type for memory processing: ${ext}`,
+        ),
         false,
       );
     }
 
-    // Explicitly blacklist dangerous MIME types that could execute XSS payloads during merge preview
     const dangerousMimeTypes = [
       "text/html",
       "image/svg+xml",
@@ -263,8 +253,9 @@ const uploadMemory = multer({
   },
 });
 
-// ================== EXPORT BOTH CONFIGURATIONS ==================
-
+// ================== EXPORTS ==================
 export default upload;
 export { uploadMemory };
 export const mergePdfUpload = uploadMemory.array("files", 10);
+// NEW: For frontend conversion tool
+export const convertPdfUpload = uploadMemory.single("file");

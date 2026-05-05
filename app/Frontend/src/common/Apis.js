@@ -418,6 +418,18 @@ export const CreateFolder = async (path, isProject) => {
     ...isProject,
   });
 };
+
+// Convert file to PDF
+// Convert file to PDF
+export const ConvertFileToPdf = async (formData) => {
+  return apiClient.post('/convert-to-pdf', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data', // <--- THIS IS THE FIX
+    },
+    responseType: 'blob', // Treat the response as a file buffer
+  });
+};
+
 export const ArchiveFile = async (documentId) => {
   return apiClient.post(`/archiveFile`, { documentId });
 };

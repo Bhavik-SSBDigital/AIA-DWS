@@ -2715,6 +2715,8 @@ export const view_process = async (req, res) => {
   }
 };
 
+import * as ftp from "basic-ftp"; // Add this import at the top of your file with other imports
+
 export const attach_po_numbers = async (req, res) => {
   try {
     const { processId, poNumbers } = req.body;
@@ -2772,9 +2774,63 @@ export const attach_po_numbers = async (req, res) => {
       console.error("Failed to sync to Mongo:", syncError.message);
     }
 
+    // 4. Send Documents to FTP Server
+    const client = new ftp.Client();
+    // client.ftp.verbose = true; // Uncomment this if you need to debug FTP connection logs
+    try {
+      // Connect to the FTP server
+      await client.access({
+        host: process.env.FTP_HOST,
+        port: parseInt(process.env.FTP_PORT || "21", 10),
+        user: process.env.FTP_USER,
+        password: process.env.FTP_PASSWORD,
+        secure: false, // Port 21 is standard unencrypted FTP
+      });
+
+      // Ensure target directory exists and switch to it
+      const remotePath =
+        process.env.FTP_REMOTE_PATH || "/home/AIAAudit/PRD/POAttachment";
+      await client.ensureDir(remotePath);
+
+      // Join PO numbers with an underscore in case there are multiple (e.g. PO123_PO124)
+      const poPrefix = poNumbers.join("_");
+
+      // Iterate over the processed documents and upload them
+      for (const pd of updatedProcess.documents) {
+        const originalDocName = pd.document.name;
+        const localFilePath = path.join(
+          __dirname,
+          STORAGE_PATH,
+          pd.document.path,
+        );
+
+        // Construct the new remote file name: poNumber_original_doc_name
+        const remoteFileName = `${poPrefix}_${originalDocName}`;
+
+        try {
+          // Verify local file exists before attempting upload
+          await fs.access(localFilePath);
+
+          // Upload to FTP
+          await client.uploadFrom(localFilePath, remoteFileName);
+          console.log(`Successfully uploaded ${remoteFileName} to FTP.`);
+        } catch (fileError) {
+          console.error(
+            `Failed to read or upload file ${localFilePath}:`,
+            fileError.message,
+          );
+        }
+      }
+    } catch (ftpError) {
+      console.error("FTP Connection/Upload Error:", ftpError.message);
+    } finally {
+      client.close(); // Always close the FTP connection to prevent hanging sockets
+    }
+
+    // 5. Return Success Response
     return res.status(200).json({
       success: true,
-      message: "PO Numbers attached successfully",
+      message: "PO Numbers attached and files uploaded successfully",
       data: updatedProcess,
     });
   } catch (error) {

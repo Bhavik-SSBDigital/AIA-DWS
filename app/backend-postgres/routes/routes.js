@@ -1,5 +1,6 @@
 import express from "express";
 import upload_, {
+  convertPdfUpload,
   mergePdfUpload,
   uploadMemory,
 } from "../config/multer-config.js";
@@ -99,6 +100,7 @@ import {
   get_bookmarked_documents,
   remove_bookmark_document,
   download_converted_signed_pdf,
+  convertFileToPdf,
 } from "../controller/file-controller.js";
 import {
   getRootDocumentsWithAccess,
@@ -341,6 +343,7 @@ router.delete("/delete_search/:id", delete_search);
 // PDF & Document Operations
 router.post("/merge-pdf", mergePdfUpload, mergeFilesToPdf);
 router.post("/merge-and-save", mergePdfUpload, mergeAndSavePdf);
+router.post("/convert-to-pdf", convertPdfUpload, convertFileToPdf);
 router.post("/downloadWatermarkedFile/:documentId", downloadWatermarkedFile);
 router.get(
   "/downloadConvertedSignedPdf/:processId/:documentId",

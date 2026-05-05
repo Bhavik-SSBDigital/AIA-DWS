@@ -409,13 +409,28 @@ export default function InitiateProcess() {
   }, [processTagId]);
 
   const inputRef = useRef(null);
+
   const handleFileChange = (e) => {
     if (!e.target.files) return;
 
-    const newFiles = Array.from(e.target.files);
-    setSelectedFiles((prev) => [...prev, ...newFiles]);
+    const rawFiles = Array.from(e.target.files);
+    
+    // Strict Filtering Based on Requirements
+    const allowedExts = ['pdf', 'xls', 'xlsx', 'eml'];
+    const validFiles = rawFiles.filter(file => {
+      const ext = file.name.split('.').pop().toLowerCase();
+      return allowedExts.includes(ext);
+    });
 
-    newFiles.forEach((file) => {
+    if (validFiles.length !== rawFiles.length) {
+      toast.error("Some files were removed. Strictly only .pdf, .xls, .xlsx, and .eml are allowed.");
+    }
+
+    if(validFiles.length === 0) return;
+
+    setSelectedFiles((prev) => [...prev, ...validFiles]);
+
+    validFiles.forEach((file) => {
       const uniqueKey = `${file.name}-${Date.now()}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
@@ -433,6 +448,7 @@ export default function InitiateProcess() {
 
     if (inputRef.current) inputRef.current.value = '';
   };
+
 
   const removeFile = (index, key) => {
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
@@ -953,7 +969,7 @@ export default function InitiateProcess() {
                       </div>
                     )}
 
-                    {/* NEW: Notification Recipients Display block */}
+                    {/* Notification Recipients Display block */}
                     {(paymentMode === 'ON_APPROVAL' || paymentMode === 'ON_DATE') && (
                       <div className="mt-4 flex flex-col sm:flex-row items-start gap-4 bg-indigo-50/40 p-4 border border-indigo-100 rounded-xl animate-in fade-in slide-in-from-top-2 duration-300">
                         <IconMail size={24} className="text-indigo-500 shrink-0 mt-0.5" />
@@ -978,7 +994,6 @@ export default function InitiateProcess() {
                             </p>
                           )}
                           
-                          {/* Conditionally rendered note based on paymentMode */}
                           <p className="text-xs text-indigo-700 font-medium mt-3">
                             <span className="font-bold">Note: </span>
                             {paymentMode === 'ON_APPROVAL' 
@@ -1054,14 +1069,22 @@ export default function InitiateProcess() {
                   <IconUpload size={24} stroke={1.5} />
                 </div>
                 <h4 className="text-sm font-bold text-slate-800 mb-1">Click or drag files here to stage</h4>
-                <p className="text-xs text-slate-500 text-center font-medium">PDF, DOCX, XLSX, ZIP, EML, MSG</p>
+                
+                <p className="text-xs text-slate-500 text-center font-medium">PDF, XLSX, XLS, EML</p>
+                <div className="mt-4 bg-red-50 border border-red-200 rounded-lg px-4 py-2 flex items-center gap-2 shadow-sm">
+                  <IconAlertCircle size={16} className="text-red-500" />
+                  <p className="text-xs text-red-600 font-bold tracking-wide uppercase">
+                    NOTE: Only .xlsx, .xls, .pdf, and .eml files are allowed.
+                  </p>
+                </div>
+
                 <input
                   ref={inputRef}
                   type="file"
                   multiple
                   className="hidden"
                   onChange={handleFileChange}
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.jpg,.jpeg,.png,.zip,.rar,.eml,.msg"
+                  accept=".pdf,.xls,.xlsx,.eml"
                 />
               </label>
 
@@ -1258,7 +1281,7 @@ export default function InitiateProcess() {
             </div>
           )}
 
-          {/* Committed Documents Section - COMPLETELY REVAMPED */}
+          {/* Committed Documents Section */}
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
               <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
@@ -1357,7 +1380,7 @@ export default function InitiateProcess() {
                         </div>
                       </div>
 
-                      {/* Rich Text Description Area - Safe Rendering Box */}
+                      {/* Rich Text Description Area */}
                       {doc.description && (
                         <div className="px-5 pb-5 pl-6">
                           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 ml-1">Document Description</div>

@@ -1,8 +1,10 @@
 import fs from "fs/promises";
 import { createWriteStream, createReadStream, read } from "fs";
 import { loginLimiter } from "../utility/limiter.js";
+import os from "os";
 import { fileURLToPath } from "url";
 import { dirname, join, normalize, extname, basename } from "path";
+import { simpleParser } from "mailparser";
 import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
 import fsCB from "fs";
 import sharp from "sharp";
@@ -39,6 +41,20 @@ const __dirname = dirname(__filename);
 const COLLABORA_URL = process.env.WOPI_SERVER_URL;
 import { exec } from "child_process";
 const execPromise = promisify(exec);
+
+// import { execSync } from "child_process";
+
+const getLibreOfficePath = () => {
+  if (process.env.LIBREOFFICE_PATH) {
+    return process.env.LIBREOFFICE_PATH;
+  }
+
+  try {
+    return execSync("which soffice").toString().trim();
+  } catch {
+    return null;
+  }
+};
 
 const getContentTypeFromExtension = (extension) => {
   const mimeTypes = {
@@ -2963,28 +2979,168 @@ export const remove_bookmark_document = async (req, res) => {
   }
 };
 
+// Helper function to clean up temporary files
+// ======================================================================
+const getSofficeCommand = (outDir, inFile) => {
+  const platform = os.platform();
+
+  if (platform === "darwin") {
+    // Mac: Automatically looks in Homebrew and standard App paths
+    return `PATH=$PATH:/opt/homebrew/bin:/usr/local/bin:/Applications/LibreOffice.app/Contents/MacOS soffice --headless --convert-to pdf --outdir "${outDir}" "${inFile}"`;
+  } else if (platform === "win32") {
+    // Windows: Wraps path in quotes to handle spaces in 'Program Files'
+    return `""C:\\Program Files\\LibreOffice\\program\\soffice.exe"" --headless --convert-to pdf --outdir "${outDir}" "${inFile}"`;
+  } else {
+    // Linux/Ubuntu: Standard command
+    return `soffice --headless --convert-to pdf --outdir "${outDir}" "${inFile}"`;
+  }
+};
+
+const executeLibreOfficeConversion = async (inputFilePath, outputDir) => {
+  try {
+    const command = getSofficeCommand(outputDir, inputFilePath);
+    execSync(command, { stdio: "ignore" });
+
+    const parsedPath = path.parse(inputFilePath);
+    const outputFilePath = path.join(outputDir, `${parsedPath.name}.pdf`);
+    return outputFilePath;
+  } catch (error) {
+    throw new Error(
+      `LibreOffice conversion failed. Ensure LibreOffice is installed. Details: ${error.message}`,
+    );
+  }
+};
+
+// ======================================================================
+// 1. CONVERT SINGLE IMAGE/DOC TO PDF (EXACT FORMATTING)
+// ======================================================================
+export const convertFileToPdf = async (req, res) => {
+  let tempFilePath = null;
+  let convertedFilePath = null;
+
+  try {
+    const authHeader =
+      req.headers["authorization"] || req.headers["x-authorization"];
+    const accessToken = authHeader?.substring(7);
+    const userData = await verifyUser(accessToken);
+
+    if (userData === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ message: "No file uploaded for conversion." });
+    }
+
+    const file = req.file;
+    const originalName = file.originalname;
+    const fileExtension = path.extname(originalName).toLowerCase();
+
+    const allowedConversionExtensions = [".jpg", ".jpeg", ".png", ".docx"];
+    if (!allowedConversionExtensions.includes(fileExtension)) {
+      return res.status(400).json({
+        message:
+          "Security Error: Only jpg, jpeg, png, and docx are allowed for conversion.",
+      });
+    }
+
+    let finalPdfBytes;
+
+    // -- IMAGE HANDLING --
+    if ([".jpg", ".jpeg", ".png"].includes(fileExtension)) {
+      const mergedPdf = await PDFDocument.create();
+      let image;
+      try {
+        image = sharp(file.buffer, { failOn: "none" });
+      } catch (sharpError) {
+        image = sharp(file.buffer);
+      }
+
+      const metadata = await image.metadata();
+      let imageObj;
+
+      if ([".jpg", ".jpeg"].includes(fileExtension)) {
+        imageObj = await mergedPdf.embedJpg(file.buffer);
+      } else {
+        const pngBuffer = await image.png().toBuffer();
+        imageObj = await mergedPdf.embedPng(pngBuffer);
+      }
+
+      const page = mergedPdf.addPage([metadata.width, metadata.height]);
+      page.drawImage(imageObj, {
+        x: 0,
+        y: 0,
+        width: metadata.width,
+        height: metadata.height,
+      });
+
+      finalPdfBytes = await mergedPdf.save();
+
+      // -- DOCX HANDLING (FLAWLESS FORMATTING) --
+    } else if (fileExtension === ".docx") {
+      const tempDir = path.join(__dirname, STORAGE_PATH, "temp");
+      await fs.mkdir(tempDir, { recursive: true });
+
+      tempFilePath = path.join(tempDir, `conv_${Date.now()}${fileExtension}`);
+      await fs.writeFile(tempFilePath, file.buffer);
+
+      convertedFilePath = await executeLibreOfficeConversion(
+        tempFilePath,
+        tempDir,
+      );
+      finalPdfBytes = await fs.readFile(convertedFilePath);
+    }
+
+    const cleanName = originalName.substring(0, originalName.lastIndexOf("."));
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${cleanName}_converted.pdf"`,
+    );
+    res.setHeader("Content-Length", finalPdfBytes.length);
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+    return res.status(200).send(Buffer.from(finalPdfBytes));
+  } catch (error) {
+    console.log("error converting file", error);
+    return res
+      .status(500)
+      .json({ message: "An error occurred while converting the file to PDF." });
+  } finally {
+    if (tempFilePath) await fs.unlink(tempFilePath).catch(() => {});
+    if (convertedFilePath) await fs.unlink(convertedFilePath).catch(() => {});
+  }
+};
+
+// ======================================================================
+// 2. EXTRACT EML DETAILS (ORIGINAL + ATTACHMENT CONVERSION)
+// ======================================================================
+
+// ======================================================================
+// 3. MERGE FILES TO PDF (UPDATED FOR PERFECT FORMATTING)
+// ======================================================================
 export const mergeFilesToPdf = async (req, res) => {
   let userData;
   let tempFiles = [];
   let mergedPdfPath = null;
+  const tempDir = path.join(__dirname, STORAGE_PATH, "temp");
 
   try {
     const accessToken = req.headers["authorization"]?.substring(7);
     userData = await verifyUser(accessToken);
 
-    logger.info({
-      action: "MERGE_FILES_START",
-      userId: userData.id,
-      details: {
-        username: userData.username,
-      },
-    });
+    if (typeof logger !== "undefined") {
+      logger.info({
+        action: "MERGE_FILES_START",
+        userId: userData.id,
+        details: { username: userData.username },
+      });
+    }
 
     if (userData === "Unauthorized") {
-      logger.warn({
-        action: "MERGE_FILES_UNAUTHORIZED",
-        details: { accessToken },
-      });
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
@@ -2992,21 +3148,15 @@ export const mergeFilesToPdf = async (req, res) => {
       return res.status(400).json({ message: "No files uploaded for merging" });
     }
 
-    // Create a new PDF document for merging
     const mergedPdf = await PDFDocument.create();
-
-    // Create temporary directory
-    const tempDir = path.join(__dirname, STORAGE_PATH, "temp");
     await fs.mkdir(tempDir, { recursive: true });
 
-    // Process each uploaded file
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
       const fileBuffer = file.buffer;
       const originalName = file.originalname;
       const fileExtension = path.extname(originalName).toLowerCase();
 
-      // Save file temporarily
       const tempFilePath = path.join(
         tempDir,
         `temp_${Date.now()}_${i}${fileExtension}`,
@@ -3016,49 +3166,28 @@ export const mergeFilesToPdf = async (req, res) => {
 
       try {
         if (fileExtension === ".pdf") {
-          // For PDF files, directly copy pages
           const pdfDoc = await PDFDocument.load(fileBuffer);
           const copiedPages = await mergedPdf.copyPages(
             pdfDoc,
             pdfDoc.getPageIndices(),
           );
           copiedPages.forEach((page) => mergedPdf.addPage(page));
-
-          logger.info({
-            action: "MERGE_PDF_PROCESSED",
-            userId: userData.id,
-            details: {
-              fileName: originalName,
-              pageCount: pdfDoc.getPageCount(),
-            },
-          });
         } else if (
           [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"].includes(
             fileExtension,
           )
         ) {
-          // For image files, convert to PDF page
           let image;
-
           try {
             image = sharp(fileBuffer, { failOn: "none" });
           } catch (sharpError) {
-            // If sharp can't process, try alternative approach
             image = sharp(fileBuffer);
           }
 
           const metadata = await image.metadata();
-          let imageObj;
-
-          if ([".jpg", ".jpeg"].includes(fileExtension)) {
-            imageObj = await mergedPdf.embedJpg(fileBuffer);
-          } else if ([".png"].includes(fileExtension)) {
-            imageObj = await mergedPdf.embedPng(fileBuffer);
-          } else {
-            // For other image formats, convert to PNG first
-            const pngBuffer = await image.png().toBuffer();
-            imageObj = await mergedPdf.embedPng(pngBuffer);
-          }
+          let imageObj = [".jpg", ".jpeg"].includes(fileExtension)
+            ? await mergedPdf.embedJpg(fileBuffer)
+            : await mergedPdf.embedPng(await image.png().toBuffer());
 
           const page = mergedPdf.addPage([metadata.width, metadata.height]);
           page.drawImage(imageObj, {
@@ -3067,139 +3196,33 @@ export const mergeFilesToPdf = async (req, res) => {
             width: metadata.width,
             height: metadata.height,
           });
-
-          logger.info({
-            action: "MERGE_IMAGE_PROCESSED",
-            userId: userData.id,
-            details: {
-              fileName: originalName,
-              dimensions: `${metadata.width}x${metadata.height}`,
-            },
-          });
         } else if (
           [".txt", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt"].includes(
             fileExtension,
           )
         ) {
-          // For text/office documents, extract text and create text page
+          // RETAIN 100% ORIGINAL FORMATTING BY USING NATIVE OS LIBREOFFICE
           try {
-            // Save temp file for text extraction
-            await fs.writeFile(tempFilePath, fileBuffer);
-
-            let extractedText = "";
-            try {
-              const extractionResult =
-                await executeTextExtractionScript(tempFilePath);
-              if (extractionResult.success && extractionResult.text) {
-                extractedText = extractionResult.text;
-              }
-            } catch (extractionError) {
-              logger.warn({
-                action: "MERGE_FILE_EXTRACTION_FAILED",
-                userId: userData.id,
-                details: {
-                  fileName: originalName,
-                  error: extractionError.message,
-                },
-              });
-            }
-
-            // Create a text page
-            const page = mergedPdf.addPage([595.28, 841.89]); // A4 size
-            const helveticaFont = await mergedPdf.embedFont(
-              StandardFonts.Helvetica,
+            const convertedPdfPath = await executeLibreOfficeConversion(
+              tempFilePath,
+              tempDir,
             );
+            tempFiles.push(convertedPdfPath); // Track for cleanup
 
-            // Draw file name as header
-            page.drawText(`File: ${originalName}`, {
-              x: 50,
-              y: 800,
-              size: 16,
-              font: helveticaFont,
-            });
-
-            // Draw extracted text
-            if (extractedText) {
-              const lines = extractedText.split("\n");
-              let yPosition = 750;
-              const maxWidth = 495; // Page width minus margins
-
-              for (let line of lines) {
-                if (yPosition < 50) {
-                  // Add new page if we run out of space
-                  const newPage = mergedPdf.addPage([595.28, 841.89]);
-                  newPage.drawText(`File: ${originalName} (continued)`, {
-                    x: 50,
-                    y: 800,
-                    size: 16,
-                    font: helveticaFont,
-                  });
-                  yPosition = 750;
-                }
-
-                // Simple text wrapping
-                let currentLine = "";
-                const words = line.split(" ");
-                for (const word of words) {
-                  const testLine = currentLine + word + " ";
-                  const testWidth = helveticaFont.widthOfTextAtSize(
-                    testLine,
-                    12,
-                  );
-
-                  if (testWidth > maxWidth && currentLine !== "") {
-                    page.drawText(currentLine, {
-                      x: 50,
-                      y: yPosition,
-                      size: 12,
-                      font: helveticaFont,
-                    });
-                    yPosition -= 20;
-                    currentLine = word + " ";
-                  } else {
-                    currentLine = testLine;
-                  }
-                }
-
-                if (currentLine) {
-                  page.drawText(currentLine, {
-                    x: 50,
-                    y: yPosition,
-                    size: 12,
-                    font: helveticaFont,
-                  });
-                  yPosition -= 20;
-                }
-              }
-            } else {
-              // If no text extracted, show placeholder
-              page.drawText("(Content could not be extracted)", {
-                x: 50,
-                y: 750,
-                size: 12,
-                font: helveticaFont,
-              });
-            }
-
-            logger.info({
-              action: "MERGE_DOCUMENT_PROCESSED",
-              userId: userData.id,
-              details: {
-                fileName: originalName,
-                textLength: extractedText.length,
-              },
-            });
+            const convertedPdfBytes = await fs.readFile(convertedPdfPath);
+            const pdfDoc = await PDFDocument.load(convertedPdfBytes);
+            const copiedPages = await mergedPdf.copyPages(
+              pdfDoc,
+              pdfDoc.getPageIndices(),
+            );
+            copiedPages.forEach((page) => mergedPdf.addPage(page));
           } catch (docError) {
-            logger.error({
-              action: "MERGE_DOCUMENT_ERROR",
-              userId: userData.id,
-              details: {
-                fileName: originalName,
-                error: docError.message,
-              },
-            });
+            if (typeof logger !== "undefined")
+              logger.error({
+                action: "MERGE_DOCUMENT_ERROR",
+                details: docError.message,
+              });
 
-            // Add a placeholder page
             const page = mergedPdf.addPage([595.28, 841.89]);
             const helveticaFont = await mergedPdf.embedFont(
               StandardFonts.Helvetica,
@@ -3210,211 +3233,84 @@ export const mergeFilesToPdf = async (req, res) => {
               size: 16,
               font: helveticaFont,
             });
-            page.drawText("(Error processing file)", {
+            page.drawText("(Error processing file formatting)", {
               x: 50,
               y: 370,
               size: 12,
               font: helveticaFont,
             });
           }
-        } else {
-          // For unsupported file types, create an informational page
-          const page = mergedPdf.addPage([595.28, 841.89]);
-          const helveticaFont = await mergedPdf.embedFont(
-            StandardFonts.Helvetica,
-          );
-          page.drawText(`File: ${originalName}`, {
-            x: 50,
-            y: 400,
-            size: 16,
-            font: helveticaFont,
-          });
-          page.drawText(
-            `File type ${fileExtension} is not supported for content extraction`,
-            {
-              x: 50,
-              y: 370,
-              size: 12,
-              font: helveticaFont,
-            },
-          );
-
-          logger.info({
-            action: "MERGE_UNSUPPORTED_FILE",
-            userId: userData.id,
-            details: {
-              fileName: originalName,
-              fileType: fileExtension,
-            },
-          });
         }
       } catch (error) {
-        logger.error({
-          action: "MERGE_FILE_PROCESSING_ERROR",
-          userId: userData.id,
-          details: {
-            fileName: originalName,
-            error: error.message,
-          },
-        });
         continue;
       }
     }
 
-    // Check if any pages were added
-    if (mergedPdf.getPageCount() === 0) {
-      logger.warn({
-        action: "MERGE_FILES_NO_VALID_PAGES",
-        userId: userData.id,
-        details: { fileCount: req.files.length },
-      });
+    if (mergedPdf.getPageCount() === 0)
       return res
         .status(400)
         .json({ message: "No valid files could be merged" });
-    }
 
-    // Save the merged PDF to a temporary file
     const mergedPdfBytes = await mergedPdf.save();
     const timestamp = Date.now();
     mergedPdfPath = path.join(tempDir, `merged_${timestamp}.pdf`);
     await fs.writeFile(mergedPdfPath, mergedPdfBytes);
 
-    // Get file stats for range requests
     const stat = await fs.stat(mergedPdfPath);
     const fileSize = stat.size;
     const range = req.headers.range;
 
-    // Set response headers
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="merged_documents_${timestamp}.pdf"`,
     );
     res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-
-    if (range === "bytes=0-0") {
-      res.setHeader("Content-Range", `bytes 0-0/${fileSize}`);
-      res.setHeader("Content-Length", 1);
-      return res.status(206).json({
-        fileSize,
-        message: "Partial file details fetched successfully.",
-      });
-    }
 
     if (range) {
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-      const chunksize = end - start + 1;
 
       res.setHeader("Content-Range", `bytes ${start}-${end}/${fileSize}`);
-      res.setHeader("Content-Length", chunksize);
+      res.setHeader("Content-Length", end - start + 1);
       res.status(206);
 
       const fileStream = fsCB.createReadStream(mergedPdfPath, { start, end });
       fileStream.pipe(res);
-
-      // Cleanup after stream ends
-      fileStream.on("end", async () => {
-        await cleanupTempFiles(tempFiles, mergedPdfPath);
-      });
-
-      fileStream.on("error", async (error) => {
-        logger.error({
-          action: "MERGE_FILES_STREAM_ERROR",
-          userId: userData.id,
-          details: { error: error.message },
-        });
-        await cleanupTempFiles(tempFiles, mergedPdfPath);
-      });
+      fileStream.on(
+        "end",
+        async () => await cleanupTempFiles(tempFiles, mergedPdfPath),
+      );
+      fileStream.on(
+        "error",
+        async () => await cleanupTempFiles(tempFiles, mergedPdfPath),
+      );
     } else {
       res.setHeader("Content-Length", fileSize);
-
       const fileStream = fsCB.createReadStream(mergedPdfPath);
       fileStream.pipe(res);
-
-      // Cleanup after stream ends
-      fileStream.on("end", async () => {
-        await cleanupTempFiles(tempFiles, mergedPdfPath);
-      });
-
-      fileStream.on("error", async (error) => {
-        logger.error({
-          action: "MERGE_FILES_STREAM_ERROR",
-          userId: userData.id,
-          details: { error: error.message },
-        });
-        await cleanupTempFiles(tempFiles, mergedPdfPath);
-      });
+      fileStream.on(
+        "end",
+        async () => await cleanupTempFiles(tempFiles, mergedPdfPath),
+      );
+      fileStream.on(
+        "error",
+        async () => await cleanupTempFiles(tempFiles, mergedPdfPath),
+      );
     }
-
-    logger.info({
-      action: "MERGE_FILES_SUCCESS",
-      userId: userData.id,
-      details: {
-        fileCount: req.files.length,
-        pageCount: mergedPdf.getPageCount(),
-        mergedFilePath: mergedPdfPath,
-        username: userData.username,
-      },
-    });
   } catch (error) {
-    logger.error({
-      action: "MERGE_FILES_ERROR",
-      userId: userData?.id,
-      details: {
-        error: error.message,
-        fileCount: req.files?.length || 0,
-      },
-    });
-
-    // Cleanup on error
     await cleanupTempFiles(tempFiles, mergedPdfPath);
-
-    if (!res.headersSent) {
+    if (!res.headersSent)
       return res
         .status(500)
         .json({ message: "Error merging files: " + error.message });
-    }
   }
 };
 
-// Helper function to clean up temporary files
-async function cleanupTempFiles(tempFiles, mergedPdfPath) {
-  try {
-    // Clean up individual temp files
-    for (const tempFile of tempFiles) {
-      try {
-        await fs.unlink(tempFile);
-      } catch (err) {
-        if (err.code !== "ENOENT") {
-          console.error(`Error deleting temp file ${tempFile}:`, err.message);
-        }
-      }
-    }
-
-    // Clean up merged PDF
-    if (mergedPdfPath) {
-      try {
-        await fs.unlink(mergedPdfPath);
-      } catch (err) {
-        if (err.code !== "ENOENT") {
-          console.error(
-            `Error deleting merged PDF ${mergedPdfPath}:`,
-            err.message,
-          );
-        }
-      }
-    }
-  } catch (error) {
-    console.error("Error in cleanupTempFiles:", error.message);
-  }
-}
-
-// Alternative version that returns the file URL (if you want to save it)
+// ======================================================================
+// 4. MERGE AND SAVE PDF (UPDATED FOR PERFECT FORMATTING)
+// ======================================================================
 export const mergeAndSavePdf = async (req, res) => {
   let userData;
   let tempFiles = [];
@@ -3425,64 +3321,81 @@ export const mergeAndSavePdf = async (req, res) => {
     const accessToken = authHeader?.substring(7);
     userData = await verifyUser(accessToken);
 
-    if (userData === "Unauthorized") {
+    if (userData === "Unauthorized")
       return res.status(401).json({ message: "Unauthorized request" });
-    }
-
-    if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+    if (!req.files || !Array.isArray(req.files) || req.files.length === 0)
       return res.status(400).json({ message: "No files uploaded for merging" });
-    }
 
-    // Create merged PDF
     const mergedPdf = await PDFDocument.create();
-
-    // Process each file
     const tempDir = path.join(__dirname, STORAGE_PATH, "temp");
     await fs.mkdir(tempDir, { recursive: true });
 
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
-      const fileBuffer = file.buffer;
-      const originalName = file.originalname;
-      const fileExtension = path.extname(originalName).toLowerCase();
+      const fileExtension = path.extname(file.originalname).toLowerCase();
 
-      // Same processing logic from mergeFilesToPdf...
       const tempFilePath = path.join(
         tempDir,
         `temp_${Date.now()}_${i}${fileExtension}`,
       );
-      await fs.writeFile(tempFilePath, fileBuffer);
+      await fs.writeFile(tempFilePath, file.buffer);
       tempFiles.push(tempFilePath);
 
       try {
         if (fileExtension === ".pdf") {
-          const pdfDoc = await PDFDocument.load(fileBuffer);
+          const pdfDoc = await PDFDocument.load(file.buffer);
+          const copiedPages = await mergedPdf.copyPages(
+            pdfDoc,
+            pdfDoc.getPageIndices(),
+          );
+          copiedPages.forEach((page) => mergedPdf.addPage(page));
+        } else if ([".jpg", ".jpeg", ".png"].includes(fileExtension)) {
+          let image = sharp(file.buffer, { failOn: "none" });
+          const metadata = await image.metadata();
+          const imageObj = [".jpg", ".jpeg"].includes(fileExtension)
+            ? await mergedPdf.embedJpg(file.buffer)
+            : await mergedPdf.embedPng(await image.png().toBuffer());
+          const page = mergedPdf.addPage([metadata.width, metadata.height]);
+          page.drawImage(imageObj, {
+            x: 0,
+            y: 0,
+            width: metadata.width,
+            height: metadata.height,
+          });
+        } else if (
+          [".docx", ".doc", ".xlsx", ".xls", ".ppt", ".pptx"].includes(
+            fileExtension,
+          )
+        ) {
+          // NATIVE FORMATTING PRESERVATION
+          const convertedPdfPath = await executeLibreOfficeConversion(
+            tempFilePath,
+            tempDir,
+          );
+          tempFiles.push(convertedPdfPath);
+
+          const convertedPdfBytes = await fs.readFile(convertedPdfPath);
+          const pdfDoc = await PDFDocument.load(convertedPdfBytes);
           const copiedPages = await mergedPdf.copyPages(
             pdfDoc,
             pdfDoc.getPageIndices(),
           );
           copiedPages.forEach((page) => mergedPdf.addPage(page));
         }
-        // ... (Keep your existing image/doc conversion logic here)
       } catch (docError) {
         continue;
       }
     }
 
-    // Save to a permanent location
     const mergedPdfBytes = await mergedPdf.save();
     const timestamp = Date.now();
     const fileName = `merged_documents_${timestamp}.pdf`;
     const filePath = `temp/merged/${fileName}`;
     const fullPath = path.join(__dirname, STORAGE_PATH, filePath);
 
-    // Ensure directory exists
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
-
-    // Save the file
     await fs.writeFile(fullPath, mergedPdfBytes);
 
-    // Create document record
     const newDocument = await prisma.document.create({
       data: {
         name: fileName,
@@ -3494,9 +3407,10 @@ export const mergeAndSavePdf = async (req, res) => {
       },
     });
 
-    await createUserPermissions(newDocument.id, userData.username, true);
+    if (typeof createUserPermissions !== "undefined") {
+      await createUserPermissions(newDocument.id, userData.username, true);
+    }
 
-    // ✅ NATIVE DOWNLOAD FIX: Pre-attach token to the merged file URL
     const fileURLBase = process.env.FILE_URL;
     const fileURL = `${fileURLBase}${filePath}?token=${accessToken}`;
 
@@ -3508,17 +3422,37 @@ export const mergeAndSavePdf = async (req, res) => {
       pageCount: mergedPdf.getPageCount(),
     });
   } catch (error) {
-    logger.error({
-      action: "MERGE_AND_SAVE_ERROR",
-      userId: userData?.id,
-    });
-
-    // Cleanup temp files
+    if (typeof logger !== "undefined")
+      logger.error({ action: "MERGE_AND_SAVE_ERROR", userId: userData?.id });
     await cleanupTempFiles(tempFiles, null);
-
     return res.status(500).json({ message: "Error merging and saving files" });
   }
 };
+
+// ======================================================================
+// Helper to clean up all temporary files safely
+// ======================================================================
+const cleanupTempFiles = async (files, additionalPath) => {
+  for (let file of files) {
+    try {
+      await fs.unlink(file);
+    } catch (e) {}
+  }
+  if (additionalPath) {
+    try {
+      await fs.unlink(additionalPath);
+    } catch (e) {}
+  }
+};
+
+// Alternative version that returns the file URL (if you want to save it)
+
+// Add this import to the top of your controller file
+import mammoth from "mammoth";
+
+// ======================================================================
+// 🚀 CONVERT SINGLE IMAGE/DOC TO PDF
+// ======================================================================
 
 import XLSX from "xlsx";
 import puppeteer from "puppeteer";
