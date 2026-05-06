@@ -2771,7 +2771,7 @@ export const attach_po_numbers = async (req, res) => {
         headers: { "Content-Type": "application/json" },
       });
     } catch (syncError) {
-      console.error("Failed to sync to Mongo:", syncError.message);
+      console.log("Failed to sync to Mongo:", syncError.message);
     }
 
     // 4. Send Documents to FTP Server
@@ -2815,14 +2815,14 @@ export const attach_po_numbers = async (req, res) => {
           await client.uploadFrom(localFilePath, remoteFileName);
           console.log(`Successfully uploaded ${remoteFileName} to FTP.`);
         } catch (fileError) {
-          console.error(
+          console.log(
             `Failed to read or upload file ${localFilePath}:`,
             fileError.message,
           );
         }
       }
     } catch (ftpError) {
-      console.error("FTP Connection/Upload Error:", ftpError.message);
+      console.log("FTP Connection/Upload Error:", ftpError.message);
     } finally {
       client.close(); // Always close the FTP connection to prevent hanging sockets
     }
