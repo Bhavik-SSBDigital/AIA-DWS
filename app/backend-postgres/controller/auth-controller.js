@@ -172,8 +172,6 @@ export const login = async (req, res) => {
       where: { id: { in: user.roles.map((role) => role.roleId) } },
     });
 
-    console.log("roles", roles);
-
     const isAdmin = roles.some((role) => role.isAdmin) || user.isAdmin;
     const isRootLevel =
       roles.some((role) => role.isRootLevel) || user.isRootLevel;

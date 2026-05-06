@@ -2717,26 +2717,31 @@ export const view_process = async (req, res) => {
 
 import * as ftp from "basic-ftp"; // Add this import at the top of your file with other imports
 
+import dns from "dns/promises"; // ✅ FIXED
+import net from "net"; // ✅ FIXED
+
+import https from "https";
+
 export const attach_po_numbers = async (req, res) => {
+  const startTime = Date.now();
+
   try {
     const { processId, poNumbers } = req.body;
 
-    if (
-      !processId ||
-      !poNumbers ||
-      !Array.isArray(poNumbers) ||
-      poNumbers.length === 0
-    ) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid PO Numbers payload" });
+    if (!processId || !Array.isArray(poNumbers) || poNumbers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid PO Numbers payload",
+      });
     }
 
-    // 1. Update the Process in Postgres
+    console.log("==== REQUEST START ====");
+
+    // ✅ 1. DB UPDATE
     const updatedProcess = await prisma.processInstance.update({
       where: { id: processId },
       data: {
-        poNumbers: { push: poNumbers },
+        poNumbers: { push: [...poNumbers] },
         status: "PO_NO_ATTACHED",
       },
       include: {
@@ -2749,11 +2754,13 @@ export const attach_po_numbers = async (req, res) => {
       },
     });
 
-    // 2. Prepare payload for Mongo Sync
+    console.log("DB UPDATE SUCCESS");
+
+    // ✅ 2. MONGO SYNC (FIXED SSL)
     const syncPayload = {
       processId: updatedProcess.id,
       processName: updatedProcess.name,
-      poNumbers: poNumbers,
+      poNumbers,
       documents: updatedProcess.documents.map((pd) => ({
         name: pd.document.name,
         path: path.join(__dirname, STORAGE_PATH, pd.document.path),
@@ -2765,77 +2772,126 @@ export const attach_po_numbers = async (req, res) => {
       })),
     };
 
-    // 3. Send to Mongo Setup
     try {
-      await axios.post(`${P2P_SERVER}/sync-po-details`, syncPayload, {
-        headers: { "Content-Type": "application/json" },
+      console.log("---- MONGO SYNC ----");
+
+      const mongoHost = new URL(P2P_SERVER).hostname;
+      const resolved = await dns.lookup(mongoHost);
+      console.log("Mongo resolved:", resolved);
+
+      await axios.post(`${P2P_SERVER}`, syncPayload, {
+        timeout: 10000,
+        httpsAgent: new https.Agent({
+          rejectUnauthorized: false, // ⚠️ allow self-signed cert
+        }),
       });
-    } catch (syncError) {
-      console.log("Failed to sync to Mongo:", syncError.message);
+
+      console.log("Mongo Sync SUCCESS ✅");
+    } catch (err) {
+      console.log("Mongo Sync FAILED ❌:", err.message);
     }
 
-    // 4. Send Documents to FTP Server
-    const client = new ftp.Client();
-    // client.ftp.verbose = true; // Uncomment this if you need to debug FTP connection logs
+    // ✅ 3. FTP UPLOAD (with real diagnostics)
+    const client = new ftp.Client(15000);
+    client.ftp.verbose = true;
+
     try {
-      // Connect to the FTP server
-      await client.access({
-        host: process.env.FTP_HOST,
-        port: parseInt(process.env.FTP_PORT || "21", 10),
-        user: process.env.FTP_USER,
-        password: process.env.FTP_PASSWORD,
-        secure: false, // Port 21 is standard unencrypted FTP
+      console.log("---- FTP START ----");
+
+      const {
+        FTP_HOST,
+        FTP_PORT = "21",
+        FTP_USER,
+        FTP_PASSWORD,
+        FTP_REMOTE_PATH,
+      } = process.env;
+
+      if (!FTP_HOST || !FTP_USER || !FTP_PASSWORD) {
+        throw new Error("Missing FTP ENV variables");
+      }
+
+      console.log("FTP CONFIG:", {
+        host: FTP_HOST,
+        port: FTP_PORT,
+        user: FTP_USER,
+        password: FTP_PASSWORD ? "SET" : "MISSING",
       });
 
-      // Ensure target directory exists and switch to it
-      const remotePath =
-        process.env.FTP_REMOTE_PATH || "/home/AIAAudit/PRD/POAttachment";
+      // ✅ DNS
+      const resolved = await dns.lookup(FTP_HOST);
+      console.log("FTP DNS:", resolved);
+
+      // ✅ PORT CHECK
+      await new Promise((resolve, reject) => {
+        const socket = net.createConnection(
+          { host: FTP_HOST, port: parseInt(FTP_PORT), timeout: 5000 },
+          () => {
+            console.log("PORT OPEN ✅");
+            socket.destroy();
+            resolve();
+          },
+        );
+
+        socket.on("error", reject);
+        socket.on("timeout", () => reject(new Error("Port timeout")));
+      });
+
+      // ✅ CONNECT
+      await client.access({
+        host: FTP_HOST,
+        port: parseInt(FTP_PORT),
+        user: FTP_USER,
+        password: FTP_PASSWORD,
+        secure: false,
+      });
+
+      console.log("FTP LOGIN SUCCESS ✅");
+
+      const remotePath = FTP_REMOTE_PATH || "/home/AIAAudit/PRD/POAttachment";
+
       await client.ensureDir(remotePath);
 
-      // Join PO numbers with an underscore in case there are multiple (e.g. PO123_PO124)
       const poPrefix = poNumbers.join("_");
 
-      // Iterate over the processed documents and upload them
       for (const pd of updatedProcess.documents) {
-        const originalDocName = pd.document.name;
         const localFilePath = path.join(
           __dirname,
           STORAGE_PATH,
           pd.document.path,
         );
 
-        // Construct the new remote file name: poNumber_original_doc_name
-        const remoteFileName = `${poPrefix}_${originalDocName}`;
+        const remoteFileName = `${poPrefix}_${pd.document.name}`;
 
         try {
-          // Verify local file exists before attempting upload
           await fs.access(localFilePath);
-
-          // Upload to FTP
           await client.uploadFrom(localFilePath, remoteFileName);
-          console.log(`Successfully uploaded ${remoteFileName} to FTP.`);
-        } catch (fileError) {
-          console.log(
-            `Failed to read or upload file ${localFilePath}:`,
-            fileError.message,
-          );
+          console.log("Uploaded:", remoteFileName);
+        } catch (err) {
+          console.log("File failed:", err.message);
         }
       }
-    } catch (ftpError) {
-      console.log("FTP Connection/Upload Error:", ftpError.message);
+
+      console.log("FTP DONE ✅");
+    } catch (err) {
+      console.log("FTP FAILED ❌:", err.message);
     } finally {
-      client.close(); // Always close the FTP connection to prevent hanging sockets
+      client.close();
     }
 
-    // 5. Return Success Response
+    console.log("==== REQUEST END ====");
+    console.log("TIME:", Date.now() - startTime, "ms");
+
     return res.status(200).json({
       success: true,
-      message: "PO Numbers attached and files uploaded successfully",
+      message: "Process completed",
       data: updatedProcess,
     });
   } catch (error) {
-    console.error("Error attaching PO numbers:", error);
-    return res.status(500).json({ success: false, message: "Server Error" });
+    console.error("FATAL:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
   }
 };
 

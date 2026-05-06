@@ -150,7 +150,6 @@ export const get_physical_requests = async (req, res) => {
       });
       return res.status(200).json(requests);
     } else if (role === "hod") {
-      console.log("roles", roles);
       const hodDepartments = roles
         .filter((r) => r.isDepartmentHead)
         .map((r) => r.departmentId);
@@ -308,10 +307,10 @@ export const update_physical_request = async (req, res) => {
                 changerRole: isAdmin
                   ? "ADMIN"
                   : isHod
-                  ? "HOD"
-                  : isRequestingUser
-                  ? "USER"
-                  : null,
+                    ? "HOD"
+                    : isRequestingUser
+                      ? "USER"
+                      : null,
               },
             }),
           ]
