@@ -2722,6 +2722,9 @@ import net from "net"; // ✅ FIXED
 
 import https from "https";
 
+// 🔥 FORCE IPV4 (VERY IMPORTANT)
+dns.setDefaultResultOrder("ipv4first");
+
 export const attach_po_numbers = async (req, res) => {
   const startTime = Date.now();
 
@@ -2756,7 +2759,7 @@ export const attach_po_numbers = async (req, res) => {
 
     console.log("DB UPDATE SUCCESS");
 
-    // ✅ 2. MONGO SYNC (FIXED SSL)
+    // ✅ 2. MONGO SYNC
     const syncPayload = {
       processId: updatedProcess.id,
       processName: updatedProcess.name,
@@ -2775,14 +2778,10 @@ export const attach_po_numbers = async (req, res) => {
     try {
       console.log("---- MONGO SYNC ----");
 
-      const mongoHost = new URL(P2P_SERVER).hostname;
-      const resolved = await dns.lookup(mongoHost);
-      console.log("Mongo resolved:", resolved);
-
       await axios.post(`${P2P_SERVER}`, syncPayload, {
-        timeout: 10000,
+        timeout: 15000,
         httpsAgent: new https.Agent({
-          rejectUnauthorized: false, // ⚠️ allow self-signed cert
+          rejectUnauthorized: false,
         }),
       });
 
@@ -2791,8 +2790,8 @@ export const attach_po_numbers = async (req, res) => {
       console.log("Mongo Sync FAILED ❌:", err.message);
     }
 
-    // ✅ 3. FTP UPLOAD (with real diagnostics)
-    const client = new ftp.Client(15000);
+    // ✅ 3. FTP UPLOAD (FINAL FIXED VERSION)
+    const client = new ftp.Client(30000); // 🔥 increased timeout
     client.ftp.verbose = true;
 
     try {
@@ -2817,26 +2816,7 @@ export const attach_po_numbers = async (req, res) => {
         password: FTP_PASSWORD ? "SET" : "MISSING",
       });
 
-      // ✅ DNS
-      const resolved = await dns.lookup(FTP_HOST);
-      console.log("FTP DNS:", resolved);
-
-      // ✅ PORT CHECK
-      await new Promise((resolve, reject) => {
-        const socket = net.createConnection(
-          { host: FTP_HOST, port: parseInt(FTP_PORT), timeout: 5000 },
-          () => {
-            console.log("PORT OPEN ✅");
-            socket.destroy();
-            resolve();
-          },
-        );
-
-        socket.on("error", reject);
-        socket.on("timeout", () => reject(new Error("Port timeout")));
-      });
-
-      // ✅ CONNECT
+      // 🔥 DIRECT CONNECT (no manual socket check)
       await client.access({
         host: FTP_HOST,
         port: parseInt(FTP_PORT),
@@ -2847,9 +2827,16 @@ export const attach_po_numbers = async (req, res) => {
 
       console.log("FTP LOGIN SUCCESS ✅");
 
-      const remotePath = FTP_REMOTE_PATH || "/home/AIAAudit/PRD/POAttachment";
+      // 🔥 FIX: Force IPv4 passive mode (CRITICAL for VPN/NAT)
+      client.prepareTransfer = ftp.enterPassiveModeIPv4;
+
+      // 🔥 Switch to binary mode (safe for files)
+      await client.send("TYPE I");
+
+      const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
 
       await client.ensureDir(remotePath);
+      console.log("Changed dir:", remotePath);
 
       const poPrefix = poNumbers.join("_");
 
