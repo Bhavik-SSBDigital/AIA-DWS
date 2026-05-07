@@ -3133,7 +3133,9 @@ export const mass_sync_po_data = async (req, res) => {
           httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         });
         mongoSuccessCount++;
-      } catch (err) {}
+      } catch (err) {
+        console.log("error syncing data to P2P", err);
+      }
     }
 
     // FTP MASS UPLOAD (Connect Once)
@@ -3190,6 +3192,7 @@ export const mass_sync_po_data = async (req, res) => {
         if (allDocsUploaded) ftpSuccessCount++;
       }
     } catch (err) {
+      console.log("error uploading to ftp", err);
     } finally {
       client.close();
     }
