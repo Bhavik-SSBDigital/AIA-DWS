@@ -19,6 +19,7 @@ import {
   IconFile,
   IconTags,
   IconSettings,
+  IconFileCheck
 } from '@tabler/icons-react';
 import { defaultPath } from '../../Slices/PathSlice';
 import { useDispatch } from 'react-redux';
@@ -215,15 +216,19 @@ const Sidebar = ({ sidebarOpen, setSidebarOpen }: SidebarProps) => {
       label: 'Processes',
       icon: <ProcessIcon />,
       dropdown: processSubItems,
-      // FIXED: Only active if one of its specific dropdown sub-paths is currently active
       active: processSubItems.some(sub => pathname.startsWith(sub.path)), 
     },
     (isAdmin || isRootUser) && {
       path: '/admin/processes/list',
       label: 'All Processes (Admin)',
       icon: <IconFile size={26} />,
-      // FIXED: Restrict this to strictly matching the admin processes path
       active: pathname.startsWith('/admin/processes'),
+    },
+    (isAdmin || isRootUser) && {
+      path: '/admin/po-inspection',
+      label: 'PO Sync Inspection',
+      icon: <IconFileCheck size={26} />,
+      active: pathname === '/admin/po-inspection',
     },
     canSee('logs') && {
       path: '/logs',

@@ -46,6 +46,8 @@ import AdminReportsPage from './pages/Reports';
 import AutoLoginHandler from './components/AutoLoginHandler';
 import List from './pages/Published/List';
 import AdminProcessesList from './pages/Processes/AdminProcessesList';
+// IMPORT NEW COMPONENT HERE
+import POInspectionPanel from './pages/Processes/POInspectionPanel';
 
 const AdminRoute = ({ children }: { children: JSX.Element }) => {
   const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
@@ -362,6 +364,20 @@ function App() {
             </AdminRoute>
           }
         />
+        
+        {/* NEW INSPECTION ROUTE ADDED HERE */}
+        <Route
+          path="/admin/po-inspection"
+          element={
+            <AdminRoute>
+              <DefaultLayout>
+                <PageTitle title="PO Sync Inspection" />
+                <POInspectionPanel />
+              </DefaultLayout>
+            </AdminRoute>
+          }
+        />
+
         <Route
           path="/reports"
           element={

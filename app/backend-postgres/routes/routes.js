@@ -149,6 +149,9 @@ import {
   delete_document_in_process,
   attach_po_numbers,
   get_all_processes_for_admin,
+  get_po_inspection_data,
+  sync_missing_po_data,
+  mass_sync_po_data,
 } from "../controller/process-controller.js";
 import { pick_process_step } from "../controller/process-step-claim.js";
 import { upload_signature } from "../controller/image-controller.js";
@@ -352,6 +355,11 @@ router.get(
 router.post("/extract-eml", extractEMLDetails);
 router.post("/generateDocumentName", generateDocumentNameController);
 
+router.get("/check-po-sync-status", get_po_inspection_data);
+
+router.post("/po-inspection/sync/mass", mass_sync_po_data);
+
+router.post("/po-inspection/sync/:processId", sync_missing_po_data);
 // Workflows
 
 router.post("/workflows/addWorkflow", requireStrictAdmin, add_workflow);

@@ -2732,19 +2732,18 @@ export const attach_po_numbers = async (req, res) => {
     const { processId, poNumbers } = req.body;
 
     if (!processId || !Array.isArray(poNumbers) || poNumbers.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid PO Numbers payload",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid PO Numbers payload" });
     }
 
     console.log("==== REQUEST START ====");
 
-    // ✅ 1. DB UPDATE
+    // 1. DB UPDATE
     const updatedProcess = await prisma.processInstance.update({
       where: { id: processId },
       data: {
-        poNumbers: { push: [...poNumbers] },
+        poNumbers: { push: [...poNumbers] }, // Prisma push appends new POs
         status: "PO_NO_ATTACHED",
       },
       include: {
@@ -2757,13 +2756,14 @@ export const attach_po_numbers = async (req, res) => {
       },
     });
 
-    console.log("DB UPDATE SUCCESS");
+    // Extract unique PO numbers just in case of duplicates in DB
+    const allUniquePoNumbers = Array.from(new Set(updatedProcess.poNumbers));
 
-    // ✅ 2. MONGO SYNC
+    // 2. MONGO SYNC (Sends ALL POs, P2P server uses upsert so no duplication occurs)
     const syncPayload = {
       processId: updatedProcess.id,
       processName: updatedProcess.name,
-      poNumbers,
+      poNumbers: allUniquePoNumbers,
       documents: updatedProcess.documents.map((pd) => ({
         name: pd.document.name,
         path: path.join(__dirname, STORAGE_PATH, pd.document.path),
@@ -2777,26 +2777,21 @@ export const attach_po_numbers = async (req, res) => {
 
     try {
       console.log("---- MONGO SYNC ----");
-
-      await axios.post(`${P2P_SERVER}`, syncPayload, {
+      await axios.post(`${P2P_SERVER}/sync-po-details`, syncPayload, {
         timeout: 15000,
-        httpsAgent: new https.Agent({
-          rejectUnauthorized: false,
-        }),
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
       });
-
       console.log("Mongo Sync SUCCESS ✅");
     } catch (err) {
       console.log("Mongo Sync FAILED ❌:", err.message);
     }
 
-    // ✅ 3. FTP UPLOAD (FINAL FIXED VERSION)
-    const client = new ftp.Client(30000); // 🔥 increased timeout
-    client.ftp.verbose = true;
+    // 3. FTP UPLOAD (No Duplication Logic + Cartesian Product)
+    const client = new ftp.Client(30000);
+    client.ftp.verbose = false; // Turned off verbose to keep logs clean
 
     try {
       console.log("---- FTP START ----");
-
       const {
         FTP_HOST,
         FTP_PORT = "21",
@@ -2805,18 +2800,9 @@ export const attach_po_numbers = async (req, res) => {
         FTP_REMOTE_PATH,
       } = process.env;
 
-      if (!FTP_HOST || !FTP_USER || !FTP_PASSWORD) {
+      if (!FTP_HOST || !FTP_USER || !FTP_PASSWORD)
         throw new Error("Missing FTP ENV variables");
-      }
 
-      console.log("FTP CONFIG:", {
-        host: FTP_HOST,
-        port: FTP_PORT,
-        user: FTP_USER,
-        password: FTP_PASSWORD ? "SET" : "MISSING",
-      });
-
-      // 🔥 DIRECT CONNECT (no manual socket check)
       await client.access({
         host: FTP_HOST,
         port: parseInt(FTP_PORT),
@@ -2825,36 +2811,38 @@ export const attach_po_numbers = async (req, res) => {
         secure: false,
       });
 
-      console.log("FTP LOGIN SUCCESS ✅");
-
-      // 🔥 FIX: Force IPv4 passive mode (CRITICAL for VPN/NAT)
       client.prepareTransfer = ftp.enterPassiveModeIPv4;
-
-      // 🔥 Switch to binary mode (safe for files)
       await client.send("TYPE I");
 
       const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
-
       await client.ensureDir(remotePath);
-      console.log("Changed dir:", remotePath);
 
-      const poPrefix = poNumbers.join("_");
+      // Get list of existing files to PREVENT DUPLICATE UPLOADS
+      const existingFtpFilesList = await client.list(remotePath);
+      const existingFtpFiles = new Set(existingFtpFilesList.map((f) => f.name));
 
-      for (const pd of updatedProcess.documents) {
-        const localFilePath = path.join(
-          __dirname,
-          STORAGE_PATH,
-          pd.document.path,
-        );
+      // Cartesian Product: Upload EVERY document for EVERY PO
+      for (const po of allUniquePoNumbers) {
+        for (const pd of updatedProcess.documents) {
+          const localFilePath = path.join(
+            __dirname,
+            STORAGE_PATH,
+            pd.document.path,
+          );
+          const remoteFileName = `${po}_${pd.document.name}`;
 
-        const remoteFileName = `${poPrefix}_${pd.document.name}`;
+          if (existingFtpFiles.has(remoteFileName)) {
+            console.log(`Skipping (Already on FTP): ${remoteFileName}`);
+            continue; // Skip uploading this specific file
+          }
 
-        try {
-          await fs.access(localFilePath);
-          await client.uploadFrom(localFilePath, remoteFileName);
-          console.log("Uploaded:", remoteFileName);
-        } catch (err) {
-          console.log("File failed:", err.message);
+          try {
+            await fs.access(localFilePath);
+            await client.uploadFrom(localFilePath, remoteFileName);
+            console.log(`Uploaded: ${remoteFileName}`);
+          } catch (err) {
+            console.log(`File failed (${remoteFileName}):`, err.message);
+          }
         }
       }
 
@@ -2865,9 +2853,7 @@ export const attach_po_numbers = async (req, res) => {
       client.close();
     }
 
-    console.log("==== REQUEST END ====");
     console.log("TIME:", Date.now() - startTime, "ms");
-
     return res.status(200).json({
       success: true,
       message: "Process completed",
@@ -2875,10 +2861,346 @@ export const attach_po_numbers = async (req, res) => {
     });
   } catch (error) {
     console.error("FATAL:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Server Error",
+    return res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+export const get_po_inspection_data = async (req, res) => {
+  const client = new ftp.Client(30000);
+
+  try {
+    const processes = await prisma.processInstance.findMany({
+      where: { status: "PO_NO_ATTACHED" },
+      select: {
+        id: true,
+        name: true,
+        poNumbers: true,
+        documents: { select: { document: { select: { name: true } } } },
+      },
+      orderBy: { createdAt: "desc" },
     });
+
+    if (processes.length === 0) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const allPoNumbersSet = new Set();
+    processes.forEach((p) =>
+      p.poNumbers.forEach((po) => allPoNumbersSet.add(po)),
+    );
+    const allPoNumbers = Array.from(allPoNumbersSet);
+
+    // 1. BULK MONGO CHECK
+    let mongoSyncStatus = {};
+    try {
+      const p2pResponse = await axios.post(
+        `${P2P_SERVER}/check-po-sync-status`,
+        { poNumbers: allPoNumbers },
+        {
+          timeout: 10000,
+          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        },
+      );
+      if (p2pResponse.data && p2pResponse.data.data)
+        mongoSyncStatus = p2pResponse.data.data;
+    } catch (err) {}
+
+    // 2. BULK FTP CHECK
+    let ftpFiles = new Set();
+    try {
+      const {
+        FTP_HOST,
+        FTP_PORT = "21",
+        FTP_USER,
+        FTP_PASSWORD,
+        FTP_REMOTE_PATH,
+      } = process.env;
+      if (FTP_HOST && FTP_USER) {
+        await client.access({
+          host: FTP_HOST,
+          port: parseInt(FTP_PORT),
+          user: FTP_USER,
+          password: FTP_PASSWORD,
+          secure: false,
+        });
+        client.prepareTransfer = ftp.enterPassiveModeIPv4;
+        const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
+
+        const list = await client.list(remotePath);
+        list.forEach((file) => ftpFiles.add(file.name));
+      }
+    } catch (err) {
+    } finally {
+      client.close();
+    }
+
+    // 3. MAP DATA TOGETHER (Cartesian Logic)
+    const inspectionData = processes.map((proc) => {
+      const uniquePos = Array.from(new Set(proc.poNumbers));
+      const missingFtpDocs = [];
+      let ftpFullySynced = true;
+
+      // Loop through every PO and Document combination
+      uniquePos.forEach((po) => {
+        proc.documents.forEach((pd) => {
+          const expectedFileName = `${po}_${pd.document.name}`;
+          if (!ftpFiles.has(expectedFileName)) {
+            ftpFullySynced = false;
+            missingFtpDocs.push(expectedFileName);
+          }
+        });
+      });
+
+      const mongoFullySynced = uniquePos.every(
+        (po) => mongoSyncStatus[po] === true,
+      );
+
+      return {
+        id: proc.id,
+        processName: proc.name,
+        poNumbers: uniquePos,
+        mongoFullySynced,
+        ftpFullySynced,
+        missingFtpDocs, // This now accurately states EXACTLY which file is missing (e.g., "PO123_invoice.pdf")
+      };
+    });
+
+    return res.status(200).json({ success: true, data: inspectionData });
+  } catch (error) {
+    client.close();
+    return res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+export const sync_missing_po_data = async (req, res) => {
+  const { processId } = req.params;
+
+  try {
+    const processInstance = await prisma.processInstance.findUnique({
+      where: { id: processId },
+      include: {
+        documents: {
+          include: { document: true, signatures: { include: { user: true } } },
+        },
+      },
+    });
+
+    if (
+      !processInstance ||
+      !processInstance.poNumbers ||
+      processInstance.poNumbers.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid process or missing PO numbers",
+      });
+    }
+
+    const allUniquePoNumbers = Array.from(new Set(processInstance.poNumbers));
+
+    // MONGO SYNC
+    const syncPayload = {
+      processId: processInstance.id,
+      processName: processInstance.name,
+      poNumbers: allUniquePoNumbers,
+      documents: processInstance.documents.map((pd) => ({
+        name: pd.document.name,
+        path: path.join(__dirname, STORAGE_PATH, pd.document.path),
+        signatures: pd.signatures.map((sig) => ({
+          signedBy: sig.user.username,
+          signedAt: sig.signedAt,
+          remarks: sig.reason,
+        })),
+      })),
+    };
+
+    let mongoSuccess = false;
+    try {
+      await axios.post(`${P2P_SERVER}/sync-po-details`, syncPayload, {
+        timeout: 15000,
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+      });
+      mongoSuccess = true;
+    } catch (err) {
+      console.log("Mongo Sync FAILED:", err.message);
+    }
+
+    // FTP UPLOAD
+    let ftpSuccess = true;
+    const client = new ftp.Client(30000);
+
+    try {
+      const {
+        FTP_HOST,
+        FTP_PORT = "21",
+        FTP_USER,
+        FTP_PASSWORD,
+        FTP_REMOTE_PATH,
+      } = process.env;
+      await client.access({
+        host: FTP_HOST,
+        port: parseInt(FTP_PORT),
+        user: FTP_USER,
+        password: FTP_PASSWORD,
+        secure: false,
+      });
+      client.prepareTransfer = ftp.enterPassiveModeIPv4;
+      await client.send("TYPE I");
+      const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
+      await client.ensureDir(remotePath);
+
+      const existingFtpFilesList = await client.list(remotePath);
+      const existingFtpFiles = new Set(existingFtpFilesList.map((f) => f.name));
+
+      for (const po of allUniquePoNumbers) {
+        for (const pd of processInstance.documents) {
+          const localFilePath = path.join(
+            __dirname,
+            STORAGE_PATH,
+            pd.document.path,
+          );
+          const remoteFileName = `${po}_${pd.document.name}`;
+
+          if (existingFtpFiles.has(remoteFileName)) continue; // SKIP DUPLICATES
+
+          try {
+            await fs.access(localFilePath);
+            await client.uploadFrom(localFilePath, remoteFileName);
+          } catch (err) {
+            ftpSuccess = false;
+          }
+        }
+      }
+    } catch (err) {
+      ftpSuccess = false;
+    } finally {
+      client.close();
+    }
+
+    return res
+      .status(200)
+      .json({ success: true, data: { mongoSuccess, ftpSuccess } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+export const mass_sync_po_data = async (req, res) => {
+  const { processIds } = req.body;
+
+  if (!processIds || !Array.isArray(processIds) || processIds.length === 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "No process IDs provided" });
+  }
+
+  try {
+    const processes = await prisma.processInstance.findMany({
+      where: { id: { in: processIds } },
+      include: {
+        documents: {
+          include: { document: true, signatures: { include: { user: true } } },
+        },
+      },
+    });
+
+    let mongoSuccessCount = 0;
+    let ftpSuccessCount = 0;
+
+    // MONGO MASS SYNC
+    for (const proc of processes) {
+      if (!proc.poNumbers || proc.poNumbers.length === 0) continue;
+      const allUniquePoNumbers = Array.from(new Set(proc.poNumbers));
+
+      const syncPayload = {
+        processId: proc.id,
+        processName: proc.name,
+        poNumbers: allUniquePoNumbers,
+        documents: proc.documents.map((pd) => ({
+          name: pd.document.name,
+          path: path.join(__dirname, STORAGE_PATH, pd.document.path),
+          signatures: pd.signatures.map((sig) => ({
+            signedBy: sig.user.username,
+            signedAt: sig.signedAt,
+            remarks: sig.reason,
+          })),
+        })),
+      };
+
+      try {
+        await axios.post(`${P2P_SERVER}/sync-po-details`, syncPayload, {
+          timeout: 15000,
+          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        });
+        mongoSuccessCount++;
+      } catch (err) {}
+    }
+
+    // FTP MASS UPLOAD (Connect Once)
+    const client = new ftp.Client(30000);
+    try {
+      const {
+        FTP_HOST,
+        FTP_PORT = "21",
+        FTP_USER,
+        FTP_PASSWORD,
+        FTP_REMOTE_PATH,
+      } = process.env;
+      await client.access({
+        host: FTP_HOST,
+        port: parseInt(FTP_PORT),
+        user: FTP_USER,
+        password: FTP_PASSWORD,
+        secure: false,
+      });
+      client.prepareTransfer = ftp.enterPassiveModeIPv4;
+      await client.send("TYPE I");
+      const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
+      await client.ensureDir(remotePath);
+
+      // Fetch FTP Directory Once for ALL mass sync processes
+      const existingFtpFilesList = await client.list(remotePath);
+      const existingFtpFiles = new Set(existingFtpFilesList.map((f) => f.name));
+
+      for (const proc of processes) {
+        if (!proc.poNumbers || proc.poNumbers.length === 0) continue;
+        const allUniquePoNumbers = Array.from(new Set(proc.poNumbers));
+        let allDocsUploaded = true;
+
+        for (const po of allUniquePoNumbers) {
+          for (const pd of proc.documents) {
+            const localFilePath = path.join(
+              __dirname,
+              STORAGE_PATH,
+              pd.document.path,
+            );
+            const remoteFileName = `${po}_${pd.document.name}`;
+
+            if (existingFtpFiles.has(remoteFileName)) continue; // SKIP DUPLICATES
+
+            try {
+              await fs.access(localFilePath);
+              await client.uploadFrom(localFilePath, remoteFileName);
+              existingFtpFiles.add(remoteFileName); // Add to set so we don't upload again if duplicates exist across processes
+            } catch (err) {
+              allDocsUploaded = false;
+            }
+          }
+        }
+        if (allDocsUploaded) ftpSuccessCount++;
+      }
+    } catch (err) {
+    } finally {
+      client.close();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Mass sync completed.",
+      data: { mongoSuccessCount, ftpSuccessCount, total: processes.length },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Server Error" });
   }
 };
 
