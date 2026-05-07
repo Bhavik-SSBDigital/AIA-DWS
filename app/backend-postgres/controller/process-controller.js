@@ -3127,6 +3127,7 @@ export const mass_sync_po_data = async (req, res) => {
         })),
       };
 
+      console.log("P2P", `${P2P_SERVER}/sync-po-details`);
       try {
         await axios.post(`${P2P_SERVER}/sync-po-details`, syncPayload, {
           timeout: 15000,
@@ -3185,6 +3186,7 @@ export const mass_sync_po_data = async (req, res) => {
               await client.uploadFrom(localFilePath, remoteFileName);
               existingFtpFiles.add(remoteFileName); // Add to set so we don't upload again if duplicates exist across processes
             } catch (err) {
+              console.log("error uploading ftp doc", err);
               allDocsUploaded = false;
             }
           }
