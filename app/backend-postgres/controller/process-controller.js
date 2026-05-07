@@ -2811,7 +2811,7 @@ export const attach_po_numbers = async (req, res) => {
         secure: false,
       });
 
-      client.prepareTransfer = ftp.enterPassiveModeIPv4;
+      client.prepareTransfer = ftp.enterActiveModeIPv4;
       await client.send("TYPE I");
 
       const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
@@ -2923,7 +2923,7 @@ export const get_po_inspection_data = async (req, res) => {
           password: FTP_PASSWORD,
           secure: false,
         });
-        client.prepareTransfer = ftp.enterPassiveModeIPv4;
+        client.prepareTransfer = ftp.enterActiveModeIPv4;
         const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
 
         const list = await client.list(remotePath);
@@ -3044,7 +3044,7 @@ export const sync_missing_po_data = async (req, res) => {
         password: FTP_PASSWORD,
         secure: false,
       });
-      client.prepareTransfer = ftp.enterPassiveModeIPv4;
+      client.prepareTransfer = ftp.enterActiveModeIPv4;
       await client.send("TYPE I");
       const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
       await client.ensureDir(remotePath);
@@ -3156,7 +3156,7 @@ export const mass_sync_po_data = async (req, res) => {
         password: FTP_PASSWORD,
         secure: false,
       });
-      client.prepareTransfer = ftp.enterPassiveModeIPv4;
+      client.prepareTransfer = ftp.enterActiveModeIPv4;
       await client.send("TYPE I");
       const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
       await client.ensureDir(remotePath);
