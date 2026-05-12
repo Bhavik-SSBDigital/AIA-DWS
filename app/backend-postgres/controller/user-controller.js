@@ -388,7 +388,7 @@ export const edit_user = async (req, res) => {
         where: { email },
       });
       if (emailExists) {
-        return res.status(400).json({ message: "Email already taken" });
+        // return res.status(400).json({ message: "Email already taken" });
       }
     }
 
