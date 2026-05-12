@@ -7,7 +7,6 @@ import upload_, {
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 
-// ✅ IMPORT BOTH AUTH AND ADMIN MIDDLEWARE
 import {
   requireAuth,
   requireAdmin,
@@ -192,6 +191,30 @@ import {
 
 const router = express.Router();
 
+// ==========================================
+// 🚀 SPA BROWSER RELOAD HANDLER (THE FIX)
+// ==========================================
+// This checks if the request is a browser navigating to a URL (requesting HTML).
+// If it is, it skips the entire Express API router completely and lets it fall down
+// to `index.js` where the React App (index.html) is properly served.
+router.use((req, res, next) => {
+  if (
+    req.method === "GET" &&
+    req.headers.accept &&
+    req.headers.accept.includes("text/html")
+  ) {
+    // We don't skip if it's a file download or WOPI request,
+    // as browsers might navigate to those directly.
+    const isFileDownload = req.path.match(/\/(download|files|export)/i);
+    const isWopi = req.path.match(/\/(wopi|hosting|collabora)/i);
+
+    if (!isFileDownload && !isWopi) {
+      return next("router"); // Skip API routing, serve React UI
+    }
+  }
+  next();
+});
+
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -247,7 +270,6 @@ router.use(requireAuth);
 // ==========================================
 // 👑 ADMIN-ONLY ROUTES
 // ==========================================
-// Users
 router.post("/signup", requireStrictAdmin, sign_up);
 router.post("/createAdmin", create_admin);
 router.post("/deleteUser/:id", requireStrictAdmin, deactivate_user);
@@ -259,7 +281,6 @@ router.delete("/process/email-recipients/:processId", removeEmailRecipient);
 router.get("/process/sent-emails/:processId", getSentEmails);
 router.post("/process/send-email/:processId", sendManualEmail);
 
-// Departments
 router.post("/addDepartment", requireStrictAdmin, add_department);
 router.delete(
   "/deleteDepartment/:id",
@@ -267,17 +288,14 @@ router.delete(
   deactivate_department,
 );
 
-// Roles
 router.post("/addRole", requireStrictAdmin, add_role);
 router.put("/editRole/:id", requireStrictAdmin, edit_role);
 router.delete("/deleteRole/:id", requireStrictAdmin, deactivate_role);
 
-// Admin Logs & Permissions
 router.get("/downloadLoginLogs", requireAdmin, download_login_logs);
 router.get("/exportFileLogs", requireAdmin, export_file_logs);
 router.post("/createPermissions", requireAdmin, create_permissions);
 
-// ✅ FIXED: Missing requireAdmin on global document fetch
 router.post("/getAllDocuments", requireAdmin, getDocumentDetailsForAdmin);
 
 // ==========================================
@@ -285,14 +303,12 @@ router.post("/getAllDocuments", requireAdmin, getDocumentDetailsForAdmin);
 // ==========================================
 router.post("/logout", logout);
 
-// Tags
 router.post("/tags", requireAdmin, add_tags);
 router.get("/tags", get_tags);
 router.put("/tags/:id", requireAdmin, update_tag);
 router.delete("/tags/:id", requireAdmin, delete_tag);
 router.get("/getTemplatesByTag/:tagId", get_templates_by_tag);
 
-// ✅ FIXED: Added requireAdmin to global Department & Role read routes
 router.get("/getDepartments", requireAdmin, get_departments);
 router.post("/getAllBranches", requireAdmin, get_departments);
 router.get("/getDepartment/:id", requireAdmin, get_department);
@@ -305,20 +321,17 @@ router.get(
   getRolesHierarchyInDepartment,
 );
 
-// ✅ FIXED: Added requireAdmin to global User read routes
 router.get("/getUsers", requireAdmin, get_users);
 router.get("/getUsersWithDetails", get_users_with_details);
 
-// (Allowed for standard users to fetch specific context/own data)
 router.get("/getUser/:userId", requireAdmin, get_user);
-router.put("/editUser/:userId", requireAdmin, edit_user); // Handled internally for self-edit vs admin-edit
+router.put("/editUser/:userId", requireAdmin, edit_user);
 router.get("/api/users/signature/:userId", get_user_signature_id);
 router.get("/getUserSignature/:userId", get_user_signature);
 router.post("/getUserProfilePic", get_user_profile_pic);
 router.get("/getUserProfileData", get_user_profile_data);
 router.get("/getUserDSC", get_user_dsc);
 
-// Files & Folders
 router.post("/upload", file_upload);
 router.get("/download-template/:id", download_template_document);
 router.post("/download", file_download);
@@ -343,7 +356,6 @@ router.get("/searchDocuments", search_documents);
 router.get("/get_searches", get_searches);
 router.delete("/delete_search/:id", delete_search);
 
-// PDF & Document Operations
 router.post("/merge-pdf", mergePdfUpload, mergeFilesToPdf);
 router.post("/merge-and-save", mergePdfUpload, mergeAndSavePdf);
 router.post("/convert-to-pdf", convertPdfUpload, convertFileToPdf);
@@ -356,11 +368,8 @@ router.post("/extract-eml", extractEMLDetails);
 router.post("/generateDocumentName", generateDocumentNameController);
 
 router.get("/check-po-sync-status", get_po_inspection_data);
-
 router.post("/po-inspection/sync/mass", mass_sync_po_data);
-
 router.post("/po-inspection/sync/:processId", sync_missing_po_data);
-// Workflows
 
 router.post("/workflows/addWorkflow", requireStrictAdmin, add_workflow);
 router.put(
@@ -403,7 +412,6 @@ router.post(
 );
 router.post("/useTemplateDocument", use_template_document);
 
-// Processes
 router.post("/initiateProcess", initiate_process);
 router.get("/viewProcess/:processId", view_process);
 router.post("/claimProcessStep", pick_process_step);
@@ -414,11 +422,9 @@ router.get("/api/processes/admin-all", get_all_processes_for_admin);
 router.get("/tags/:tagId/emails", get_tag_emails);
 router.post("/tags/:tagId/emails", add_tag_emails);
 router.delete("/tags/:tagId/emails/:emailId", delete_tag_email);
-router.get("/tags/:tagId/emails/list", get_tag_email_strings); // public, used during initiation
+router.get("/tags/:tagId/emails/list", get_tag_email_strings);
 
-// Unified process listing
 router.get("/getAllProcessesForListing", get_completed_initiator_processes);
-
 router.get("/processes/initiated", get_completed_initiator_processes);
 router.post("/reopenProcess", reopen_process);
 router.post("/process/attach-po", attach_po_numbers);
@@ -429,7 +435,6 @@ router.get(
 router.post("/uploadDocumentsInProcess", upload_documents_in_process);
 router.post("/deleteDocumentInProcess", delete_document_in_process);
 
-// Signatures & Actions
 router.post("/signDocument", sign_document);
 router.post("/signDocuments", sign_documents);
 router.post("/revokeSign", revoke_sign);
@@ -440,7 +445,6 @@ router.post("/bookmarkDocument", bookmark_document);
 router.get("/getBookmarkedDocuments", get_bookmarked_documents);
 router.delete("/removeBookmark", remove_bookmark_document);
 
-// Queries & Recommendations
 router.post("/queries/createQuery", createQuery);
 router.post("/recommendations/createRecommendation", createRecommendation);
 router.post("/recommendations/signDocument", signAsRecommender);
@@ -448,21 +452,18 @@ router.post("/recommendations/respond", submitRecommendationResponse);
 router.get("/recommendations/getRecommendations", get_recommendations);
 router.get("/recommendations/:recommendationId", get_recommendation);
 
-// Physical Requests
 router.post("/createPhysicalRequest", create_physical_request);
 router.get("/getPhysicalRequests", get_physical_requests);
 router.post("/updatePhysicalRequest/:id", update_physical_request);
 router.get("/getPhysicalRequestMessages/:id", get_physical_request_messages);
 router.post("/addRequestMessage/:id", add_request_message);
 
-// Projects
 router.post("/getProjects", getRootDocumentsWithAccess);
 router.post("/getRootDocumentsForEdit", requireAdmin, getRootDocumentsForEdit);
 
 router.get("/sidebar-config", get_sidebar_config);
 router.post("/sidebar-config", save_sidebar_config);
 
-// Dashboards & Logs
 router.get("/getNumbers", getNumbers);
 router.get("/getDetails", getDetails);
 router.get("/workflowAnalysis/:workflowId", getWorkflowAnalysis);
@@ -471,8 +472,6 @@ router.get("/logs/:processId/:stepInstanceId?", get_user_activity_log);
 router.get("/getProcessActivityLogs/:processId", get_process_activity_logs);
 
 router.delete("/templates/:id", delete_template_document);
-
-// Misc
 router.get("/getHighlightsInFile/:documentId", (req, res) =>
   res.status(200).json({ highlights: [] }),
 );

@@ -36,9 +36,6 @@ app.use(
 // ==========================================
 // 🌐 STRICT CORS CONFIGURATION (CRITICAL FIX FOR blocked:origin)
 // ==========================================
-// ==========================================
-// 🌐 STRICT CORS CONFIGURATION (CRITICAL FIX FOR blocked:origin)
-// ==========================================
 const corsOptions = {
   origin: ["http://localhost:3000", "https://ai-audit.aia.local"],
   credentials: true,
@@ -80,7 +77,10 @@ app.use(cors(corsOptions));
 // );
 
 // Other Middleware
-app.use(express.json()); // For JSON-based APIs
+// ✅ FIXED: Increased limit to 50mb to prevent PayloadTooLargeError for large files/data
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
 app.use(express.static(path.join(__dirname, "build")));
 app.use("/", router);
 
