@@ -273,13 +273,13 @@ router.use((req, res, next) => {
 // ==========================================
 // 🔒 GLOBAL AUTHENTICATION GATEWAY
 // ==========================================
+router.post("/createAdmin", create_admin);
 router.use(requireAuth);
 
 // ==========================================
 // 👑 ADMIN-ONLY ROUTES
 // ==========================================
 router.post("/signup", requireStrictAdmin, sign_up);
-router.post("/createAdmin", create_admin);
 router.post("/deleteUser/:id", requireStrictAdmin, deactivate_user);
 
 router.get("/process/email-recipients/:processId", getEmailRecipients);
