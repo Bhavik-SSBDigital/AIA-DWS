@@ -197,19 +197,27 @@ const router = express.Router();
 // This checks if the request is a browser navigating to a URL (requesting HTML).
 // If it is, it skips the entire Express API router completely and lets it fall down
 // to `index.js` where the React App (index.html) is properly served.
+// ==========================================
+// 🚀 SPA BROWSER RELOAD HANDLER (THE CORRECTED FIX)
+// ==========================================
 router.use((req, res, next) => {
   if (
     req.method === "GET" &&
     req.headers.accept &&
     req.headers.accept.includes("text/html")
   ) {
-    // We don't skip if it's a file download or WOPI request,
-    // as browsers might navigate to those directly.
-    const isFileDownload = req.path.match(/\/(download|files|export)/i);
+    // 1. Exclude WOPI integration routes
     const isWopi = req.path.match(/\/(wopi|hosting|collabora)/i);
 
-    if (!isFileDownload && !isWopi) {
-      return next("router"); // Skip API routing, serve React UI
+    // 2. Exclude actual file streams (e.g. /files/document.pdf)
+    // BUT allow exactly "/files" or "/files/" to pass through to the React UI.
+    const isFileStream = req.path.startsWith("/files/") && req.path.length > 7;
+
+    // 3. Exclude other specific backend GET endpoints that return files
+    const isOtherDownload = req.path.match(/\/(download|export)/i);
+
+    if (!isWopi && !isFileStream && !isOtherDownload) {
+      return next("router"); // Skip API routing, let index.js serve the React UI
     }
   }
   next();
