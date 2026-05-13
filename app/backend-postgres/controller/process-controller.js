@@ -2952,11 +2952,23 @@ export const attach_po_numbers = async (req, res) => {
 
       for (const po of allUniquePoNumbers) {
         for (const pd of updatedProcess.documents) {
+          // ==========================================
+          // PATH DEBUGGING LOGS
+          // ==========================================
+          console.log("--- DEBUG PATH: attach_po_numbers ---");
+          console.log("1. __dirname is:", __dirname);
+          console.log("2. STORAGE_PATH is:", STORAGE_PATH);
+          console.log("3. pd.document.path is:", pd.document.path);
+
           const localFilePath = path.join(
             __dirname,
             STORAGE_PATH,
             pd.document.path,
           );
+
+          console.log("=> FINAL localFilePath RESOLVED TO:", localFilePath);
+          // ==========================================
+
           const remoteFileName = `${remotePath}/${po}_${pd.document.name}`;
           const remoteFileNameOnly = `${po}_${pd.document.name}`;
 
@@ -2967,6 +2979,9 @@ export const attach_po_numbers = async (req, res) => {
 
           try {
             await fs.access(localFilePath);
+            console.log(
+              `fs.access PASSED for: ${localFilePath} - Starting FTP upload...`,
+            );
             await ftpUploadFile(client, localFilePath, remoteFileName);
             console.log(`Uploaded: ${remoteFileNameOnly}`);
           } catch (err) {
@@ -2990,112 +3005,6 @@ export const attach_po_numbers = async (req, res) => {
     });
   } catch (error) {
     console.error("FATAL:", error);
-    return res.status(500).json({ success: false, message: "Server Error" });
-  }
-};
-
-export const get_po_inspection_data = async (req, res) => {
-  let client;
-
-  try {
-    const processes = await prisma.processInstance.findMany({
-      where: { status: "PO_NO_ATTACHED" },
-      select: {
-        id: true,
-        name: true,
-        poNumbers: true,
-        documents: { select: { document: { select: { name: true } } } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
-
-    if (processes.length === 0) {
-      return res.status(200).json({ success: true, data: [] });
-    }
-
-    const allPoNumbersSet = new Set();
-    processes.forEach((p) =>
-      p.poNumbers.forEach((po) => allPoNumbersSet.add(po)),
-    );
-    const allPoNumbers = Array.from(allPoNumbersSet);
-
-    // 1. BULK MONGO CHECK
-    let mongoSyncStatus = {};
-    try {
-      const p2pResponse = await axios.post(
-        `${P2P_SERVER}/check-po-sync-status`,
-        { poNumbers: allPoNumbers },
-        {
-          timeout: 10000,
-          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-        },
-      );
-      if (p2pResponse.data && p2pResponse.data.data)
-        mongoSyncStatus = p2pResponse.data.data;
-    } catch (err) {}
-
-    // 2. BULK FTP CHECK — Active Mode
-    let ftpFiles = new Set();
-    try {
-      const {
-        FTP_HOST,
-        FTP_PORT = "21",
-        FTP_USER,
-        FTP_PASSWORD,
-        FTP_REMOTE_PATH,
-      } = process.env;
-
-      if (FTP_HOST && FTP_USER) {
-        client = await ftpConnect({
-          host: FTP_HOST,
-          port: parseInt(FTP_PORT),
-          user: FTP_USER,
-          password: FTP_PASSWORD,
-        });
-
-        const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
-        const list = await ftpList(client, remotePath);
-        list.forEach((file) => ftpFiles.add(file.name));
-      }
-    } catch (err) {
-      console.log("FTP Check FAILED:", err.message);
-    } finally {
-      if (client) client.end();
-    }
-
-    // 3. MAP DATA TOGETHER
-    const inspectionData = processes.map((proc) => {
-      const uniquePos = Array.from(new Set(proc.poNumbers));
-      const missingFtpDocs = [];
-      let ftpFullySynced = true;
-
-      uniquePos.forEach((po) => {
-        proc.documents.forEach((pd) => {
-          const expectedFileName = `${po}_${pd.document.name}`;
-          if (!ftpFiles.has(expectedFileName)) {
-            ftpFullySynced = false;
-            missingFtpDocs.push(expectedFileName);
-          }
-        });
-      });
-
-      const mongoFullySynced = uniquePos.every(
-        (po) => mongoSyncStatus[po] === true,
-      );
-
-      return {
-        id: proc.id,
-        processName: proc.name,
-        poNumbers: uniquePos,
-        mongoFullySynced,
-        ftpFullySynced,
-        missingFtpDocs,
-      };
-    });
-
-    return res.status(200).json({ success: true, data: inspectionData });
-  } catch (error) {
-    if (client) client.end();
     return res.status(500).json({ success: false, message: "Server Error" });
   }
 };
@@ -3184,11 +3093,23 @@ export const sync_missing_po_data = async (req, res) => {
 
       for (const po of allUniquePoNumbers) {
         for (const pd of processInstance.documents) {
+          // ==========================================
+          // PATH DEBUGGING LOGS
+          // ==========================================
+          console.log("--- DEBUG PATH: sync_missing_po_data ---");
+          console.log("1. __dirname is:", __dirname);
+          console.log("2. STORAGE_PATH is:", STORAGE_PATH);
+          console.log("3. pd.document.path is:", pd.document.path);
+
           const localFilePath = path.join(
             __dirname,
             STORAGE_PATH,
             pd.document.path,
           );
+
+          console.log("=> FINAL localFilePath RESOLVED TO:", localFilePath);
+          // ==========================================
+
           const remoteFileNameOnly = `${po}_${pd.document.name}`;
           const remoteFileName = `${remotePath}/${remoteFileNameOnly}`;
 
@@ -3196,8 +3117,15 @@ export const sync_missing_po_data = async (req, res) => {
 
           try {
             await fs.access(localFilePath);
+            console.log(
+              `fs.access PASSED for: ${localFilePath} - Starting FTP upload...`,
+            );
             await ftpUploadFile(client, localFilePath, remoteFileName);
           } catch (err) {
+            console.log(
+              `File access or upload failed for (${localFilePath}):`,
+              err.message,
+            );
             ftpSuccess = false;
           }
         }
@@ -3307,11 +3235,23 @@ export const mass_sync_po_data = async (req, res) => {
 
         for (const po of allUniquePoNumbers) {
           for (const pd of proc.documents) {
+            // ==========================================
+            // PATH DEBUGGING LOGS
+            // ==========================================
+            console.log("--- DEBUG PATH: mass_sync_po_data ---");
+            console.log("1. __dirname is:", __dirname);
+            console.log("2. STORAGE_PATH is:", STORAGE_PATH);
+            console.log("3. pd.document.path is:", pd.document.path);
+
             const localFilePath = path.join(
               __dirname,
               STORAGE_PATH,
               pd.document.path,
             );
+
+            console.log("=> FINAL localFilePath RESOLVED TO:", localFilePath);
+            // ==========================================
+
             const remoteFileNameOnly = `${po}_${pd.document.name}`;
             const remoteFileName = `${remotePath}/${remoteFileNameOnly}`;
 
@@ -3319,10 +3259,13 @@ export const mass_sync_po_data = async (req, res) => {
 
             try {
               await fs.access(localFilePath);
+              console.log(
+                `fs.access PASSED for: ${localFilePath} - Starting FTP upload...`,
+              );
               await ftpUploadFile(client, localFilePath, remoteFileName);
               existingFtpFiles.add(remoteFileNameOnly);
             } catch (err) {
-              console.log("error uploading ftp doc", err);
+              console.log(`Error uploading ftp doc (${localFilePath}):`, err);
               allDocsUploaded = false;
             }
           }
@@ -3330,7 +3273,7 @@ export const mass_sync_po_data = async (req, res) => {
         if (allDocsUploaded) ftpSuccessCount++;
       }
     } catch (err) {
-      console.log("error uploading to ftp");
+      console.log("error uploading to ftp", err);
     } finally {
       if (client) client.end();
     }
@@ -3342,6 +3285,112 @@ export const mass_sync_po_data = async (req, res) => {
     });
   } catch (error) {
     console.log("error syncing ftp", error);
+    if (client) client.end();
+    return res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+export const get_po_inspection_data = async (req, res) => {
+  let client;
+
+  try {
+    const processes = await prisma.processInstance.findMany({
+      where: { status: "PO_NO_ATTACHED" },
+      select: {
+        id: true,
+        name: true,
+        poNumbers: true,
+        documents: { select: { document: { select: { name: true } } } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (processes.length === 0) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const allPoNumbersSet = new Set();
+    processes.forEach((p) =>
+      p.poNumbers.forEach((po) => allPoNumbersSet.add(po)),
+    );
+    const allPoNumbers = Array.from(allPoNumbersSet);
+
+    // 1. BULK MONGO CHECK
+    let mongoSyncStatus = {};
+    try {
+      const p2pResponse = await axios.post(
+        `${P2P_SERVER}/check-po-sync-status`,
+        { poNumbers: allPoNumbers },
+        {
+          timeout: 10000,
+          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        },
+      );
+      if (p2pResponse.data && p2pResponse.data.data)
+        mongoSyncStatus = p2pResponse.data.data;
+    } catch (err) {}
+
+    // 2. BULK FTP CHECK — Active Mode
+    let ftpFiles = new Set();
+    try {
+      const {
+        FTP_HOST,
+        FTP_PORT = "21",
+        FTP_USER,
+        FTP_PASSWORD,
+        FTP_REMOTE_PATH,
+      } = process.env;
+
+      if (FTP_HOST && FTP_USER) {
+        client = await ftpConnect({
+          host: FTP_HOST,
+          port: parseInt(FTP_PORT),
+          user: FTP_USER,
+          password: FTP_PASSWORD,
+        });
+
+        const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
+        const list = await ftpList(client, remotePath);
+        list.forEach((file) => ftpFiles.add(file.name));
+      }
+    } catch (err) {
+      console.log("FTP Check FAILED:", err.message);
+    } finally {
+      if (client) client.end();
+    }
+
+    // 3. MAP DATA TOGETHER
+    const inspectionData = processes.map((proc) => {
+      const uniquePos = Array.from(new Set(proc.poNumbers));
+      const missingFtpDocs = [];
+      let ftpFullySynced = true;
+
+      uniquePos.forEach((po) => {
+        proc.documents.forEach((pd) => {
+          const expectedFileName = `${po}_${pd.document.name}`;
+          if (!ftpFiles.has(expectedFileName)) {
+            ftpFullySynced = false;
+            missingFtpDocs.push(expectedFileName);
+          }
+        });
+      });
+
+      const mongoFullySynced = uniquePos.every(
+        (po) => mongoSyncStatus[po] === true,
+      );
+
+      return {
+        id: proc.id,
+        processName: proc.name,
+        poNumbers: uniquePos,
+        mongoFullySynced,
+        ftpFullySynced,
+        missingFtpDocs,
+      };
+    });
+
+    return res.status(200).json({ success: true, data: inspectionData });
+  } catch (error) {
     if (client) client.end();
     return res.status(500).json({ success: false, message: "Server Error" });
   }
