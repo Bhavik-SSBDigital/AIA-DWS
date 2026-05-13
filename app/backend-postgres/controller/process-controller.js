@@ -2726,48 +2726,99 @@ import https from "https";
 // 🔥 FORCE IPV4 (VERY IMPORTANT)
 dns.setDefaultResultOrder("ipv4first");
 
-const ftpConnect = (config) => {
-  return new Promise((resolve, reject) => {
-    const client = new FTPClient();
-    client.on("ready", () => resolve(client));
-    client.on("error", (err) => reject(err));
-    client.connect({
-      host: config.host,
-      port: config.port,
-      user: config.user,
-      password: config.password,
-      connTimeout: 30000,
-      pasvTimeout: 30000,
-      keepalive: 10000,
-    });
-  });
+import { execFile } from "child_process";
+import util from "util";
+
+// Promisify execFile so we can safely use async/await without shell injection risks
+const execFileAsync = util.promisify(execFile);
+
+/**
+ * 1. MOCK FTP CONNECTION
+ * Since cURL is stateless, we don't hold a persistent socket open.
+ * We simply store the config and provide a dummy `end()` to prevent `finally` crashes.
+ */
+const ftpConnect = async (config) => {
+  return {
+    ...config,
+    end: () => {}, // Dummy end function to keep your `finally { client.end(); }` working
+  };
 };
 
-const ftpUploadFile = (client, localPath, remoteName) => {
-  return new Promise((resolve, reject) => {
-    client.put(localPath, remoteName, (err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
+/**
+ * 2. UPLOAD FILE (ACTIVE MODE)
+ */
+const ftpUploadFile = async (client, localPath, remoteName) => {
+  const remoteUrl = `ftp://${client.host}:${client.port}${remoteName}`;
+
+  await execFileAsync("curl", [
+    "-u",
+    `${client.user}:${client.password}`,
+    "--ftp-port",
+    "-", // 🔥 THE MAGIC FLAG: FORCES ACTIVE MODE
+    "--ftp-create-dirs", // Automatically creates directories if missing
+    "--silent",
+    "--show-error",
+    "-T",
+    localPath,
+    remoteUrl,
+  ]);
 };
 
-const ftpList = (client, remotePath) => {
-  return new Promise((resolve, reject) => {
-    client.list(remotePath, (err, list) => {
-      if (err) reject(err);
-      else resolve(list);
-    });
-  });
+/**
+ * 3. LIST DIRECTORY (ACTIVE MODE)
+ */
+const ftpList = async (client, remotePath) => {
+  const remoteUrl = `ftp://${client.host}:${client.port}${remotePath}/`;
+
+  try {
+    const { stdout } = await execFileAsync("curl", [
+      "-u",
+      `${client.user}:${client.password}`,
+      "--ftp-port",
+      "-", // 🔥 FORCES ACTIVE MODE
+      "--silent",
+      "-l", // List only filenames
+      remoteUrl,
+    ]);
+
+    // Convert raw string output back into the array of objects your code expects
+    return stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((name) => ({ name }));
+  } catch (err) {
+    // If the directory doesn't exist yet, return an empty array instead of failing
+    if (
+      err.message.includes("does not exist") ||
+      err.message.includes("failed")
+    ) {
+      return [];
+    }
+    throw err;
+  }
 };
 
-const ftpMkdir = (client, remotePath) => {
-  return new Promise((resolve, reject) => {
-    client.mkdir(remotePath, true, (err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
+/**
+ * 4. MAKE DIRECTORY (ACTIVE MODE)
+ */
+const ftpMkdir = async (client, remotePath) => {
+  const remoteUrl = `ftp://${client.host}:${client.port}/`;
+
+  try {
+    await execFileAsync("curl", [
+      "-u",
+      `${client.user}:${client.password}`,
+      "--ftp-port",
+      "-",
+      "--silent",
+      "-Q",
+      `MKD ${remotePath}`, // Send raw FTP command
+      remoteUrl,
+    ]);
+  } catch (err) {
+    // Ignore errors here. cURL will naturally fail if the directory already exists.
+  }
 };
 
 export const attach_po_numbers = async (req, res) => {
