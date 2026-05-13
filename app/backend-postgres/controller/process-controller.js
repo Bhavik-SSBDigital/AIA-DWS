@@ -2718,29 +2718,38 @@ export const view_process = async (req, res) => {
 
 // Add this import at the top of your file with other imports
 
-import dns from "dns/promises"; // ✅ FIXED
-import net from "net"; // ✅ FIXED
-
+import dns from "dns/promises";
+import net from "net";
 import https from "https";
-
-// 🔥 FORCE IPV4 (VERY IMPORTANT)
-dns.setDefaultResultOrder("ipv4first");
 
 import { execFile } from "child_process";
 import util from "util";
 
-// Promisify execFile so we can safely use async/await without shell injection risks
+// 🔥 FORCE IPV4 (VERY IMPORTANT)
+dns.setDefaultResultOrder("ipv4first");
+
+// Promisify execFile so we can safely use async/await
 const execFileAsync = util.promisify(execFile);
 
 /**
+ * Builds the Active Mode PORT flag based on your .env settings.
+ * Example output: "52.12.34.56:50000-50050" or "-"
+ */
+const getPortFlag = () => {
+  const ip = process.env.PUBLIC_IP || "-";
+  const ports = process.env.FTP_PORT_RANGE
+    ? `:${process.env.FTP_PORT_RANGE}`
+    : "";
+  return `${ip}${ports}`;
+};
+
+/**
  * 1. MOCK FTP CONNECTION
- * Since cURL is stateless, we don't hold a persistent socket open.
- * We simply store the config and provide a dummy `end()` to prevent `finally` crashes.
  */
 const ftpConnect = async (config) => {
   return {
     ...config,
-    end: () => {}, // Dummy end function to keep your `finally { client.end(); }` working
+    end: () => {},
   };
 };
 
@@ -2754,8 +2763,8 @@ const ftpUploadFile = async (client, localPath, remoteName) => {
     "-u",
     `${client.user}:${client.password}`,
     "--ftp-port",
-    "-", // 🔥 THE MAGIC FLAG: FORCES ACTIVE MODE
-    "--ftp-create-dirs", // Automatically creates directories if missing
+    getPortFlag(),
+    "--ftp-create-dirs",
     "--silent",
     "--show-error",
     "-T",
@@ -2775,20 +2784,18 @@ const ftpList = async (client, remotePath) => {
       "-u",
       `${client.user}:${client.password}`,
       "--ftp-port",
-      "-", // 🔥 FORCES ACTIVE MODE
+      getPortFlag(),
       "--silent",
-      "-l", // List only filenames
+      "-l",
       remoteUrl,
     ]);
 
-    // Convert raw string output back into the array of objects your code expects
     return stdout
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
       .map((name) => ({ name }));
   } catch (err) {
-    // If the directory doesn't exist yet, return an empty array instead of failing
     if (
       err.message.includes("does not exist") ||
       err.message.includes("failed")
@@ -2810,16 +2817,20 @@ const ftpMkdir = async (client, remotePath) => {
       "-u",
       `${client.user}:${client.password}`,
       "--ftp-port",
-      "-",
+      getPortFlag(),
       "--silent",
       "-Q",
-      `MKD ${remotePath}`, // Send raw FTP command
+      `MKD ${remotePath}`,
       remoteUrl,
     ]);
   } catch (err) {
-    // Ignore errors here. cURL will naturally fail if the directory already exists.
+    // Ignore if directory exists
   }
 };
+
+// ==========================================
+// CONTROLLERS
+// ==========================================
 
 export const attach_po_numbers = async (req, res) => {
   const startTime = Date.now();
