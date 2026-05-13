@@ -2836,17 +2836,22 @@ const ftpList = async (client, remotePath) => {
       `${client.user}:${client.password}`,
       "--ftp-port",
       getPortFlag(),
-      "--disable-eprt", // 🔥 FORCE CLASSIC PORT COMMAND
+      "--disable-eprt",
       "--silent",
-      "-l",
-      remoteUrl,
+      remoteUrl, // no -l flag = full listing with sizes
     ]);
 
     return stdout
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
-      .map((name) => ({ name }));
+      .map((line) => {
+        const parts = line.split(/\s+/);
+        // FTP full listing: permissions links owner group SIZE date date date NAME
+        const size = parseInt(parts[4]) || 0;
+        const name = parts[parts.length - 1];
+        return { name, size };
+      });
   } catch (err) {
     if (
       err.message.includes("does not exist") ||
@@ -2899,7 +2904,6 @@ export const attach_po_numbers = async (req, res) => {
 
     console.log("==== REQUEST START ====");
 
-    // 1. DB UPDATE
     const updatedProcess = await prisma.processInstance.update({
       where: { id: processId },
       data: {
@@ -2918,7 +2922,7 @@ export const attach_po_numbers = async (req, res) => {
 
     const allUniquePoNumbers = Array.from(new Set(updatedProcess.poNumbers));
 
-    // 2. MONGO SYNC
+    // MONGO SYNC
     const syncPayload = {
       processId: updatedProcess.id,
       processName: updatedProcess.name,
@@ -2945,7 +2949,7 @@ export const attach_po_numbers = async (req, res) => {
       console.log("Mongo Sync FAILED ❌:", err.message);
     }
 
-    // 3. FTP UPLOAD — Active Mode using 'ftp' package
+    // FTP UPLOAD
     let client;
     try {
       console.log("---- FTP START ----");
@@ -2968,44 +2972,42 @@ export const attach_po_numbers = async (req, res) => {
       });
 
       const remotePath = FTP_REMOTE_PATH || "/home/vendx_prd/prd/po";
-
       await ftpMkdir(client, remotePath);
 
       const existingFilesList = await ftpList(client, remotePath);
-      const existingFtpFiles = new Set(existingFilesList.map((f) => f.name));
+      // Map: filename -> size
+      const existingFtpFiles = new Map(
+        existingFilesList.map((f) => [f.name, f.size]),
+      );
 
       for (const po of allUniquePoNumbers) {
         for (const pd of updatedProcess.documents) {
-          // ==========================================
-          // PATH DEBUGGING LOGS
-          // ==========================================
-          console.log("--- DEBUG PATH: attach_po_numbers ---");
-          console.log("1. __dirname is:", __dirname);
-          console.log("2. STORAGE_PATH is:", STORAGE_PATH);
-          console.log("3. pd.document.path is:", pd.document.path);
-
           const localFilePath = path.join(
             __dirname,
             STORAGE_PATH,
             pd.document.path,
           );
-
-          console.log("=> FINAL localFilePath RESOLVED TO:", localFilePath);
-          // ==========================================
-
           const remoteFileName = `${remotePath}/${po}_${pd.document.name}`;
           const remoteFileNameOnly = `${po}_${pd.document.name}`;
 
-          if (existingFtpFiles.has(remoteFileNameOnly)) {
-            console.log(`Skipping (Already on FTP): ${remoteFileNameOnly}`);
+          const existingSize = existingFtpFiles.get(remoteFileNameOnly);
+
+          // Skip only if file exists AND has size > 0
+          if (existingSize !== undefined && existingSize > 0) {
+            console.log(
+              `Skipping (Already on FTP, size=${existingSize}): ${remoteFileNameOnly}`,
+            );
             continue;
+          }
+
+          if (existingSize === 0) {
+            console.log(
+              `Found 0-byte file on FTP, will re-upload: ${remoteFileNameOnly}`,
+            );
           }
 
           try {
             await fs.access(localFilePath);
-            console.log(
-              `fs.access PASSED for: ${localFilePath} - Starting FTP upload...`,
-            );
             await ftpUploadFile(client, localFilePath, remoteFileName);
             console.log(`Uploaded: ${remoteFileNameOnly}`);
           } catch (err) {
@@ -3090,7 +3092,7 @@ export const sync_missing_po_data = async (req, res) => {
       console.log("Mongo Sync FAILED:", err.message);
     }
 
-    // FTP UPLOAD — Active Mode
+    // FTP UPLOAD
     let ftpSuccess = true;
 
     try {
@@ -3113,43 +3115,41 @@ export const sync_missing_po_data = async (req, res) => {
       await ftpMkdir(client, remotePath);
 
       const existingFilesList = await ftpList(client, remotePath);
-      const existingFtpFiles = new Set(existingFilesList.map((f) => f.name));
+      const existingFtpFiles = new Map(
+        existingFilesList.map((f) => [f.name, f.size]),
+      );
 
       for (const po of allUniquePoNumbers) {
         for (const pd of processInstance.documents) {
-          // ==========================================
-          // PATH DEBUGGING LOGS
-          // ==========================================
-          console.log("--- DEBUG PATH: sync_missing_po_data ---");
-          console.log("1. __dirname is:", __dirname);
-          console.log("2. STORAGE_PATH is:", STORAGE_PATH);
-          console.log("3. pd.document.path is:", pd.document.path);
-
           const localFilePath = path.join(
             __dirname,
             STORAGE_PATH,
             pd.document.path,
           );
-
-          console.log("=> FINAL localFilePath RESOLVED TO:", localFilePath);
-          // ==========================================
-
           const remoteFileNameOnly = `${po}_${pd.document.name}`;
           const remoteFileName = `${remotePath}/${remoteFileNameOnly}`;
 
-          if (existingFtpFiles.has(remoteFileNameOnly)) continue;
+          const existingSize = existingFtpFiles.get(remoteFileNameOnly);
+
+          if (existingSize !== undefined && existingSize > 0) {
+            console.log(
+              `Skipping (Already on FTP, size=${existingSize}): ${remoteFileNameOnly}`,
+            );
+            continue;
+          }
+
+          if (existingSize === 0) {
+            console.log(
+              `Found 0-byte file on FTP, will re-upload: ${remoteFileNameOnly}`,
+            );
+          }
 
           try {
             await fs.access(localFilePath);
-            console.log(
-              `fs.access PASSED for: ${localFilePath} - Starting FTP upload...`,
-            );
             await ftpUploadFile(client, localFilePath, remoteFileName);
+            console.log(`Uploaded: ${remoteFileNameOnly}`);
           } catch (err) {
-            console.log(
-              `File access or upload failed for (${localFilePath}):`,
-              err.message,
-            );
+            console.log(`Upload failed (${remoteFileNameOnly}):`, err.message);
             ftpSuccess = false;
           }
         }
@@ -3225,11 +3225,11 @@ export const mass_sync_po_data = async (req, res) => {
         });
         mongoSuccessCount++;
       } catch (err) {
-        console.log("error syncing data to P2P", err);
+        console.log("error syncing data to P2P", err.message);
       }
     }
 
-    // FTP MASS UPLOAD — Active Mode (Connect Once)
+    // FTP MASS UPLOAD
     try {
       const {
         FTP_HOST,
@@ -3250,7 +3250,12 @@ export const mass_sync_po_data = async (req, res) => {
       await ftpMkdir(client, remotePath);
 
       const existingFilesList = await ftpList(client, remotePath);
-      const existingFtpFiles = new Set(existingFilesList.map((f) => f.name));
+      // Map: filename -> size (so we can detect 0-byte files)
+      const existingFtpFiles = new Map(
+        existingFilesList.map((f) => [f.name, f.size]),
+      );
+
+      console.log(`FTP directory has ${existingFilesList.length} files`);
 
       for (const proc of processes) {
         if (!proc.poNumbers || proc.poNumbers.length === 0) continue;
@@ -3259,37 +3264,42 @@ export const mass_sync_po_data = async (req, res) => {
 
         for (const po of allUniquePoNumbers) {
           for (const pd of proc.documents) {
-            // ==========================================
-            // PATH DEBUGGING LOGS
-            // ==========================================
-            console.log("--- DEBUG PATH: mass_sync_po_data ---");
-            console.log("1. __dirname is:", __dirname);
-            console.log("2. STORAGE_PATH is:", STORAGE_PATH);
-            console.log("3. pd.document.path is:", pd.document.path);
-
             const localFilePath = path.join(
               __dirname,
               STORAGE_PATH,
               pd.document.path,
             );
-
-            console.log("=> FINAL localFilePath RESOLVED TO:", localFilePath);
-            // ==========================================
-
             const remoteFileNameOnly = `${po}_${pd.document.name}`;
             const remoteFileName = `${remotePath}/${remoteFileNameOnly}`;
 
-            if (existingFtpFiles.has(remoteFileNameOnly)) continue;
+            const existingSize = existingFtpFiles.get(remoteFileNameOnly);
+
+            // Skip only if file exists with size > 0
+            if (existingSize !== undefined && existingSize > 0) {
+              console.log(
+                `Skipping (size=${existingSize}): ${remoteFileNameOnly}`,
+              );
+              continue;
+            }
+
+            if (existingSize === 0) {
+              console.log(
+                `0-byte file detected, re-uploading: ${remoteFileNameOnly}`,
+              );
+            } else {
+              console.log(`New file, uploading: ${remoteFileNameOnly}`);
+            }
 
             try {
               await fs.access(localFilePath);
-              console.log(
-                `fs.access PASSED for: ${localFilePath} - Starting FTP upload...`,
-              );
               await ftpUploadFile(client, localFilePath, remoteFileName);
-              existingFtpFiles.add(remoteFileNameOnly);
+              existingFtpFiles.set(remoteFileNameOnly, 1); // mark as uploaded
+              console.log(`Upload SUCCESS: ${remoteFileNameOnly}`);
             } catch (err) {
-              console.log(`Error uploading ftp doc (${localFilePath}):`, err);
+              console.log(
+                `Upload FAILED (${remoteFileNameOnly}):`,
+                err.message,
+              );
               allDocsUploaded = false;
             }
           }
@@ -3297,10 +3307,11 @@ export const mass_sync_po_data = async (req, res) => {
         if (allDocsUploaded) ftpSuccessCount++;
       }
     } catch (err) {
-      console.log("error uploading to ftp", err);
+      console.log("FTP MASS UPLOAD ERROR:", err.message);
     } finally {
       if (client) client.end();
     }
+
     console.log("MASS FTP SYNC SUCCESS");
     return res.status(200).json({
       success: true,
@@ -3308,7 +3319,7 @@ export const mass_sync_po_data = async (req, res) => {
       data: { mongoSuccessCount, ftpSuccessCount, total: processes.length },
     });
   } catch (error) {
-    console.log("error syncing ftp", error);
+    console.log("error syncing ftp", error.message);
     if (client) client.end();
     return res.status(500).json({ success: false, message: "Server Error" });
   }
