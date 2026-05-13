@@ -2780,24 +2780,40 @@ const getCurlUrl = (host, port, remotePath) => {
 };
 
 /**
- * 2. UPLOAD FILE (ACTIVE MODE)
+ * 2. UPLOAD FILE (ACTIVE MODE - DEFINED PORT RANGE)
  */
 const ftpUploadFile = async (client, localPath, remoteName) => {
   const remoteUrl = getCurlUrl(client.host, client.port, remoteName);
 
-  await execFileAsync("curl", [
+  const curlArgs = [
     "-u",
     `${client.user}:${client.password}`,
+    // 🔥 Tell curl to use the default IP (-), but strictly use ports 50000-50050 for the incoming data
     "--ftp-port",
-    getPortFlag(),
-    "--disable-eprt", // 🔥 FORCE CLASSIC PORT COMMAND (Bypasses some strict firewalls)
+    "-:50000-50050",
+    "--disable-eprt", // Force classic PORT command
     "--ftp-create-dirs",
-    "--silent",
-    "--show-error",
+    "--show-error", // Don't hide errors if the connection drops
     "-T",
     localPath,
     remoteUrl,
-  ]);
+  ];
+
+  console.log(`\n--- EXECUTING CURL (ACTIVE MODE) ---`);
+  console.log(
+    `curl -u ${client.user}:****** --ftp-port -:50000-50050 --disable-eprt --ftp-create-dirs --show-error -T ${localPath} ${remoteUrl}`,
+  );
+
+  try {
+    const { stdout, stderr } = await execFileAsync("curl", curlArgs);
+
+    if (stderr && stderr.includes("curl:")) {
+      console.log("CURL WARNING/ERROR:", stderr);
+    }
+  } catch (err) {
+    console.error("CURL CRASHED:", err.message);
+    throw err;
+  }
 };
 
 /**
