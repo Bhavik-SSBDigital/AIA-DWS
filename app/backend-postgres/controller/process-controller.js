@@ -2782,36 +2782,54 @@ const getCurlUrl = (host, port, remotePath) => {
 /**
  * 2. UPLOAD FILE (ACTIVE MODE - DEFINED PORT RANGE)
  */
+const getPublicIp = async () => {
+  try {
+    const { stdout } = await execAsync("curl -s https://ifconfig.me");
+    return stdout.trim();
+  } catch (err) {
+    console.error("Could not fetch Public IP, defaulting to interface");
+    return "-"; // Fallback to let curl decide
+  }
+};
+
+/**
+ * 2. UPLOAD FILE (ACTIVE MODE - FIXED FOR NAT)
+ */
 const ftpUploadFile = async (client, localPath, remoteName) => {
   const remoteUrl = getCurlUrl(client.host, client.port, remoteName);
+  const publicIp = await getPublicIp();
+
+  console.log(`\n--- FTP UPLOAD START ---`);
+  console.log(`Local: ${localPath}`);
+  console.log(`Public IP being reported to FTP: ${publicIp}`);
 
   const curlArgs = [
     "-u",
     `${client.user}:${client.password}`,
-    // 🔥 Tell curl to use the default IP (-), but strictly use ports 50000-50050 for the incoming data
     "--ftp-port",
-    "-:50000-50050",
-    "--disable-eprt", // Force classic PORT command
+    `${publicIp}:50000-50050`, // Tells FTP server exactly where to send data back
+    "--disable-eprt",
     "--ftp-create-dirs",
-    "--show-error", // Don't hide errors if the connection drops
+    "--show-error",
+    "-v", // Verbose so we can see the "PORT" command result
     "-T",
     localPath,
     remoteUrl,
   ];
 
-  console.log(`\n--- EXECUTING CURL (ACTIVE MODE) ---`);
-  console.log(
-    `curl -u ${client.user}:****** --ftp-port -:50000-50050 --disable-eprt --ftp-create-dirs --show-error -T ${localPath} ${remoteUrl}`,
-  );
-
   try {
     const { stdout, stderr } = await execFileAsync("curl", curlArgs);
 
-    if (stderr && stderr.includes("curl:")) {
-      console.log("CURL WARNING/ERROR:", stderr);
+    // Look for "200 PORT command successful" and "150 Opening BINARY mode" in logs
+    console.log("=== CURL VERBOSE LOG ===");
+    console.log(stderr);
+
+    if (stderr.includes("150 Opening BINARY mode data connection")) {
+      console.log("✅ Data channel opened successfully.");
     }
   } catch (err) {
-    console.error("CURL CRASHED:", err.message);
+    console.error("❌ FTP Upload Failed:", err.message);
+    if (err.stderr) console.error(err.stderr);
     throw err;
   }
 };
