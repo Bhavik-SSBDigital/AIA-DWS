@@ -2756,8 +2756,18 @@ const ftpConnect = async (config) => {
 /**
  * 2. UPLOAD FILE (ACTIVE MODE)
  */
+
+/**
+ * 3. LIST DIRECTORY (ACTIVE MODE)
+ */
+const getCurlUrl = (host, port, remotePath) => {
+  const safePath = remotePath.startsWith("/")
+    ? `%2F${remotePath.slice(1)}`
+    : remotePath;
+  return `ftp://${host}:${port}/${safePath}`;
+};
 const ftpUploadFile = async (client, localPath, remoteName) => {
-  const remoteUrl = `ftp://${client.host}:${client.port}${remoteName}`;
+  const remoteUrl = getCurlUrl(client.host, client.port, remoteName);
 
   await execFileAsync("curl", [
     "-u",
@@ -2772,12 +2782,8 @@ const ftpUploadFile = async (client, localPath, remoteName) => {
     remoteUrl,
   ]);
 };
-
-/**
- * 3. LIST DIRECTORY (ACTIVE MODE)
- */
 const ftpList = async (client, remotePath) => {
-  const remoteUrl = `ftp://${client.host}:${client.port}${remotePath}/`;
+  const remoteUrl = getCurlUrl(client.host, client.port, remotePath) + "/";
 
   try {
     const { stdout } = await execFileAsync("curl", [
