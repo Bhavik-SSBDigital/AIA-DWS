@@ -2731,6 +2731,21 @@ dns.setDefaultResultOrder("ipv4first");
 // Promisify execFile so we can safely use async/await
 const execFileAsync = util.promisify(execFile);
 
+// import dns from "dns/promises";
+// import net from "net";
+// import https from "https";
+// import fs from "fs/promises";
+// import path from "path";
+// import axios from "axios";
+// import { execFile } from "child_process";
+// import util from "util";
+
+// 🔥 FORCE IPV4 (VERY IMPORTANT)
+// dns.setDefaultResultOrder("ipv4first");
+
+// Promisify execFile so we can safely use async/await without shell injection risks
+// const execFileAsync = util.promisify(execFile);
+
 /**
  * Builds the Active Mode PORT flag based on your .env settings.
  * Example output: "52.12.34.56:50000-50050" or "-"
@@ -2754,11 +2769,8 @@ const ftpConnect = async (config) => {
 };
 
 /**
- * 2. UPLOAD FILE (ACTIVE MODE)
- */
-
-/**
- * 3. LIST DIRECTORY (ACTIVE MODE)
+ * Helper to fix cURL absolute path issue.
+ * Converts "/home/AIAAudit/..." to "%2Fhome/AIAAudit/..."
  */
 const getCurlUrl = (host, port, remotePath) => {
   const safePath = remotePath.startsWith("/")
@@ -2766,6 +2778,10 @@ const getCurlUrl = (host, port, remotePath) => {
     : remotePath;
   return `ftp://${host}:${port}/${safePath}`;
 };
+
+/**
+ * 2. UPLOAD FILE (ACTIVE MODE)
+ */
 const ftpUploadFile = async (client, localPath, remoteName) => {
   const remoteUrl = getCurlUrl(client.host, client.port, remoteName);
 
@@ -2774,6 +2790,7 @@ const ftpUploadFile = async (client, localPath, remoteName) => {
     `${client.user}:${client.password}`,
     "--ftp-port",
     getPortFlag(),
+    "--disable-eprt", // 🔥 FORCE CLASSIC PORT COMMAND (Bypasses some strict firewalls)
     "--ftp-create-dirs",
     "--silent",
     "--show-error",
@@ -2782,6 +2799,10 @@ const ftpUploadFile = async (client, localPath, remoteName) => {
     remoteUrl,
   ]);
 };
+
+/**
+ * 3. LIST DIRECTORY (ACTIVE MODE)
+ */
 const ftpList = async (client, remotePath) => {
   const remoteUrl = getCurlUrl(client.host, client.port, remotePath) + "/";
 
@@ -2791,6 +2812,7 @@ const ftpList = async (client, remotePath) => {
       `${client.user}:${client.password}`,
       "--ftp-port",
       getPortFlag(),
+      "--disable-eprt", // 🔥 FORCE CLASSIC PORT COMMAND
       "--silent",
       "-l",
       remoteUrl,
@@ -2824,6 +2846,7 @@ const ftpMkdir = async (client, remotePath) => {
       `${client.user}:${client.password}`,
       "--ftp-port",
       getPortFlag(),
+      "--disable-eprt", // 🔥 FORCE CLASSIC PORT COMMAND
       "--silent",
       "-Q",
       `MKD ${remotePath}`,
