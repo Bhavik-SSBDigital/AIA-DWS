@@ -3311,13 +3311,14 @@ export const mass_sync_po_data = async (req, res) => {
     } finally {
       if (client) client.end();
     }
-
+    console.log("MASS FTP SYNC SUCCESS");
     return res.status(200).json({
       success: true,
       message: "Mass sync completed.",
       data: { mongoSuccessCount, ftpSuccessCount, total: processes.length },
     });
   } catch (error) {
+    console.log("error syncing ftp", error);
     if (client) client.end();
     return res.status(500).json({ success: false, message: "Server Error" });
   }
