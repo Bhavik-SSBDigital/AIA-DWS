@@ -3330,7 +3330,7 @@ export const mass_sync_po_data = async (req, res) => {
         if (allDocsUploaded) ftpSuccessCount++;
       }
     } catch (err) {
-      console.log("error uploading to ftp", err);
+      console.log("error uploading to ftp");
     } finally {
       if (client) client.end();
     }
