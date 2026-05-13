@@ -2779,59 +2779,49 @@ const getCurlUrl = (host, port, remotePath) => {
   return `ftp://${host}:${port}/${safePath}`;
 };
 
-/**
- * 2. UPLOAD FILE (ACTIVE MODE - DEFINED PORT RANGE)
- */
+// Put this near the top of your file, alongside your other helpers
+let _cachedPublicIp = null;
 const getPublicIp = async () => {
+  if (_cachedPublicIp) return _cachedPublicIp;
   try {
-    const { stdout } = await execAsync("curl -s https://ifconfig.me");
-    return stdout.trim();
-  } catch (err) {
-    console.error("Could not fetch Public IP, defaulting to interface");
-    return "-"; // Fallback to let curl decide
+    const { stdout } = await execFileAsync("curl", [
+      "-s",
+      "--max-time",
+      "5",
+      "https://ifconfig.me",
+    ]);
+    _cachedPublicIp = stdout.trim();
+    console.log("Public IP detected:", _cachedPublicIp);
+    return _cachedPublicIp;
+  } catch {
+    console.log("Could not fetch public IP, falling back to -");
+    return "-";
   }
 };
 
-/**
- * 2. UPLOAD FILE (ACTIVE MODE - FIXED FOR NAT)
- */
 const ftpUploadFile = async (client, localPath, remoteName) => {
   const remoteUrl = getCurlUrl(client.host, client.port, remoteName);
   const publicIp = await getPublicIp();
 
-  console.log(`\n--- FTP UPLOAD START ---`);
-  console.log(`Local: ${localPath}`);
-  console.log(`Public IP being reported to FTP: ${publicIp}`);
+  console.log(
+    `\n[FTP UPLOAD] Local: ${localPath} | Remote: ${remoteUrl} | PORT IP: ${publicIp}`,
+  );
 
-  const curlArgs = [
+  const { stderr } = await execFileAsync("curl", [
     "-u",
     `${client.user}:${client.password}`,
     "--ftp-port",
-    `${publicIp}:50000-50050`, // Tells FTP server exactly where to send data back
+    `${publicIp}:50000-50050`,
     "--disable-eprt",
     "--ftp-create-dirs",
     "--show-error",
-    "-v", // Verbose so we can see the "PORT" command result
+    "-v",
     "-T",
     localPath,
     remoteUrl,
-  ];
+  ]);
 
-  try {
-    const { stdout, stderr } = await execFileAsync("curl", curlArgs);
-
-    // Look for "200 PORT command successful" and "150 Opening BINARY mode" in logs
-    console.log("=== CURL VERBOSE LOG ===");
-    console.log(stderr);
-
-    if (stderr.includes("150 Opening BINARY mode data connection")) {
-      console.log("✅ Data channel opened successfully.");
-    }
-  } catch (err) {
-    console.error("❌ FTP Upload Failed:", err.message);
-    if (err.stderr) console.error(err.stderr);
-    throw err;
-  }
+  console.log("[CURL LOG]\n", stderr);
 };
 
 /**
