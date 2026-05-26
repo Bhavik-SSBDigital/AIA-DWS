@@ -3498,6 +3498,7 @@ export const get_po_inspection_data = async (req, res) => {
       select: {
         id: true,
         name: true,
+        tags: true, // ADD tags so we can get processTag
         poNumbers: true,
         documents: { select: { document: { select: { name: true } } } },
       },
@@ -3515,7 +3516,7 @@ export const get_po_inspection_data = async (req, res) => {
     const allPoNumbers = Array.from(allPoNumbersSet);
 
     // 1. BULK MONGO CHECK
-    let mongoSyncStatus = {};
+    let syncedMap = {};
     try {
       const p2pResponse = await axios.post(
         `${P2P_SERVER}/check-po-sync-status`,
@@ -3525,12 +3526,10 @@ export const get_po_inspection_data = async (req, res) => {
           httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         },
       );
-      if (p2pResponse.data && p2pResponse.data.data) {
-        mongoSyncStatus = p2pResponse.data.data;
-        console.log(
-          "Mongo Sync Status Response:",
-          JSON.stringify(mongoSyncStatus, null, 2),
-        );
+
+      if (p2pResponse.data?.data?.syncedMap) {
+        syncedMap = p2pResponse.data.data.syncedMap;
+        console.log("Mongo syncedMap:", JSON.stringify(syncedMap, null, 2));
       }
     } catch (err) {
       console.log("Mongo check-po-sync-status FAILED ❌");
@@ -3580,6 +3579,7 @@ export const get_po_inspection_data = async (req, res) => {
     // 3. MAP DATA TOGETHER
     const inspectionData = processes.map((proc) => {
       const uniquePos = Array.from(new Set(proc.poNumbers));
+      const processTag = proc.tags?.[0] || "";
       const missingFtpDocs = [];
       let ftpFullySynced = true;
 
@@ -3593,13 +3593,14 @@ export const get_po_inspection_data = async (req, res) => {
         });
       });
 
-      // Check by processId — log what we get to confirm the key shape
-      const rawMongoValue = mongoSyncStatus[proc.id];
-      console.log(
-        `Process ${proc.id} (${proc.name}) → mongoSyncStatus value:`,
-        rawMongoValue,
-      );
-      const mongoFullySynced = rawMongoValue === true;
+      // Key is "poNumber-processTag" matching what P2P server builds
+      // All POs of this process must be synced for mongoFullySynced = true
+      const mongoFullySynced = uniquePos.every((po) => {
+        const key = processTag ? `${po}-${processTag}` : po;
+        const val = syncedMap[key];
+        console.log(`Checking mongo key: "${key}" →`, val);
+        return val?.synced === true;
+      });
 
       return {
         id: proc.id,
