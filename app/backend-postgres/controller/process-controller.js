@@ -3498,7 +3498,6 @@ export const get_po_inspection_data = async (req, res) => {
       select: {
         id: true,
         name: true,
-        tags: true, // ADD tags so we can get processTag
         poNumbers: true,
         documents: { select: { document: { select: { name: true } } } },
       },
@@ -3579,7 +3578,6 @@ export const get_po_inspection_data = async (req, res) => {
     // 3. MAP DATA TOGETHER
     const inspectionData = processes.map((proc) => {
       const uniquePos = Array.from(new Set(proc.poNumbers));
-      const processTag = proc.tags?.[0] || "";
       const missingFtpDocs = [];
       let ftpFullySynced = true;
 
@@ -3593,12 +3591,10 @@ export const get_po_inspection_data = async (req, res) => {
         });
       });
 
-      // Key is "poNumber-processTag" matching what P2P server builds
-      // All POs of this process must be synced for mongoFullySynced = true
+      // Plain poNumber key — no processTag, matches P2P response key format
       const mongoFullySynced = uniquePos.every((po) => {
-        const key = processTag ? `${po}-${processTag}` : po;
-        const val = syncedMap[key];
-        console.log(`Checking mongo key: "${key}" →`, val);
+        const val = syncedMap[po];
+        console.log(`Checking mongo key: "${po}" →`, val);
         return val?.synced === true;
       });
 
