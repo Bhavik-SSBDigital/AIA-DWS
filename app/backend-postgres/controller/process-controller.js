@@ -2904,7 +2904,6 @@ export const attach_po_numbers = async (req, res) => {
 
     console.log("==== REQUEST START ====");
 
-    // Fetch the process to get the tag
     const processInstance = await prisma.processInstance.findUnique({
       where: { id: processId },
       select: {
@@ -2919,7 +2918,6 @@ export const attach_po_numbers = async (req, res) => {
         .json({ success: false, message: "Process not found" });
     }
 
-    // Get the first tag (or empty string if no tags)
     const processTag = processInstance.tags?.[0] || "";
 
     const updatedProcess = await prisma.processInstance.update({
@@ -2940,12 +2938,11 @@ export const attach_po_numbers = async (req, res) => {
 
     const allUniquePoNumbers = Array.from(new Set(updatedProcess.poNumbers));
 
-    // MONGO SYNC - Include processTag and status
     const syncPayload = {
       processId: updatedProcess.id,
       processName: updatedProcess.name,
-      processTag: processTag, // NEW: Add process tag
-      status: "SYNCED", // NEW: Add status field
+      processTag: processTag,
+      status: "SYNCED",
       poNumbers: allUniquePoNumbers,
       documents: updatedProcess.documents.map((pd) => ({
         name: pd.document.name,
@@ -2960,13 +2957,61 @@ export const attach_po_numbers = async (req, res) => {
 
     try {
       console.log("---- MONGO SYNC ----");
-      await axios.post(`${P2P_SERVER}/sync-po-details`, syncPayload, {
-        timeout: 15000,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-      });
+      console.log("Mongo Sync URL:", `${P2P_SERVER}/sync-po-details`);
+      console.log("Mongo Sync Payload:", JSON.stringify(syncPayload, null, 2));
+
+      const mongoResponse = await axios.post(
+        `${P2P_SERVER}/sync-po-details`,
+        syncPayload,
+        {
+          timeout: 15000,
+          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        },
+      );
+
       console.log("Mongo Sync SUCCESS ✅");
+      console.log("Mongo Response Status:", mongoResponse.status);
+      console.log(
+        "Mongo Response Data:",
+        JSON.stringify(mongoResponse.data, null, 2),
+      );
     } catch (err) {
-      console.log("Mongo Sync FAILED ❌:", err.message);
+      console.log("Mongo Sync FAILED ❌");
+      console.log("  → Error Message :", err.message);
+      console.log("  → Error Code    :", err.code);
+      console.log("  → Error Type    :", err.name);
+
+      if (err.response) {
+        // Server responded with a non-2xx status
+        console.log(
+          "  → Response Status  :",
+          err.response.status,
+          err.response.statusText,
+        );
+        console.log(
+          "  → Response Data    :",
+          JSON.stringify(err.response.data, null, 2),
+        );
+        console.log(
+          "  → Response Headers :",
+          JSON.stringify(err.response.headers, null, 2),
+        );
+      } else if (err.request) {
+        // Request was made but no response received
+        console.log(
+          "  → No response received from server (timeout or network issue)",
+        );
+        console.log("  → Request URL  :", err.config?.url);
+        console.log("  → Request Method:", err.config?.method?.toUpperCase());
+        console.log(
+          "  → Request Payload Sent:",
+          JSON.stringify(err.config?.data, null, 2),
+        );
+      } else {
+        // Error in setting up the request
+        console.log("  → Error occurred before request was sent");
+        console.log("  → Stack:", err.stack);
+      }
     }
 
     // FTP UPLOAD
@@ -3084,12 +3129,11 @@ export const sync_missing_po_data = async (req, res) => {
     const allUniquePoNumbers = Array.from(new Set(processInstance.poNumbers));
     const processTag = processInstance.tags?.[0] || "";
 
-    // MONGO SYNC - Include processTag and status
     const syncPayload = {
       processId: processInstance.id,
       processName: processInstance.name,
-      processTag: processTag, // NEW
-      status: "SYNCED", // NEW
+      processTag: processTag,
+      status: "SYNCED",
       poNumbers: allUniquePoNumbers,
       documents: processInstance.documents.map((pd) => ({
         name: pd.document.name,
@@ -3104,13 +3148,60 @@ export const sync_missing_po_data = async (req, res) => {
 
     let mongoSuccess = false;
     try {
-      await axios.post(`${P2P_SERVER}/sync-po-details`, syncPayload, {
-        timeout: 15000,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-      });
+      console.log("---- MONGO SYNC [sync_missing_po_data] ----");
+      console.log("Mongo Sync URL:", `${P2P_SERVER}/sync-po-details`);
+      console.log("Mongo Sync Payload:", JSON.stringify(syncPayload, null, 2));
+
+      const mongoResponse = await axios.post(
+        `${P2P_SERVER}/sync-po-details`,
+        syncPayload,
+        {
+          timeout: 15000,
+          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        },
+      );
+
       mongoSuccess = true;
+      console.log("Mongo Sync SUCCESS ✅");
+      console.log("Mongo Response Status:", mongoResponse.status);
+      console.log(
+        "Mongo Response Data:",
+        JSON.stringify(mongoResponse.data, null, 2),
+      );
     } catch (err) {
-      console.log("Mongo Sync FAILED:", err.message);
+      console.log("Mongo Sync FAILED ❌");
+      console.log("  → Error Message :", err.message);
+      console.log("  → Error Code    :", err.code);
+      console.log("  → Error Type    :", err.name);
+
+      if (err.response) {
+        console.log(
+          "  → Response Status  :",
+          err.response.status,
+          err.response.statusText,
+        );
+        console.log(
+          "  → Response Data    :",
+          JSON.stringify(err.response.data, null, 2),
+        );
+        console.log(
+          "  → Response Headers :",
+          JSON.stringify(err.response.headers, null, 2),
+        );
+      } else if (err.request) {
+        console.log(
+          "  → No response received from server (timeout or network issue)",
+        );
+        console.log("  → Request URL   :", err.config?.url);
+        console.log("  → Request Method:", err.config?.method?.toUpperCase());
+        console.log(
+          "  → Request Payload Sent:",
+          JSON.stringify(err.config?.data, null, 2),
+        );
+      } else {
+        console.log("  → Error occurred before request was sent");
+        console.log("  → Stack:", err.stack);
+      }
     }
 
     // FTP UPLOAD
@@ -3218,7 +3309,7 @@ export const mass_sync_po_data = async (req, res) => {
     let mongoSuccessCount = 0;
     let ftpSuccessCount = 0;
 
-    // MONGO MASS SYNC - Include processTag for each process
+    // MONGO MASS SYNC
     for (const proc of processes) {
       if (!proc.poNumbers || proc.poNumbers.length === 0) continue;
       const allUniquePoNumbers = Array.from(new Set(proc.poNumbers));
@@ -3227,8 +3318,8 @@ export const mass_sync_po_data = async (req, res) => {
       const syncPayload = {
         processId: proc.id,
         processName: proc.name,
-        processTag: processTag, // NEW
-        status: "SYNCED", // NEW
+        processTag: processTag,
+        status: "SYNCED",
         poNumbers: allUniquePoNumbers,
         documents: proc.documents.map((pd) => ({
           name: pd.document.name,
@@ -3241,15 +3332,66 @@ export const mass_sync_po_data = async (req, res) => {
         })),
       };
 
-      console.log("P2P", `${P2P_SERVER}/sync-po-details`);
+      console.log(
+        `---- MONGO SYNC [mass_sync_po_data] → processId: ${proc.id} ----`,
+      );
+      console.log("Mongo Sync URL:", `${P2P_SERVER}/sync-po-details`);
+      console.log("Mongo Sync Payload:", JSON.stringify(syncPayload, null, 2));
+
       try {
-        await axios.post(`${P2P_SERVER}/sync-po-details`, syncPayload, {
-          timeout: 15000,
-          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-        });
+        const mongoResponse = await axios.post(
+          `${P2P_SERVER}/sync-po-details`,
+          syncPayload,
+          {
+            timeout: 15000,
+            httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+          },
+        );
+
         mongoSuccessCount++;
+        console.log(`Mongo Sync SUCCESS ✅ → processId: ${proc.id}`);
+        console.log("  → Response Status:", mongoResponse.status);
+        console.log(
+          "  → Response Data  :",
+          JSON.stringify(mongoResponse.data, null, 2),
+        );
       } catch (err) {
-        console.log("error syncing data to P2P", err.message);
+        console.log(`Mongo Sync FAILED ❌ → processId: ${proc.id}`);
+        console.log("  → Error Message :", err.message);
+        console.log("  → Error Code    :", err.code);
+        console.log("  → Error Type    :", err.name);
+
+        if (err.response) {
+          console.log(
+            "  → Response Status  :",
+            err.response.status,
+            err.response.statusText,
+          );
+          console.log(
+            "  → Response Data    :",
+            JSON.stringify(err.response.data, null, 2),
+          );
+          console.log(
+            "  → Response Headers :",
+            JSON.stringify(err.response.headers, null, 2),
+          );
+        } else if (err.request) {
+          console.log(
+            "  → No response received from server (timeout or network issue)",
+          );
+          console.log("  → Request URL   :", err.config?.url);
+          console.log(
+            "  → Request Method :",
+            err.config?.method?.toUpperCase(),
+          );
+          console.log(
+            "  → Request Payload Sent:",
+            JSON.stringify(err.config?.data, null, 2),
+          );
+        } else {
+          console.log("  → Error occurred before request was sent");
+          console.log("  → Stack:", err.stack);
+        }
       }
     }
 
