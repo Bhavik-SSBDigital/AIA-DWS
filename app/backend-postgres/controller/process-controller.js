@@ -2904,6 +2904,24 @@ export const attach_po_numbers = async (req, res) => {
 
     console.log("==== REQUEST START ====");
 
+    // Fetch the process to get the tag
+    const processInstance = await prisma.processInstance.findUnique({
+      where: { id: processId },
+      select: {
+        tags: true,
+        name: true,
+      },
+    });
+
+    if (!processInstance) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Process not found" });
+    }
+
+    // Get the first tag (or empty string if no tags)
+    const processTag = processInstance.tags?.[0] || "";
+
     const updatedProcess = await prisma.processInstance.update({
       where: { id: processId },
       data: {
@@ -2922,10 +2940,12 @@ export const attach_po_numbers = async (req, res) => {
 
     const allUniquePoNumbers = Array.from(new Set(updatedProcess.poNumbers));
 
-    // MONGO SYNC
+    // MONGO SYNC - Include processTag and status
     const syncPayload = {
       processId: updatedProcess.id,
       processName: updatedProcess.name,
+      processTag: processTag, // NEW: Add process tag
+      status: "SYNCED", // NEW: Add status field
       poNumbers: allUniquePoNumbers,
       documents: updatedProcess.documents.map((pd) => ({
         name: pd.document.name,
@@ -2975,7 +2995,6 @@ export const attach_po_numbers = async (req, res) => {
       await ftpMkdir(client, remotePath);
 
       const existingFilesList = await ftpList(client, remotePath);
-      // Map: filename -> size
       const existingFtpFiles = new Map(
         existingFilesList.map((f) => [f.name, f.size]),
       );
@@ -2992,7 +3011,6 @@ export const attach_po_numbers = async (req, res) => {
 
           const existingSize = existingFtpFiles.get(remoteFileNameOnly);
 
-          // Skip only if file exists AND has size > 0
           if (existingSize !== undefined && existingSize > 0) {
             console.log(
               `Skipping (Already on FTP, size=${existingSize}): ${remoteFileNameOnly}`,
@@ -3064,11 +3082,14 @@ export const sync_missing_po_data = async (req, res) => {
     }
 
     const allUniquePoNumbers = Array.from(new Set(processInstance.poNumbers));
+    const processTag = processInstance.tags?.[0] || "";
 
-    // MONGO SYNC
+    // MONGO SYNC - Include processTag and status
     const syncPayload = {
       processId: processInstance.id,
       processName: processInstance.name,
+      processTag: processTag, // NEW
+      status: "SYNCED", // NEW
       poNumbers: allUniquePoNumbers,
       documents: processInstance.documents.map((pd) => ({
         name: pd.document.name,
@@ -3197,14 +3218,17 @@ export const mass_sync_po_data = async (req, res) => {
     let mongoSuccessCount = 0;
     let ftpSuccessCount = 0;
 
-    // MONGO MASS SYNC
+    // MONGO MASS SYNC - Include processTag for each process
     for (const proc of processes) {
       if (!proc.poNumbers || proc.poNumbers.length === 0) continue;
       const allUniquePoNumbers = Array.from(new Set(proc.poNumbers));
+      const processTag = proc.tags?.[0] || "";
 
       const syncPayload = {
         processId: proc.id,
         processName: proc.name,
+        processTag: processTag, // NEW
+        status: "SYNCED", // NEW
         poNumbers: allUniquePoNumbers,
         documents: proc.documents.map((pd) => ({
           name: pd.document.name,
@@ -3250,7 +3274,6 @@ export const mass_sync_po_data = async (req, res) => {
       await ftpMkdir(client, remotePath);
 
       const existingFilesList = await ftpList(client, remotePath);
-      // Map: filename -> size (so we can detect 0-byte files)
       const existingFtpFiles = new Map(
         existingFilesList.map((f) => [f.name, f.size]),
       );
@@ -3274,7 +3297,6 @@ export const mass_sync_po_data = async (req, res) => {
 
             const existingSize = existingFtpFiles.get(remoteFileNameOnly);
 
-            // Skip only if file exists with size > 0
             if (existingSize !== undefined && existingSize > 0) {
               console.log(
                 `Skipping (size=${existingSize}): ${remoteFileNameOnly}`,
@@ -3293,7 +3315,7 @@ export const mass_sync_po_data = async (req, res) => {
             try {
               await fs.access(localFilePath);
               await ftpUploadFile(client, localFilePath, remoteFileName);
-              existingFtpFiles.set(remoteFileNameOnly, 1); // mark as uploaded
+              existingFtpFiles.set(remoteFileNameOnly, 1);
               console.log(`Upload SUCCESS: ${remoteFileNameOnly}`);
             } catch (err) {
               console.log(
