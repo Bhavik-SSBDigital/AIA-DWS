@@ -3525,9 +3525,28 @@ export const get_po_inspection_data = async (req, res) => {
           httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         },
       );
-      if (p2pResponse.data && p2pResponse.data.data)
+      if (p2pResponse.data && p2pResponse.data.data) {
         mongoSyncStatus = p2pResponse.data.data;
-    } catch (err) {}
+        console.log(
+          "Mongo Sync Status Response:",
+          JSON.stringify(mongoSyncStatus, null, 2),
+        );
+      }
+    } catch (err) {
+      console.log("Mongo check-po-sync-status FAILED ❌");
+      console.log("  → Error Message :", err.message);
+      console.log("  → Error Code    :", err.code);
+      if (err.response) {
+        console.log("  → Response Status:", err.response.status);
+        console.log(
+          "  → Response Data  :",
+          JSON.stringify(err.response.data, null, 2),
+        );
+      } else if (err.request) {
+        console.log("  → No response received (timeout or network issue)");
+        console.log("  → Request URL:", err.config?.url);
+      }
+    }
 
     // 2. BULK FTP CHECK — Active Mode
     let ftpFiles = new Set();
@@ -3574,9 +3593,13 @@ export const get_po_inspection_data = async (req, res) => {
         });
       });
 
-      const mongoFullySynced = uniquePos.every(
-        (po) => mongoSyncStatus[po] === true,
+      // Check by processId — log what we get to confirm the key shape
+      const rawMongoValue = mongoSyncStatus[proc.id];
+      console.log(
+        `Process ${proc.id} (${proc.name}) → mongoSyncStatus value:`,
+        rawMongoValue,
       );
+      const mongoFullySynced = rawMongoValue === true;
 
       return {
         id: proc.id,
