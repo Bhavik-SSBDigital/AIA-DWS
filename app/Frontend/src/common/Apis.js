@@ -420,7 +420,6 @@ export const CreateFolder = async (path, isProject) => {
 };
 
 // Convert file to PDF
-// Convert file to PDF
 export const ConvertFileToPdf = async (formData) => {
   return apiClient.post('/convert-to-pdf', formData, {
     headers: {
@@ -609,6 +608,14 @@ export const getWorkflowAnalysisDetails = async (id, startDate, endDate) => {
     `/workflowAnalysis/${id}?startDate=${startDate}&endDate=${endDate}`,
   );
 };
+export const getPersonalizedDashboard = async (startDate, endDate) => {
+  return apiClient.get('/personalized', { 
+    params: { startDate, endDate } 
+  });
+};
+export const getQuickStats = async () => {
+  return apiClient.get('/quick-stats');
+};
 
 // timeline
 export const getTimelineData = async (id) => {
@@ -616,9 +623,7 @@ export const getTimelineData = async (id) => {
 };
 
 // notifications
-// In your Apis.js file
 export const GetNotifications = async (payload = {}) => {
-  // Changed to .post() to match router.post("/getUserProcesses")
   return apiClient.post(`/getUserProcesses`, payload);
 };
 
@@ -655,7 +660,6 @@ export const createTemplateDocument = async (payload) => {
 };
 
 export const DeleteTemplate = async (id) => {
-  // The ID must be part of the URL route you set up earlier
   return await apiClient.delete(`/templates/${id}`);
 };
 
@@ -701,15 +705,12 @@ export const getPhysicalRequestMessages = async (id) => {
   return apiClient.get(`/getPhysicalRequestMessages/${id}`);
 };
 
-// Add this to your common/Apis.js file
-
 export const DownloadTemplate = async (templateId, fileName) => {
   try {
     const response = await apiClient.get(`/download-template/${templateId}`, {
-      responseType: 'blob', // Important: Treat the response as a file buffer
+      responseType: 'blob',
     });
 
-    // Create a temporary link to force the browser to download the blob
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement('a');
     link.href = url;

@@ -188,6 +188,16 @@ import {
   delete_tag_email,
   delete_template_document,
 } from "../controller/tag-controller.js";
+import {
+  getCompletedTasksDrillDown,
+  getInitiatedProcessesDrillDown,
+  getOpenQueriesDrillDown,
+  getPendingTasksDrillDown,
+  // getMyProcesses,
+  getPersonalizedDashboard,
+  // getQuickStats,
+  getSignedDocumentsDrillDown,
+} from "../controller/personalised-controller.js";
 
 const router = express.Router();
 
@@ -223,22 +233,22 @@ router.use((req, res, next) => {
   next();
 });
 
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: {
-    message:
-      "Too many login attempts from this IP, please try again after 15 minutes",
-  },
-});
+// const loginLimiter = rateLimit({
+//   windowMs: 15 * 60 * 1000,
+//   max: 10,
+//   message: {
+//     message:
+//       "Too many login attempts from this IP, please try again after 15 minutes",
+//   },
+// });
 
 // ==========================================
 // 🔓 PUBLIC ROUTES (No Token Required)
 // ==========================================
-router.post("/login", loginLimiter, login);
+router.post("/login", login);
 router.get("/auto-login", autoLogin);
 router.post("/validate-auto-login", validateAutoLogin);
-router.post("/forgetPassword", loginLimiter, forget_password);
+router.post("/forgetPassword", forget_password);
 router.post("/changePassword", change_password);
 router.get("/files/:filePath(*)", file_though_url);
 
@@ -459,6 +469,15 @@ router.post("/recommendations/signDocument", signAsRecommender);
 router.post("/recommendations/respond", submitRecommendationResponse);
 router.get("/recommendations/getRecommendations", get_recommendations);
 router.get("/recommendations/:recommendationId", get_recommendation);
+
+router.get("/personalized", getPersonalizedDashboard);
+router.get("/dashboard/completed-tasks", getCompletedTasksDrillDown);
+// router.get("/quick-stats", getQuickStats);
+router.get("/dashboard/pending-tasks", getPendingTasksDrillDown);
+router.get("/dashboard/initiated-processes", getInitiatedProcessesDrillDown);
+router.get("/dashboard/signed-documents", getSignedDocumentsDrillDown);
+router.get("/dashboard/open-queries", getOpenQueriesDrillDown);
+// router.get("/my-processes", getMyProcesses);
 
 router.post("/createPhysicalRequest", create_physical_request);
 router.get("/getPhysicalRequests", get_physical_requests);

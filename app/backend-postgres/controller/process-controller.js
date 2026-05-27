@@ -2386,9 +2386,11 @@ export const view_process = async (req, res) => {
           },
           pickedBy: { select: { id: true, username: true } },
           processQA: {
-            where: {
-              OR: [{ initiatorId: userData.id }, { entityId: userData.id }],
-            },
+            // === REMOVE THIS WHERE BLOCK ===
+            // where: {
+            //   OR: [{ initiatorId: userData.id }, { entityId: userData.id }],
+            // },
+            // ===============================
             include: {
               initiator: { select: { id: true, name: true } },
               process: { select: { id: true, name: true } },
@@ -5259,7 +5261,7 @@ export const createQuery = async (req, res) => {
       }
 
       // ==========================================
-      // 4. ROUTING LOGIC (Fixed Block)
+      // 4. ROUTING LOGIC (Fixed Block for Smooth Recirculation)
       // ==========================================
 
       if (isDelegatedTask) {
@@ -5277,7 +5279,8 @@ export const createQuery = async (req, res) => {
         });
 
         if (documentChanges.length > 0) {
-          // If documents changed, fallback to Step 2 loop (from your original logic)
+          // *** SMOOTH RECIRCULATION FIX ***
+          // Documents changed -> Restart from Step 2
           const secondStep = await tx.workflowStep.findFirst({
             where: {
               workflowId: stepInstance.process.workflowId,
@@ -5292,62 +5295,60 @@ export const createQuery = async (req, res) => {
               data: { currentStepId: secondStep.id },
             });
 
-            const engagedStepInstances = await tx.processStepInstance.findMany({
+            // Close out any old paused/active instances so they don't block new assignments.
+            await tx.processStepInstance.updateMany({
               where: {
                 processId,
-                stepId: secondStep.id,
-                OR: [
-                  { pickedById: { not: null } },
-                  { claimedAt: { not: null } },
-                  {
-                    status: {
-                      in: ["APPROVED", "IN_PROGRESS", "FOR_RECIRCULATION"],
-                    },
-                  },
-                ],
+                id: { not: stepInstanceId }, // Leave the solver's task as APPROVED
+                status: { in: ["FOR_RECIRCULATION", "IN_PROGRESS", "PENDING"] },
+              },
+              data: {
+                status: "SKIPPED",
+                recirculationReason:
+                  "Closed due to process restart (documents superseded)",
               },
             });
 
-            for (const instance of engagedStepInstances) {
-              await tx.processStepInstance.update({
-                where: { id: instance.id },
-                data: {
-                  status: "IN_PROGRESS",
-                  isRecirculated: true,
-                  recirculationReason:
-                    "Process reopened with superseded documents",
-                  claimedAt: null,
-                  pickedById: null,
-                  recirculationCycle: { increment: 1 },
-                },
-              });
-              await tx.processNotification.create({
-                data: {
-                  stepId: instance.id,
-                  userId: instance.assignedTo,
-                  type: "STEP_ASSIGNMENT",
-                  status: "ACTIVE",
-                  metadata: { processId, reason: "Process reopened" },
-                },
+            // Reset AssignmentProgress for all steps AFTER step 1 so they re-trigger properly
+            const allStepsExceptFirst = await tx.workflowStep.findMany({
+              where: {
+                workflowId: stepInstance.process.workflowId,
+                stepNumber: { gt: 1 },
+              },
+              select: { id: true },
+            });
+            const stepIds = allStepsExceptFirst.map((s) => s.id);
+
+            const assignmentsToReset = await tx.workflowAssignment.findMany({
+              where: { stepId: { in: stepIds } },
+              select: { id: true },
+            });
+            const assignmentIds = assignmentsToReset.map((a) => a.id);
+
+            if (assignmentIds.length > 0) {
+              await tx.assignmentProgress.updateMany({
+                where: { processId, assignmentId: { in: assignmentIds } },
+                data: { completed: false, completedAt: null },
               });
             }
 
-            if (engagedStepInstances.length === 0) {
-              const documentIds = documentChanges.map((doc) =>
-                parseInt(doc.replacesDocumentId),
+            // Spawn fresh instances for Step 2
+            const allProcessDocs = await tx.processDocument.findMany({
+              where: { processId },
+            });
+            const docIdsToPass = allProcessDocs.map((d) => d.documentId);
+
+            for (const assignment of secondStep.assignments) {
+              await processAssignment(
+                tx,
+                stepInstance.process,
+                secondStep,
+                assignment,
+                docIdsToPass,
+                true, // isRecirculated
+                false,
+                stepInstance.process.workflowId,
               );
-              for (const assignment of secondStep.assignments) {
-                await processAssignment(
-                  tx,
-                  process,
-                  secondStep,
-                  assignment,
-                  documentIds,
-                  true,
-                  false,
-                  process.workflowId,
-                );
-              }
             }
           }
         } else {
@@ -5358,14 +5359,13 @@ export const createQuery = async (req, res) => {
           });
 
           if (raiserInstance) {
+            // Close the old instance (to keep history intact)
             await tx.processStepInstance.update({
               where: { id: queryRaiserStepInstanceId },
               data: {
-                status: "IN_PROGRESS",
-                isRecirculated: true,
-                recirculationReason: "Query resolved",
-                claimedAt: null,
-                pickedById: null,
+                status: "SKIPPED",
+                recirculationReason:
+                  "Query resolved, superseded by new instance",
               },
             });
 
@@ -5374,9 +5374,27 @@ export const createQuery = async (req, res) => {
               data: { currentStepId: raiserInstance.stepId },
             });
 
+            // Create a brand NEW instance for the raiser
+            const newInstance = await tx.processStepInstance.create({
+              data: {
+                processId,
+                stepId: raiserInstance.stepId,
+                assignmentId: raiserInstance.assignmentId,
+                progressId: raiserInstance.progressId,
+                assignedTo: raiserInstance.assignedTo,
+                roleId: raiserInstance.roleId,
+                departmentId: raiserInstance.departmentId,
+                status: "IN_PROGRESS",
+                isRecirculated: true,
+                recirculationReason: "Query resolved",
+                createdAt: new Date(),
+                deadline: new Date(Date.now() + 48 * 60 * 60 * 1000),
+              },
+            });
+
             await tx.processNotification.create({
               data: {
-                stepId: queryRaiserStepInstanceId,
+                stepId: newInstance.id,
                 userId: raiserInstance.assignedTo,
                 type: "DOCUMENT_QUERY",
                 status: "ACTIVE",
@@ -5430,7 +5448,7 @@ export const createQuery = async (req, res) => {
       return { processQA, documentHistoryEntries };
     });
 
-    // --- EMAIL NOTIFICATIONS (Unchanged) ---
+    // --- EMAIL NOTIFICATIONS ---
     try {
       const processQA = await prisma.processQA.findUnique({
         where: { id: result.processQA.id },
