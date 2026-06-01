@@ -4609,11 +4609,7 @@ export const complete_process_step = async (req, res) => {
           workflowAssignment: {
             include: {
               step: {
-                select: {
-                  id: true,
-                  workflowId: true,
-                  stepNumber: true,
-                },
+                select: { id: true, workflowId: true, stepNumber: true },
               },
             },
           },
@@ -4629,182 +4625,101 @@ export const complete_process_step = async (req, res) => {
         throw new Error("Process not found for this step instance");
       }
 
-      if (stepInstance.status === "FOR_RECIRCULATION") {
-        throw new Error("Cannot complete step until recirculation is resolved");
-      }
-
       const workflowId = stepInstance.process.workflowId;
 
-      // Handle recirculated steps differently
-      if (stepInstance.isRecirculated) {
-        await tx.processStepInstance.update({
-          where: { id: stepInstanceId },
-          data: {
-            status: "APPROVED",
-            decisionAt: new Date(),
-            pickedById: userData.id,
-            claimedAt: new Date(),
+      await tx.processStepInstance.update({
+        where: { id: stepInstanceId },
+        data: {
+          status: "APPROVED",
+          decisionAt: new Date(),
+          pickedById: userData.id,
+          claimedAt: new Date(),
+        },
+      });
+
+      // ==========================================
+      // Determine Assignment Completion
+      // ==========================================
+      if (stepInstance.workflowAssignment?.assigneeType === "DEPARTMENT") {
+        await updateDepartmentProgress(tx, stepInstance, workflowId);
+      } else if (stepInstance.workflowAssignment?.assigneeType === "ROLE") {
+        await tx.processStepInstance.deleteMany({
+          where: {
+            processId: stepInstance.processId,
+            stepId: stepInstance.stepId,
+            assignmentId: stepInstance.assignmentId,
+            id: { not: stepInstanceId },
+            status: "IN_PROGRESS",
           },
         });
 
-        // For recirculated steps, check if all instances for this assignment are completed
-        const pendingRecirculatedInstances =
-          await tx.processStepInstance.findMany({
-            where: {
-              progressId: stepInstance.assignmentProgress.id,
-              isRecirculated: true,
-              status: "IN_PROGRESS",
-            },
-          });
+        await tx.assignmentProgress.update({
+          where: { id: stepInstance.assignmentProgress.id },
+          data: { completed: true, completedAt: new Date() },
+        });
+      } else if (stepInstance.workflowAssignment?.assigneeType === "USER") {
+        // Count any step instance in this specific assignment block that isn't cleanly closed
+        const pendingCount = await tx.processStepInstance.count({
+          where: {
+            processId: stepInstance.processId,
+            assignmentId: stepInstance.assignmentId,
+            status: { notIn: ["APPROVED", "SKIPPED", "REJECTED"] },
+          },
+        });
 
-        if (pendingRecirculatedInstances.length === 0) {
+        if (pendingCount === 0) {
           await tx.assignmentProgress.update({
             where: { id: stepInstance.assignmentProgress.id },
             data: { completed: true, completedAt: new Date() },
           });
         }
+      }
 
-        // Check if all assignments for the current step are completed
-        const allAssignmentsCompleted = await checkAllAssignmentsCompleted(
+      const openQueries = await tx.processQA.findMany({
+        where: {
+          processId: stepInstance.processId,
+          answer: null,
+          status: "OPEN",
+        },
+      });
+
+      if (openQueries.length > 0) {
+        return {
+          message:
+            "Step completed, but process is waiting for query resolution",
+          openQueriesCount: openQueries.length,
+          recirculated: stepInstance.isRecirculated,
+        };
+      }
+
+      // ==========================================
+      // Check Step Progression
+      // ==========================================
+      const allAssignmentsCompleted = await checkAllAssignmentsCompleted(
+        tx,
+        stepInstance.processId,
+        stepInstance.stepId,
+      );
+
+      if (allAssignmentsCompleted) {
+        const advanceResult = await advanceToNextStep(
           tx,
           stepInstance.processId,
           stepInstance.stepId,
+          workflowId,
         );
 
-        if (allAssignmentsCompleted) {
-          const advanceResult = await advanceToNextStep(
-            tx,
-            stepInstance.processId,
-            stepInstance.stepId,
-            workflowId,
-          );
-
-          return {
-            message:
-              "Recirculated step completed successfully and process advanced",
-            advanceStatus: advanceResult.status,
-            recirculated: true,
-          };
-        }
-
         return {
-          message: "Recirculated step completed successfully",
-          recirculated: true,
-        };
-      } else {
-        // Original logic for non-recirculated steps
-        await tx.processStepInstance.update({
-          where: { id: stepInstanceId },
-          data: {
-            status: "APPROVED",
-            decisionAt: new Date(),
-            pickedById: userData.id,
-            claimedAt: new Date(),
-          },
-        });
-
-        if (stepInstance.workflowAssignment?.assigneeType === "DEPARTMENT") {
-          await updateDepartmentProgress(tx, stepInstance, workflowId);
-        }
-
-        if (stepInstance.workflowAssignment?.assigneeType === "ROLE") {
-          await tx.processStepInstance.deleteMany({
-            where: {
-              processId: stepInstance.processId,
-              stepId: stepInstance.stepId,
-              assignmentId: stepInstance.assignmentId,
-              id: { not: stepInstanceId },
-              status: "IN_PROGRESS",
-            },
-          });
-
-          await tx.assignmentProgress.update({
-            where: { id: stepInstance.assignmentProgress.id },
-            data: { completed: true, completedAt: new Date() },
-          });
-        }
-
-        const assignmentCompleted =
-          stepInstance.workflowAssignment?.assigneeType !== "USER"
-            ? await checkAssignmentCompletion(
-                tx,
-                stepInstance.assignmentProgress.id,
-                stepInstance.id,
-              )
-            : true;
-
-        const openQueries = await tx.processQA.findMany({
-          where: {
-            processId: stepInstance.processId,
-            answer: null,
-            status: "OPEN",
-          },
-        });
-
-        if (openQueries.length > 0) {
-          return {
-            message:
-              "Step completed, but process is waiting for query resolution",
-            openQueriesCount: openQueries.length,
-          };
-        }
-
-        if (assignmentCompleted) {
-          const allAssignmentsCompleted =
-            stepInstance.workflowAssignment?.assigneeType !== "USER"
-              ? await checkAllAssignmentsCompleted(
-                  tx,
-                  stepInstance.processId,
-                  stepInstance.stepId,
-                )
-              : true;
-
-          const currentStep = await tx.workflowStep.findUnique({
-            where: { id: stepInstance.stepId },
-            select: { id: true, stepNumber: true, workflowId: true },
-          });
-
-          if (!currentStep) {
-            throw new Error(
-              `Current step with ID ${stepInstance.stepId} not found`,
-            );
-          }
-
-          const nextStep = await tx.workflowStep.findFirst({
-            where: {
-              workflowId: currentStep.workflowId,
-              stepNumber: currentStep.stepNumber + 1,
-            },
-            orderBy: { stepNumber: "asc" },
-            include: { assignments: true },
-          });
-
-          if (allAssignmentsCompleted && nextStep) {
-            const advanceResult = await advanceToNextStep(
-              tx,
-              stepInstance.processId,
-              stepInstance.stepId,
-              workflowId,
-            );
-
-            return {
-              message: "Step completed successfully and process advanced",
-              advanceStatus: advanceResult.status,
-            };
-          } else {
-            await tx.processInstance.update({
-              where: {
-                id: stepInstance.processId,
-              },
-              data: { status: "COMPLETED" },
-            });
-          }
-        }
-
-        return {
-          message: "Step completed successfully",
+          message: "Step completed successfully and process advanced",
+          advanceStatus: advanceResult?.status || "ADVANCED",
+          recirculated: stepInstance.isRecirculated,
         };
       }
+
+      return {
+        message: "Step completed successfully",
+        recirculated: stepInstance.isRecirculated,
+      };
     });
 
     try {
@@ -4861,14 +4776,13 @@ export const complete_process_step = async (req, res) => {
           params: [
             stepInstance.process,
             stepInstance,
-            userData, // completedByUser (though not used in template)
+            userData,
             nextAssignee,
             processDescription,
             tags,
           ],
         });
 
-        // If process is completed, send processCompleted notification
         const processStatus = await prisma.processInstance.findUnique({
           where: { id: stepInstance.processId },
           select: { status: true, initiatorId: true },
@@ -4880,8 +4794,6 @@ export const complete_process_step = async (req, res) => {
             select: { id: true, email: true, username: true, name: true },
           });
           if (initiator) {
-            const tags = await getProcessTags(stepInstance.processId);
-            const processDescription = stepInstance.process.description;
             await sendProcessNotification("processCompleted", {
               params: [
                 stepInstance.process,
@@ -5037,7 +4949,6 @@ export const createQuery = async (req, res) => {
       answerText,
       documentChanges = [],
       documentSummaries = [],
-      queryRaiserStepInstanceId,
     } = req.body;
 
     if (!processId || !stepInstanceId || (!queryText && !answerText)) {
@@ -5060,14 +4971,10 @@ export const createQuery = async (req, res) => {
         throw new Error("Invalid step instance or user not assigned");
       }
 
-      let isDelegatedTask;
-      if (queryRaiserStepInstanceId) {
-        isDelegatedTask = await tx.processQA.findFirst({
-          where: { stepInstanceId: queryRaiserStepInstanceId, status: "OPEN" },
-        });
-      }
+      const isSolving = Boolean(answerText);
+      let processQA;
 
-      // Find step number 1 in the workflow
+      // Find step number 1 in the workflow (The Initiator Step)
       const firstStep = await tx.workflowStep.findFirst({
         where: { workflowId: stepInstance.process.workflowId, stepNumber: 1 },
         include: {
@@ -5108,9 +5015,29 @@ export const createQuery = async (req, res) => {
         },
       };
 
+      // ==========================================
       // 1. Create or Update ProcessQA Record
-      let processQA;
-      if (!isDelegatedTask) {
+      // ==========================================
+      if (isSolving) {
+        processQA = await tx.processQA.findFirst({
+          where: { processId: processId, status: "OPEN", answer: null },
+          orderBy: { createdAt: "desc" },
+        });
+
+        if (!processQA) {
+          throw new Error("No open query found to resolve.");
+        }
+
+        processQA = await tx.processQA.update({
+          where: { id: processQA.id },
+          data: {
+            answer: answerText,
+            answeredAt: new Date(),
+            status: "RESOLVED",
+            details: qaDetails,
+          },
+        });
+      } else {
         processQA = await tx.processQA.create({
           data: {
             processId,
@@ -5123,19 +5050,11 @@ export const createQuery = async (req, res) => {
             details: qaDetails,
           },
         });
-      } else {
-        processQA = await tx.processQA.update({
-          where: { id: isDelegatedTask.id },
-          data: {
-            answer: answerText,
-            answeredAt: new Date(),
-            status: "RESOLVED",
-            details: qaDetails,
-          },
-        });
       }
 
+      // ==========================================
       // 2. Handle Document Changes
+      // ==========================================
       const documentHistoryEntries = [];
       for (const change of documentChanges) {
         const {
@@ -5151,13 +5070,12 @@ export const createQuery = async (req, res) => {
         });
         if (!document) throw new Error(`Document ${documentId} not found`);
 
-        let replacedDocument = null;
         if (isReplacement) {
           if (!replacesDocumentId)
             throw new Error(
               `replacesDocumentId is required when isReplacement is true`,
             );
-          replacedDocument = await tx.document.findUnique({
+          const replacedDocument = await tx.document.findUnique({
             where: { id: parseInt(replacesDocumentId) },
           });
           if (!replacedDocument)
@@ -5165,13 +5083,8 @@ export const createQuery = async (req, res) => {
               `Replaced document ${replacesDocumentId} not found`,
             );
 
-          await tx.processDocument.delete({
-            where: {
-              documentId_processId: {
-                documentId: parseInt(replacesDocumentId),
-                processId,
-              },
-            },
+          await tx.processDocument.deleteMany({
+            where: { documentId: parseInt(replacesDocumentId), processId },
           });
         }
 
@@ -5220,7 +5133,9 @@ export const createQuery = async (req, res) => {
         });
       }
 
+      // ==========================================
       // 3. Handle Document Summaries
+      // ==========================================
       for (const summary of documentSummaries) {
         const { documentId, feedbackText } = summary;
         const document = await tx.document.findUnique({
@@ -5261,26 +5176,22 @@ export const createQuery = async (req, res) => {
       }
 
       // ==========================================
-      // 4. ROUTING LOGIC (Fixed Block for Smooth Recirculation)
+      // 4. ROUTING LOGIC
       // ==========================================
-
-      if (isDelegatedTask) {
+      if (isSolving) {
         // --- SCENARIO A: SOLVING A QUERY ---
-
-        // 1. Mark the solver's task as complete
         await tx.processStepInstance.update({
           where: { id: stepInstanceId },
           data: {
             status: "APPROVED",
             decisionAt: new Date(),
             isRecirculated: true,
-            recirculationReason: answerText || queryText,
+            recirculationReason: answerText || "Query solved",
           },
         });
 
         if (documentChanges.length > 0) {
-          // *** SMOOTH RECIRCULATION FIX ***
-          // Documents changed -> Restart from Step 2
+          // *** HARD RESTART: Docs changed, go to Step 2 ***
           const secondStep = await tx.workflowStep.findFirst({
             where: {
               workflowId: stepInstance.process.workflowId,
@@ -5295,21 +5206,21 @@ export const createQuery = async (req, res) => {
               data: { currentStepId: secondStep.id },
             });
 
-            // Close out any old paused/active instances so they don't block new assignments.
+            // Wipe ALL pending/paused steps so they don't block `checkUserProcessAssignment`
             await tx.processStepInstance.updateMany({
               where: {
                 processId,
-                id: { not: stepInstanceId }, // Leave the solver's task as APPROVED
-                status: { in: ["FOR_RECIRCULATION", "IN_PROGRESS", "PENDING"] },
+                id: { not: stepInstanceId },
+                status: { notIn: ["APPROVED", "SKIPPED", "REJECTED"] },
               },
               data: {
                 status: "SKIPPED",
                 recirculationReason:
-                  "Closed due to process restart (documents superseded)",
+                  "Process hard-restarted (documents superseded)",
               },
             });
 
-            // Reset AssignmentProgress for all steps AFTER step 1 so they re-trigger properly
+            // Reset AssignmentProgress for steps > 1
             const allStepsExceptFirst = await tx.workflowStep.findMany({
               where: {
                 workflowId: stepInstance.process.workflowId,
@@ -5330,9 +5241,20 @@ export const createQuery = async (req, res) => {
                 where: { processId, assignmentId: { in: assignmentIds } },
                 data: { completed: false, completedAt: null },
               });
+
+              await tx.departmentStepProgress.updateMany({
+                where: {
+                  processId,
+                  assignmentProgressId: { in: assignmentIds },
+                },
+                data: {
+                  isCompleted: false,
+                  currentLevel: 0,
+                  completedRoles: [],
+                },
+              });
             }
 
-            // Spawn fresh instances for Step 2
             const allProcessDocs = await tx.processDocument.findMany({
               where: { processId },
             });
@@ -5345,27 +5267,31 @@ export const createQuery = async (req, res) => {
                 secondStep,
                 assignment,
                 docIdsToPass,
-                true, // isRecirculated
+                true,
                 false,
                 stepInstance.process.workflowId,
               );
             }
+          } else {
+            await tx.processInstance.update({
+              where: { id: processId },
+              data: { status: "COMPLETED", currentStepId: null },
+            });
           }
         } else {
-          // *** THE FIX ***
-          // If NO documents changed, send it directly back to the original Query Raiser
+          // *** SOFT RESUME: Text only, return to raiser ***
+          const raiserInstanceId = processQA.stepInstanceId;
           const raiserInstance = await tx.processStepInstance.findUnique({
-            where: { id: queryRaiserStepInstanceId },
+            where: { id: raiserInstanceId },
           });
 
           if (raiserInstance) {
-            // Close the old instance (to keep history intact)
+            // Keep history but free up the assignment engine
             await tx.processStepInstance.update({
-              where: { id: queryRaiserStepInstanceId },
+              where: { id: raiserInstanceId },
               data: {
                 status: "SKIPPED",
-                recirculationReason:
-                  "Query resolved, superseded by new instance",
+                recirculationReason: "Query resolved, replaced by new instance",
               },
             });
 
@@ -5374,7 +5300,7 @@ export const createQuery = async (req, res) => {
               data: { currentStepId: raiserInstance.stepId },
             });
 
-            // Create a brand NEW instance for the raiser
+            // Spawn exact clone for the raiser
             const newInstance = await tx.processStepInstance.create({
               data: {
                 processId,
@@ -5406,17 +5332,17 @@ export const createQuery = async (req, res) => {
       } else {
         // --- SCENARIO B: RAISING A QUERY ---
 
-        // 1. Suspend the reviewer's current task
+        // Suspend the raiser's current task by marking it SKIPPED instead of FOR_RECIRCULATION
+        // This ensures checkUserProcessAssignment doesn't block them later.
         await tx.processStepInstance.update({
           where: { id: stepInstanceId },
           data: {
-            status: "FOR_RECIRCULATION",
-            recirculationReason: queryText,
+            status: "SKIPPED",
+            recirculationReason: "Raised a query: " + queryText,
             isRecirculated: true,
           },
         });
 
-        // 2. Create a brand new task for Step 1 (The Initiator/Solver)
         const newStepInstance = await tx.processStepInstance.create({
           data: {
             processId,
@@ -5448,7 +5374,6 @@ export const createQuery = async (req, res) => {
       return { processQA, documentHistoryEntries };
     });
 
-    // --- EMAIL NOTIFICATIONS ---
     try {
       const processQA = await prisma.processQA.findUnique({
         where: { id: result.processQA.id },
@@ -5477,7 +5402,7 @@ export const createQuery = async (req, res) => {
       });
 
       if (processQA) {
-        const isSolvingQuery = !!req.body.queryRaiserStepInstanceId;
+        const isSolvingQuery = Boolean(answerText);
         const tags = await getProcessTags(processId);
         const processDescription = processQA.stepInstance.process.description;
 
