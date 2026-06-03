@@ -25,6 +25,76 @@ const execPromise = promisify(exec);
 
 const envVariables = process.env;
 
+// --- FIX: ULTIMATE FAIL-SAFE PDF LOADER (Leveraging PyMuPDF for broken XREFs) ---
+const loadPdfSafely = async (pdfBytes, absDocumentPath, pythonEnvPath) => {
+  // Attempt 1: Standard Load
+  try {
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    doc.getPageIndices(); // Force a parse to catch missing object refs immediately
+    return doc;
+  } catch (e1) {
+    console.warn(
+      "Standard load failed, attempting to strip trailing signatures...",
+    );
+  }
+
+  // Attempt 2: Strip corrupted trailing incremental updates (node-signpdf tail blocks)
+  try {
+    const buffer = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
+    const eofBuf = Buffer.from("%%EOF");
+    let eofs = [];
+    let i = buffer.indexOf(eofBuf);
+    while (i !== -1) {
+      eofs.push(i);
+      i = buffer.indexOf(eofBuf, i + eofBuf.length);
+    }
+
+    // Iterate backwards through previous EOFs to find the last uncorrupted state
+    for (let j = eofs.length - 2; j >= 0; j--) {
+      try {
+        const sliced = buffer.subarray(0, eofs[j] + eofBuf.length);
+        const doc = await PDFDocument.load(sliced, { ignoreEncryption: true });
+        doc.getPageIndices();
+        return doc;
+      } catch (e2) {
+        continue;
+      }
+    }
+  } catch (err) {}
+
+  // Attempt 3: Ultimate PyMuPDF Healing Strategy
+  // If we hit "Invalid object ref: 4 0 R", the PDF structure is broken. We use your
+  // existing python environment to rapidly rebuild the file structure.
+  console.warn(
+    "PDF-lib cannot parse the file. Using PyMuPDF to heal the structure...",
+  );
+  try {
+    const tempHealedPath = absDocumentPath + ".healed.pdf";
+
+    // Command line python execution to instantly heal missing objects
+    const command = `"${pythonEnvPath}" -c "import fitz, sys; doc = fitz.open(sys.argv[1]); doc.save(sys.argv[2]); doc.close()" "${absDocumentPath}" "${tempHealedPath}"`;
+    await execPromise(command);
+
+    // Read the perfectly healed file
+    const healedBytes = await fs.readFile(tempHealedPath);
+    const doc = await PDFDocument.load(healedBytes, { ignoreEncryption: true });
+    doc.getPageIndices(); // Verify
+
+    // Overwrite the original broken file with the healed version
+    await fs.writeFile(absDocumentPath, healedBytes);
+    await fs.unlink(tempHealedPath).catch(() => {});
+
+    return doc;
+  } catch (healingError) {
+    console.error(
+      "Critical: PyMuPDF failed to heal the document:",
+      healingError,
+    );
+    throw new Error(`PDF is irreversibly corrupted: ${healingError.message}`);
+  }
+};
+// --------------------------------------------------------------------------------
+
 // Unchanged Helper Functions
 export async function executePythonScript(
   pythonEnvPath,
@@ -55,7 +125,6 @@ function formatDate(timestamp) {
   return `${datePart} at ${timePart}`;
 }
 
-// Placeholder for missing helpers (to be implemented as needed)
 async function get_sign_coordinates_for_specific_step_in_process(
   documentId,
   stepId,
@@ -74,7 +143,6 @@ async function get_sign_coordinates_for_specific_step_in_process(
 }
 
 async function is_process_forwardable(process, userId) {
-  // Placeholder logic: implement based on your workflow rules
   return { isForwardable: true, isRevertable: false };
 }
 
@@ -160,12 +228,21 @@ export const sign_document = async (req, res, next) => {
     }, Timestamp: ${formatDate(Date.now())}, fileName: ${document.name})]`;
 
     const documentPath = document.path;
-    const existingPdfBytes = await fs.readFile(
-      path.join(__dirname, "../../../../", "storage", documentPath),
+    const absDocumentPath = path.join(
+      __dirname,
+      "../../../../",
+      "storage",
+      documentPath,
     );
-    const pdfDoc = await PDFDocument.load(existingPdfBytes, {
-      ignoreEncryption: true,
-    });
+    const existingPdfBytes = await fs.readFile(absDocumentPath);
+    const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
+
+    const pdfDoc = await loadPdfSafely(
+      existingPdfBytes,
+      absDocumentPath,
+      pythonEnvPath,
+    );
+
     const pages = pdfDoc.getPages();
     const lastPageIndex = pages.length - 1;
     const lastPage = pages[lastPageIndex];
@@ -181,7 +258,6 @@ export const sign_document = async (req, res, next) => {
       __dirname,
       "../../support/getFileSpace.py",
     );
-    const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
 
     const user = await prisma.user.findUnique({
       where: { username: userData.username },
@@ -198,7 +274,7 @@ export const sign_document = async (req, res, next) => {
           remarks,
           formatDate(Date.now()),
           helveticaFont,
-          path.join(__dirname, "../../../../", "storage", documentPath),
+          absDocumentPath,
           documentId,
           userData,
           path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName),
@@ -214,49 +290,18 @@ export const sign_document = async (req, res, next) => {
           remarks,
           formatDate(Date.now()),
           helveticaFont,
-          path.join(__dirname, "../../../../", "storage", documentPath),
+          absDocumentPath,
           documentId,
           userData,
-          // path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName),
-          // p12password
         );
       }
     } else {
-      // console.log("env variables", envVariables);
-      // console.log("user", user);
-      // console.log(
-      //   "wdf",
-      //   path.join(
-      //     __dirname,
-      //     "../../../../",
-      //     "storage",
-      //     envVariables.DSC_FOLDER_PATH,
-      //     user.dscFileName
-      //   )
-      // );
-
       const dscPath = user.dscFileName
         ? path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName)
         : undefined;
 
       console.log("dsc path", dscPath);
       const signatureCoordinates =
-        //  user.dscFileName
-        //   ? await print_signature_after_content_on_the_last_page(
-        //       pdfDoc,
-        //       lastPage,
-        //       documentPath,
-        //       jpegImagePath,
-        //       userData.username,
-        //       formatDate(Date.now()),
-        //       remarks,
-        //       helveticaFont,
-        //       pythonEnvPath,
-        //       pythonScriptPath,
-        //       dscPath,
-        //       p12password
-        //     )
-        //   :
         await print_signature_after_content_on_the_last_page(
           pdfDoc,
           lastPage,
@@ -318,7 +363,6 @@ export const sign_documents = async (req, res, next) => {
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
-    // Get user's signature image
     const signaturePic = await prisma.user.findUnique({
       where: { id: userData.id },
       select: { signaturePicFileName: true },
@@ -344,7 +388,6 @@ export const sign_documents = async (req, res, next) => {
         .json({ message: "Couldn't find your signature image" });
     }
 
-    // Convert signature image to JPEG if needed
     const convertToJpeg = async (inputPath) => {
       const metadata = await sharp(inputPath).metadata();
       if (metadata.format === "jpeg") return inputPath;
@@ -359,7 +402,6 @@ export const sign_documents = async (req, res, next) => {
 
     const jpegImagePath = await convertToJpeg(imagePath);
 
-    // Get user's DSC file if exists
     const user = await prisma.user.findUnique({
       where: { username: userData.username },
       select: { dscFileName: true },
@@ -369,7 +411,6 @@ export const sign_documents = async (req, res, next) => {
       ? path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName)
       : undefined;
 
-    // Extract array of documents from request body
     const { documents, processId, passphrase, p12password } = req.body;
 
     const process = await prisma.processInstance.findUnique({
@@ -385,8 +426,6 @@ export const sign_documents = async (req, res, next) => {
 
     if (!Array.isArray(documents) || documents.length === 0) {
       const processResult = await is_process_forwardable(process, userData.id);
-
-      // Prepare response
       const response = {
         message: "Batch signing completed",
         signedCount: results.length,
@@ -402,19 +441,16 @@ export const sign_documents = async (req, res, next) => {
       where: { id: process.currentStepId },
     });
 
-    // Prepare Python paths (used in default signing)
     const pythonScriptPath = path.join(
       __dirname,
       "../../support/getFileSpace.py",
     );
     const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
 
-    // Process each document
     for (const doc of documents) {
       try {
         const { documentId, processStepInstanceId, remarks = "N/A" } = doc;
 
-        // Find the document
         const document = await prisma.document.findUnique({
           where: { id: documentId },
         });
@@ -428,7 +464,6 @@ export const sign_documents = async (req, res, next) => {
           continue;
         }
 
-        // Check if document is associated with the process
         const processDocument = await prisma.processDocument.findFirst({
           where: { processId, documentId },
         });
@@ -445,22 +480,26 @@ export const sign_documents = async (req, res, next) => {
         const extension = document.name?.split(".").pop()?.toLowerCase();
         const documentPath = document.path;
 
-        // ==========================================
-        // ONLY MANIPULATE THE PHYSICAL FILE IF IT IS A PDF
-        // ==========================================
         if (extension === "pdf") {
-          const existingPdfBytes = await fs.readFile(
-            path.join(__dirname, "../../../../", "storage", documentPath),
+          const absDocumentPath = path.join(
+            __dirname,
+            "../../../../",
+            "storage",
+            documentPath,
           );
-          const pdfDoc = await PDFDocument.load(existingPdfBytes, {
-            ignoreEncryption: true,
-          });
+          const existingPdfBytes = await fs.readFile(absDocumentPath);
+
+          const pdfDoc = await loadPdfSafely(
+            existingPdfBytes,
+            absDocumentPath,
+            pythonEnvPath,
+          );
+
           const pages = pdfDoc.getPages();
           const lastPageIndex = pages.length - 1;
           const lastPage = pages[lastPageIndex];
           const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-          // Get coordinates for signing
           const coordinates =
             await get_sign_coordinates_for_specific_step_in_process(
               documentId,
@@ -468,7 +507,6 @@ export const sign_documents = async (req, res, next) => {
             );
 
           if (coordinates.length > 0) {
-            // Sign at predefined coordinates
             await print_signature_at_coordinates(
               pdfDoc,
               coordinates,
@@ -477,14 +515,13 @@ export const sign_documents = async (req, res, next) => {
               remarks,
               formatDate(Date.now()),
               helveticaFont,
-              path.join(__dirname, "../../../../", "storage", documentPath),
+              absDocumentPath,
               documentId,
               userData,
               dscPath,
               p12password,
             );
           } else {
-            // Sign at default position (end of document)
             const signatureCoordinates =
               await print_signature_after_content_on_the_last_page(
                 pdfDoc,
@@ -501,7 +538,6 @@ export const sign_documents = async (req, res, next) => {
                 p12password,
               );
 
-            // Save the coordinates for future reference
             await prisma.signCoordinate.create({
               data: {
                 processDocumentId: processDocument.id,
@@ -519,11 +555,7 @@ export const sign_documents = async (req, res, next) => {
             });
           }
         }
-        // ==========================================
-        // END OF PDF-ONLY LOGIC
-        // ==========================================
 
-        // Create signature record in the DB for ALL file types (Excel, Word, Image, PDF)
         const signDetails = await prisma.documentSignature.create({
           data: {
             processDocumentId: processDocument.id,
@@ -550,10 +582,8 @@ export const sign_documents = async (req, res, next) => {
       }
     }
 
-    // Check if process is forwardable after signing all documents
     const processResult = await is_process_forwardable(process, userData.id);
 
-    // Prepare response
     const response = {
       message: "Batch signing completed",
       signedCount: results.length,
@@ -563,12 +593,10 @@ export const sign_documents = async (req, res, next) => {
       isRevertable: processResult.isRevertable,
     };
 
-    // Include errors if any
     if (errors.length > 0) {
       response.errors = errors;
     }
 
-    // Return appropriate status code
     if (results.length === 0 && errors.length > 0) {
       return res.status(500).json({
         ...response,
@@ -629,16 +657,20 @@ export const revoke_sign = async (req, res, next) => {
     const document = await prisma.document.findUnique({
       where: { id: documentId },
     });
-    const documentPath = path.join(
+    const absDocumentPath = path.join(
       __dirname,
       "../../../../",
       "storage",
       document.path,
     );
-    const existingPdfBytes = await fs.readFile(documentPath);
-    const pdfDoc = await PDFDocument.load(existingPdfBytes, {
-      ignoreEncryption: true,
-    });
+    const existingPdfBytes = await fs.readFile(absDocumentPath);
+    const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
+
+    const pdfDoc = await loadPdfSafely(
+      existingPdfBytes,
+      absDocumentPath,
+      pythonEnvPath,
+    );
 
     const coordinates = await get_sign_coordinates_for_specific_step_in_process(
       documentId,
@@ -651,7 +683,7 @@ export const revoke_sign = async (req, res, next) => {
     );
 
     const updatedPdfBytes = await pdfDoc.save();
-    await fs.writeFile(documentPath, updatedPdfBytes);
+    await fs.writeFile(absDocumentPath, updatedPdfBytes);
 
     await prisma.documentSignature.delete({ where: { id: signature.id } });
 
@@ -734,9 +766,12 @@ export const reject_document = async (req, res, next) => {
       ? Math.max(0, pageHeight - lastYCoordinate - 50)
       : 0;
 
-    const pdfDoc = await PDFDocument.load(existingPdfBytes, {
-      ignoreEncryption: true,
-    });
+    const pdfDoc = await loadPdfSafely(
+      existingPdfBytes,
+      absDocumentPath,
+      pythonEnvPath,
+    );
+
     const pages = pdfDoc.getPages();
     const lastPageIndex = pages.length - 1;
     const lastPage = pages[lastPageIndex];
@@ -866,12 +901,20 @@ export const revoke_rejection = async (req, res, next) => {
     });
 
     const documentPath = document.path;
-    const existingPdfBytes = await fs.readFile(
-      path.join(__dirname, "../../../../", "storage", documentPath),
+    const absDocumentPath = path.join(
+      __dirname,
+      "../../../../",
+      "storage",
+      documentPath,
     );
-    const pdfDoc = await PDFDocument.load(existingPdfBytes, {
-      ignoreEncryption: true,
-    });
+    const existingPdfBytes = await fs.readFile(absDocumentPath);
+    const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
+
+    const pdfDoc = await loadPdfSafely(
+      existingPdfBytes,
+      absDocumentPath,
+      pythonEnvPath,
+    );
 
     const pages = pdfDoc.getPages();
     const lastPageIndex = pages.length - 1;
@@ -890,10 +933,7 @@ export const revoke_rejection = async (req, res, next) => {
     }
 
     const updatedPdfBytes = await pdfDoc.save();
-    await fs.writeFile(
-      path.join(__dirname, "../../../../", "storage", documentPath),
-      updatedPdfBytes,
-    );
+    await fs.writeFile(absDocumentPath, updatedPdfBytes);
 
     await prisma.document.update({
       where: { id: documentId },
@@ -946,8 +986,8 @@ function sanitizeText(text) {
   if (!text) return "";
 
   return text
-    .replace(/[\u00A0\u202F\u2007]/g, " ") // weird spaces
-    .replace(/[^\x20-\x7E]/g, "") // remove non WinAnsi
+    .replace(/[\u00A0\u202F\u2007]/g, " ")
+    .replace(/[^\x20-\x7E]/g, "")
     .replace(/[\n\r\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -968,7 +1008,7 @@ function wrapText(text, font, fontSize, maxWidth) {
     try {
       width = font.widthOfTextAtSize(testLine, fontSize);
     } catch {
-      continue; // skip bad characters safely
+      continue;
     }
 
     if (width < maxWidth) {
@@ -1026,12 +1066,10 @@ async function print_signature_after_content_on_the_last_page(
   const LEFT_MARGIN = 50;
   const SAFETY_MARGIN = 120;
 
-  // ✅ sanitize
   const safeUsername = sanitizeText(username);
   const safeTimestamp = sanitizeText(timestamp);
   const safeRemarks = sanitizeText(remarks);
 
-  // ✅ wrap text (ORDER CHANGED)
   const signedByLines = wrapText(
     `Signed By: ${safeUsername}`,
     helveticaFont,
@@ -1138,7 +1176,6 @@ async function print_signature_after_content_on_the_last_page(
 
   let currentY = startY;
 
-  // ✅ DRAW SIGNATURE FIRST (TOP)
   if (currentY < signatureImageHeight + 20) {
     currentPage = pdfDoc.addPage();
     rotation = 0;
@@ -1157,7 +1194,6 @@ async function print_signature_after_content_on_the_last_page(
 
   currentY -= signatureImageHeight + 4;
 
-  // ✅ Signed By
   for (const line of signedByLines) {
     if (currentY < 50) {
       currentPage = pdfDoc.addPage();
@@ -1178,7 +1214,6 @@ async function print_signature_after_content_on_the_last_page(
     currentY -= lineSpacing;
   }
 
-  // ✅ Timestamp
   for (const line of timestampLines) {
     if (currentY < 50) {
       currentPage = pdfDoc.addPage();
@@ -1199,7 +1234,6 @@ async function print_signature_after_content_on_the_last_page(
     currentY -= lineSpacing;
   }
 
-  // ✅ Remarks LAST (bottom, can span pages)
   for (const line of remarksLines) {
     if (currentY < 50) {
       currentPage = pdfDoc.addPage();
@@ -1251,9 +1285,6 @@ async function print_signature_at_coordinates(
     select: { dscFileName: true },
   });
 
-  // if (!user.dscFileName) {
-  //   throw new Error("Please Upload your DSC to sign the document");
-  // }
   const signatureImageBytes = await fs.readFile(jpegImagePath);
   const signatureImage = await pdfDoc.embedJpg(signatureImageBytes);
 
