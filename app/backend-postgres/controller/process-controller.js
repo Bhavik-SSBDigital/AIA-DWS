@@ -650,12 +650,21 @@ export const initiate_process = async (req, res, next) => {
       });
     }
 
+    // ── Description printing — skips the auto-generated description doc ──
     if (printDescriptionPref !== "NONE") {
       for (const docObj of copiedDocumentIds) {
         if (docObj.type.toLowerCase() === "pdf") {
           const reqDoc = req.body.documents.find(
             (d) => d.documentId === docObj.oldDocId,
           );
+
+          // Skip the auto-generated process description document so that
+          // no description text is ever stamped onto it.
+          const isDescriptionDoc =
+            Array.isArray(reqDoc?.tags) &&
+            reqDoc.tags.includes("process-description-doc");
+
+          if (isDescriptionDoc) continue;
 
           let descToPrint = "";
           if (printDescriptionPref === "PROCESS" && description) {
@@ -774,7 +783,6 @@ export const initiate_process = async (req, res, next) => {
                         : [],
                       date: (() => {
                         if (!email.date) return new Date();
-                        // Normalize Google-style "Mon, Mar 30, 2026 at 12:36 PM" → "Mon, Mar 30, 2026 12:36 PM"
                         const normalized = String(email.date).replace(
                           " at ",
                           " ",

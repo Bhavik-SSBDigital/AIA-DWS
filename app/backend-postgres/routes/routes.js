@@ -198,6 +198,7 @@ import {
   // getQuickStats,
   getSignedDocumentsDrillDown,
 } from "../controller/personalised-controller.js";
+import { saveDescriptionDocument } from "../controller/description-controller.js";
 
 const router = express.Router();
 
@@ -384,6 +385,7 @@ router.get(
 );
 router.post("/extract-eml", extractEMLDetails);
 router.post("/generateDocumentName", generateDocumentNameController);
+router.post("/saveDescriptionDocument", saveDescriptionDocument);
 
 router.get("/check-po-sync-status", get_po_inspection_data);
 router.post("/po-inspection/sync/mass", mass_sync_po_data);

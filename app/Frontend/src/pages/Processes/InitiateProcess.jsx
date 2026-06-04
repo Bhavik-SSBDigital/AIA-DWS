@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useForm, Controller, useFieldArray } from 'react-hook-form';
 import {
   DeleteFile,
@@ -10,7 +10,7 @@ import {
   useTemplateDocument,
   ViewDocument,
   extractEMLDetails,
-  getTagEmails // Added API import
+  getTagEmails
 } from '../../common/Apis';
 import { 
   IconBold, 
@@ -45,7 +45,9 @@ import {
   IconPrinter,
   IconSettings,
   IconCreditCard,
-  IconCalendarEvent
+  IconCalendarEvent,
+  IconDeviceFloppy,
+  IconAlertTriangle,
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import CustomButton from '../../CustomComponents/CustomButton';
@@ -56,7 +58,9 @@ import Title from '../../CustomComponents/Title';
 import EmailThreadModal from './EmailThreadModal';
 import CustomModal from '../../CustomComponents/CustomModal';
 
-// Enhanced Rich Text Editor supporting Tables, Lists, Formatting, and Compact Mode
+// ─────────────────────────────────────────────────────────────────────────────
+// Enhanced Rich Text Editor (unchanged from original)
+// ─────────────────────────────────────────────────────────────────────────────
 const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = false }) => {
   const editorRef = useRef(null);
   const [isFocused, setIsFocused] = useState(false);
@@ -94,9 +98,7 @@ const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = fals
     const sciRegex = /^-?\d+(\.\d+)?e[+-]?\d+$/i;
     if (sciRegex.test(val.trim())) {
       const num = Number(val);
-      if (!isNaN(num)) {
-        return num.toLocaleString("fullwide", { useGrouping: false });
-      }
+      if (!isNaN(num)) return num.toLocaleString("fullwide", { useGrouping: false });
     }
     return val;
   };
@@ -112,7 +114,6 @@ const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = fals
       tempDiv.innerHTML = htmlData;
       const tables = tempDiv.querySelectorAll("table");
       let cleanHtml = "";
-
       tables.forEach((table) => {
         table.removeAttribute("style");
         table.removeAttribute("class");
@@ -121,9 +122,7 @@ const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = fals
           let text = cell.innerText.trim();
           text = normalizeNumber(text);
           cell.innerText = text;
-          while (cell.attributes.length > 0) {
-            cell.removeAttribute(cell.attributes[0].name);
-          }
+          while (cell.attributes.length > 0) cell.removeAttribute(cell.attributes[0].name);
         });
         cleanHtml += table.outerHTML + "<p><br></p>";
       });
@@ -154,11 +153,8 @@ const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = fals
       ?.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
       ?.replace(/style="[^"]*"/g, "");
 
-    if (safeHtml) {
-      document.execCommand("insertHTML", false, safeHtml);
-    } else {
-      document.execCommand("insertText", false, textData);
-    }
+    if (safeHtml) document.execCommand("insertHTML", false, safeHtml);
+    else document.execCommand("insertText", false, textData);
     handleInput();
   };
 
@@ -183,13 +179,8 @@ const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = fals
   return (
     <div
       className={`
-      group flex flex-col w-full rounded-xl border transition-all duration-300 overflow-hidden
-      bg-white
-      ${
-        isFocused
-          ? "border-indigo-400 ring-2 ring-indigo-500/20 shadow-sm"
-          : "border-slate-300 hover:border-slate-400"
-      }
+      group flex flex-col w-full rounded-xl border transition-all duration-300 overflow-hidden bg-white
+      ${isFocused ? "border-indigo-400 ring-2 ring-indigo-500/20 shadow-sm" : "border-slate-300 hover:border-slate-400"}
       ${disabled ? "bg-slate-50 opacity-80" : ""}
     `}
     >
@@ -214,26 +205,19 @@ const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = fals
         onInput={handleInput}
         onPaste={handlePaste}
         onFocus={() => setIsFocused(true)}
-        onBlur={() => {
-          setIsFocused(false);
-          handleInput();
-        }}
+        onBlur={() => { setIsFocused(false); handleInput(); }}
         placeholder={placeholder}
         className={`
           w-full text-slate-800 outline-none overflow-y-auto custom-scrollbar break-words whitespace-normal
           ${compact ? "p-3 text-[13px] min-h-[100px] max-h-[250px]" : "p-5 text-[15px] min-h-[240px] max-h-[600px]"}
           leading-relaxed
-          
           [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300
-
           [&_table]:block [&_table]:overflow-x-auto [&_table]:max-w-full [&_table]:w-full [&_table]:border-collapse [&_table]:border [&_table]:my-3
           [&_th]:bg-slate-100 [&_th]:font-semibold [&_th]:p-2 [&_th]:text-sm
           [&_td]:p-2 [&_td]:text-sm [&_td]:border
-
           [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2
           [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2
           [&_p]:mb-2 [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap
-
           empty:before:content-[attr(placeholder)]
           empty:before:text-slate-400 empty:before:italic
         `}
@@ -242,6 +226,9 @@ const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = fals
   );
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Component
+// ─────────────────────────────────────────────────────────────────────────────
 export default function InitiateProcess() {
   const navigate = useNavigate();
   const [workflowData, setWorkflowData] = useState([]);
@@ -262,16 +249,26 @@ export default function InitiateProcess() {
   const [removeEmailThredModel, setRemoveEmailThredModel] = useState('');
 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [printPref, setPrintPref] = useState('PROCESS'); 
+  const [printPref, setPrintPref] = useState('PROCESS');
   const [pendingSubmitData, setPendingSubmitData] = useState(null);
 
   // STATES: Payment Tracking
-  const [paymentMode, setPaymentMode] = useState('NONE'); // 'NONE', 'ON_APPROVAL', 'ON_DATE'
+  const [paymentMode, setPaymentMode] = useState('NONE');
   const [paymentDate, setPaymentDate] = useState('');
 
   // STATES: Tag Emails Tracking
   const [tagEmails, setTagEmails] = useState([]);
   const [fetchingEmails, setFetchingEmails] = useState(false);
+
+  // ── NEW: Description doc state ──────────────────────────────────────────
+  const [isSavingDescription, setIsSavingDescription] = useState(false);
+  const [descriptionDocId, setDescriptionDocId] = useState(null);   // DB id of the saved description doc
+  const [descriptionDocName, setDescriptionDocName] = useState(null);
+  const [isDescriptionSaved, setIsDescriptionSaved] = useState(false); // tracks if current text has been saved
+  const [showUnsavedWarningModal, setShowUnsavedWarningModal] = useState(false);
+
+  // Track last saved description text to detect dirty state
+  const lastSavedDescriptionRef = useRef('');
 
   const defaultvalues = {
     workflowId: '',
@@ -290,11 +287,16 @@ export default function InitiateProcess() {
     watch,
     reset,
     formState: { errors },
-  } = useForm({
-    defaultValues: defaultvalues,
-  });
+  } = useForm({ defaultValues: defaultvalues });
 
   const [workflowId, processTagId, formDescription] = watch(['workflowId', 'processTagId', 'description']);
+
+  // Whenever description changes, mark as unsaved (if it differs from last saved)
+  useEffect(() => {
+    if (formDescription !== lastSavedDescriptionRef.current) {
+      setIsDescriptionSaved(false);
+    }
+  }, [formDescription]);
 
   const {
     fields: documentFields,
@@ -309,11 +311,7 @@ export default function InitiateProcess() {
       toast.success(response?.data?.message);
       removeDocument(index);
     } catch (error) {
-      toast.error(
-        error?.response?.data?.message ||
-          error?.response?.data?.error ||
-          error?.message
-      );
+      toast.error(error?.response?.data?.message || error?.response?.data?.error || error?.message);
     } finally {
       setActionsLoading(false);
     }
@@ -329,18 +327,12 @@ export default function InitiateProcess() {
         if (workflows.length > 0) {
           const firstWorkflow = workflows[0];
           setSelectedWorkflow(firstWorkflow);
-
           if (firstWorkflow.versions?.length > 0) {
-            setValue('workflowId', firstWorkflow.versions[0].id, {
-              shouldValidate: true,
-            });
+            setValue('workflowId', firstWorkflow.versions[0].id, { shouldValidate: true });
           }
         }
-      } catch (error) {
-        // console.log(error);
-      }
+      } catch (error) {}
     };
-
     getWorkflowsData();
   }, [setValue]);
 
@@ -348,11 +340,8 @@ export default function InitiateProcess() {
     if (selectedWorkflow?.versions?.length > 0) {
       const current = getValues('workflowId');
       const exists = selectedWorkflow.versions.some((v) => v.id === current);
-
       if (!current || !exists) {
-        setValue('workflowId', selectedWorkflow.versions[0].id, {
-          shouldValidate: true,
-        });
+        setValue('workflowId', selectedWorkflow.versions[0].id, { shouldValidate: true });
       }
     }
   }, [selectedWorkflow, setValue, getValues]);
@@ -364,9 +353,7 @@ export default function InitiateProcess() {
       try {
         const { data } = await apiClient.get('/tags');
         setAllTags(data);
-      } catch (e) {
-        console.error(e);
-      }
+      } catch (e) { console.error(e); }
     };
     fetchTags();
   }, []);
@@ -377,9 +364,7 @@ export default function InitiateProcess() {
         try {
           const res = await getTemplatesByTag(processTagId);
           setTemplates(res.data.templates);
-        } catch (error) {
-          console.error(error?.response?.data?.message || error?.message);
-        }
+        } catch (error) { console.error(error?.response?.data?.message || error?.message); }
       };
       getTemplates();
     } else {
@@ -387,7 +372,6 @@ export default function InitiateProcess() {
     }
   }, [processTagId]);
 
-  // EFFECT: Fetch emails for selected tag
   useEffect(() => {
     if (processTagId) {
       const fetchEmails = async () => {
@@ -412,60 +396,38 @@ export default function InitiateProcess() {
 
   const handleFileChange = (e) => {
     if (!e.target.files) return;
-
     const rawFiles = Array.from(e.target.files);
-    
-    // Strict Filtering Based on Requirements
     const allowedExts = ['pdf', 'xls', 'xlsx', 'eml'];
     const validFiles = rawFiles.filter(file => {
       const ext = file.name.split('.').pop().toLowerCase();
       return allowedExts.includes(ext);
     });
-
     if (validFiles.length !== rawFiles.length) {
       toast.error("Some files were removed. Strictly only .pdf, .xls, .xlsx, and .eml are allowed.");
     }
-
-    if(validFiles.length === 0) return;
-
+    if (validFiles.length === 0) return;
     setSelectedFiles((prev) => [...prev, ...validFiles]);
-
     validFiles.forEach((file) => {
-      const uniqueKey = `${file.name}-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
+      const uniqueKey = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setFileMetas((prevMap) => {
         const newMap = new Map(prevMap);
-        newMap.set(uniqueKey, {
-          fileDescription: '',
-          issueNo: '',
-          preApproved: false,
-          customName: '',
-        });
+        newMap.set(uniqueKey, { fileDescription: '', issueNo: '', preApproved: false, customName: '' });
         return newMap;
       });
     });
-
     if (inputRef.current) inputRef.current.value = '';
   };
 
-
   const removeFile = (index, key) => {
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
-    setFileMetas((prev) => {
-      const copy = new Map(prev);
-      copy.delete(key);
-      return copy;
-    });
+    setFileMetas((prev) => { const copy = new Map(prev); copy.delete(key); return copy; });
   };
 
   const updateMeta = (key, updates) => {
     setFileMetas((prev) => {
       const copy = new Map(prev);
       const current = copy.get(key);
-      if (current) {
-        copy.set(key, { ...current, ...updates });
-      }
+      if (current) copy.set(key, { ...current, ...updates });
       return copy;
     });
   };
@@ -474,11 +436,9 @@ export default function InitiateProcess() {
     setIsExtractingEmail(true);
     try {
       const response = await extractEMLDetails(documentId, workflowId);
-
       if (response.data.success) {
         const data = response.data.data;
         let emails = data.emails || [];
-
         const newThread = {
           id: `thread-${Date.now()}`,
           originalDocumentId: documentId,
@@ -487,48 +447,20 @@ export default function InitiateProcess() {
           attachmentsMapping: data.attachmentsMapping || [],
           extractedAt: new Date().toISOString(),
         };
-
         setEmailThreads((prev) => [...prev, newThread]);
-
         if (data.attachmentsMapping?.length > 0) {
           data.attachmentsMapping.forEach((att) => {
             if (att.isThreadContext) {
-              addDocument({
-                documentId: att.documentId,
-                name: att.originalFilename,
-                tags: ['email-thread-context'],
-                description: att.description,
-                fromEmail: false,
-                partNumber: parentMeta.partNumber || '',
-                preApproved: parentMeta.preApproved || false,
-                issueNo: parentMeta.issueNo || '',
-              });
+              addDocument({ documentId: att.documentId, name: att.originalFilename, tags: ['email-thread-context'], description: att.description, fromEmail: false, partNumber: parentMeta.partNumber || '', preApproved: parentMeta.preApproved || false, issueNo: parentMeta.issueNo || '' });
             } else {
-              addDocument({
-                documentId: att.documentId,
-                name: att.originalFilename,
-                tags: ['extracted-from-email'],
-                description: `Extracted from email: ${emails[0]?.subject || 'Unknown'}`,
-                fromEmail: true,
-                emailSubject: emails[0]?.subject || '',
-                emailFrom: emails[0]?.from || '',
-                partNumber: parentMeta.partNumber || '',
-                preApproved: parentMeta.preApproved || false,
-                issueNo: parentMeta.issueNo || '',
-              });
+              addDocument({ documentId: att.documentId, name: att.originalFilename, tags: ['extracted-from-email'], description: `Extracted from email: ${emails[0]?.subject || 'Unknown'}`, fromEmail: true, emailSubject: emails[0]?.subject || '', emailFrom: emails[0]?.from || '', partNumber: parentMeta.partNumber || '', preApproved: parentMeta.preApproved || false, issueNo: parentMeta.issueNo || '' });
             }
           });
-
-          const attachmentCount = data.attachmentsMapping.filter(
-            (a) => !a.isThreadContext
-          ).length;
-          toast.success(
-            `Email extracted! ${attachmentCount} attachment(s) + thread context PDF added.`
-          );
+          const attachmentCount = data.attachmentsMapping.filter(a => !a.isThreadContext).length;
+          toast.success(`Email extracted! ${attachmentCount} attachment(s) + thread context PDF added.`);
         } else {
           toast.info('Email extracted successfully (No attachments).');
         }
-
         return data;
       } else {
         toast.error('Failed to extract email: ' + response.data.message);
@@ -548,87 +480,136 @@ export default function InitiateProcess() {
       toast.info('Please select files and a workflow.');
       return;
     }
-
     setActionsLoading(true);
     let successCount = 0;
-
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
       const key = Array.from(fileMetas.keys())[i];
       const meta = fileMetas.get(key);
-
       setCurrentUploadingIndex(i);
-
       try {
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
         const isEmailFile = ['eml', 'msg', 'email'].includes(ext);
-
         const documentNameResult = meta.preApproved
           ? { data: { documentName: `${meta.customName || file.name}.${ext}` } }
           : await GenerateDocumentName(workflowId, null, ext);
-
-        const uploadedIds = await uploadDocumentInProcess(
-          [file],
-          documentNameResult?.data?.documentName,
-          []
-        );
-
+        const uploadedIds = await uploadDocumentInProcess([file], documentNameResult?.data?.documentName, []);
         const docId = uploadedIds[0];
-
         if (isEmailFile) {
           toast.info(`Processing email file (${file.name})...`);
           const extractedData = await handleEMLExtraction(docId, meta);
-
-          if (extractedData && extractedData.threadContextPdfId) {
-            successCount++;
-          } else {
-            toast.warn('Extraction completed with warnings');
-            successCount++;
-          }
+          if (extractedData && extractedData.threadContextPdfId) successCount++;
+          else { toast.warn('Extraction completed with warnings'); successCount++; }
         } else {
-          addDocument({
-            documentId: docId,
-            name: documentNameResult?.data?.documentName,
-            tags: [],
-            description: meta.fileDescription,
-            partNumber: '',
-            preApproved: meta.preApproved,
-            issueNo: meta.issueNo,
-            fromEmail: false,
-          });
+          addDocument({ documentId: docId, name: documentNameResult?.data?.documentName, tags: [], description: meta.fileDescription, partNumber: '', preApproved: meta.preApproved, issueNo: meta.issueNo, fromEmail: false });
           successCount++;
         }
       } catch (err) {
-        toast.error(
-          `Failed to upload ${file.name}: ${
-            err?.response?.data?.message || err.message
-          }`
-        );
+        toast.error(`Failed to upload ${file.name}: ${err?.response?.data?.message || err.message}`);
       }
     }
-
-    toast.success(
-      `Successfully processed ${successCount}/${selectedFiles.length} file(s)`
-    );
-
+    toast.success(`Successfully processed ${successCount}/${selectedFiles.length} file(s)`);
     setSelectedFiles([]);
     setFileMetas(new Map());
     setActionsLoading(false);
     setCurrentUploadingIndex(-1);
   };
 
+  // ── NEW: Save description document ────────────────────────────────────────
+  const handleSaveDescription = async () => {
+    if (!workflowId) {
+      toast.error('Please select a Target Workflow before saving the description.');
+      return;
+    }
+    const description = getValues('description');
+    if (!description || description.trim() === '' || description === '<br>') {
+      toast.info('Description is empty. Nothing to save.');
+      return;
+    }
+
+    setIsSavingDescription(true);
+    try {
+      const res = await apiClient.post('/saveDescriptionDocument', {
+        workflowId,
+        processName: selectedWorkflow?.name || '',
+        description,
+        existingDescDocId: descriptionDocId || null,
+      });
+
+      const { documentId, documentName, documentPath } = res.data;
+
+      // Update/replace in the documents field array
+      const allDocs = getValues('documents');
+      const existingIdx = allDocs.findIndex(d => d.isDescriptionDoc === true);
+
+      if (existingIdx !== -1) {
+        // Remove old entry
+        removeDocument(existingIdx);
+      }
+
+      // Add new description doc
+      addDocument({
+        documentId,
+        name: documentName,
+        tags: ['process-description-doc'],
+        description: '',          // No description printed on the description doc itself
+        partNumber: '',
+        preApproved: false,
+        issueNo: '',
+        fromEmail: false,
+        isDescriptionDoc: true,   // ← marker used to exclude from printing
+        documentPath,
+      });
+
+      setDescriptionDocId(documentId);
+      setDescriptionDocName(documentName);
+      setIsDescriptionSaved(true);
+      lastSavedDescriptionRef.current = description;
+
+      toast.success('Description document saved successfully!');
+    } catch (error) {
+      toast.error(error?.response?.data?.message || 'Failed to save description document.');
+    } finally {
+      setIsSavingDescription(false);
+    }
+  };
+
+  // ── NEW: Intercept submit to warn about unsaved description ──────────────
   const handleInitialSubmit = (data) => {
     if (data?.documents?.length === 0) {
       toast.info('Please upload documents for process');
       return;
     }
-    
-    // Validation: If Payment On Date is selected, date is mandatory
     if (paymentMode === 'ON_DATE' && !paymentDate) {
       toast.error('Please select a payment date before proceeding.');
       return;
     }
 
+    // Check if description has content but is not saved
+    const desc = getValues('description');
+    const hasDescContent = desc && desc.trim() !== '' && desc !== '<br>';
+    if (hasDescContent && !isDescriptionSaved) {
+      setShowUnsavedWarningModal(true);
+      return;
+    }
+
+    setPendingSubmitData(data);
+    setShowConfirmModal(true);
+  };
+
+  // Called from unsaved warning modal — save first then continue
+  const handleSaveAndContinue = async () => {
+    setShowUnsavedWarningModal(false);
+    await handleSaveDescription();
+    const data = getValues();
+    setPendingSubmitData(data);
+    setShowConfirmModal(true);
+  };
+
+  // Called from unsaved warning modal — skip saving and continue
+  const handleContinueWithoutSaving = () => {
+    setShowUnsavedWarningModal(false);
+    const data = getValues();
     setPendingSubmitData(data);
     setShowConfirmModal(true);
   };
@@ -638,12 +619,13 @@ export default function InitiateProcess() {
     const data = pendingSubmitData;
     const selectedTagObj = allTags.find((t) => t.id === parseInt(data.processTagId));
 
+    // Build documents array, but skip the description doc from printing logic by tagging it
     const submitData = {
       ...data,
       tag: selectedTagObj ? selectedTagObj.name : '',
       printDescriptionPref: printPref,
-      paymentMode: paymentMode, // Attached to payload
-      paymentDate: paymentMode === 'ON_DATE' ? paymentDate : null, // Attached to payload
+      paymentMode,
+      paymentDate: paymentMode === 'ON_DATE' ? paymentDate : null,
       emailThreads: emailThreads.map((thread) => ({
         threadText: thread.threadText || 'Email thread extracted',
         emails: thread.emails || [],
@@ -669,21 +651,11 @@ export default function InitiateProcess() {
       toast.error('Please select a Target Workflow before using a template.');
       return;
     }
-
     setActionsLoading(true);
     try {
-      const res = await useTemplateDocument({
-        workflowId: workflowId,
-        templateId: template?.id,
-      });
+      const res = await useTemplateDocument({ workflowId, templateId: template?.id });
       toast.success(res?.data?.message);
-      addDocument({
-        documentId: res?.data?.documentId,
-        name: res?.data?.documentName,
-        tags: [],
-        documentPath: res?.data?.documentPath,
-        info: 'Template document - edit as needed before submission.',
-      });
+      addDocument({ documentId: res?.data?.documentId, name: res?.data?.documentName, tags: [], documentPath: res?.data?.documentPath, info: 'Template document - edit as needed before submission.' });
     } catch (error) {
       toast.error(error?.response?.data?.message || error.message);
     } finally {
@@ -711,18 +683,12 @@ export default function InitiateProcess() {
   const handleremoveEmailThread = (threadId) => {
     const thread = emailThreads.find((t) => t.id === threadId);
     setEmailThreads((prev) => prev.filter((t) => t.id !== threadId));
-
     if (thread.attachmentsMapping?.length > 0) {
       thread.attachmentsMapping.forEach((att) => {
-        const index = documentFields.findIndex(
-          (doc) => doc.documentId === att.documentId
-        );
-        if (index !== -1) {
-          removeDocument(index);
-        }
+        const index = documentFields.findIndex((doc) => doc.documentId === att.documentId);
+        if (index !== -1) removeDocument(index);
       });
     }
-
     toast.info('Email thread and associated documents removed');
   };
 
@@ -732,7 +698,6 @@ export default function InitiateProcess() {
     const emailDate = new Date(date);
     const diffTime = Math.abs(now - emailDate);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
     if (diffDays <= 7) return `${diffDays}d ago`;
@@ -741,113 +706,121 @@ export default function InitiateProcess() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-10 font-sans text-slate-900">
-      {/* Remove Email Thread Modal */}
-      <CustomModal
-        isOpen={!!removeEmailThredModel}
-        onClose={() => setRemoveEmailThredModel('')}
-        size="md"
-      >
+
+      {/* ── Remove Email Thread Modal ───────────────────────────────────────── */}
+      <CustomModal isOpen={!!removeEmailThredModel} onClose={() => setRemoveEmailThredModel('')} size="md">
         <div className="p-6">
           <div className="flex items-center gap-3 mb-4">
-            <div className="p-3 bg-red-50 text-red-600 rounded-full border border-red-200">
-              <IconTrash size={28} stroke={1.5} />
-            </div>
+            <div className="p-3 bg-red-50 text-red-600 rounded-full border border-red-200"><IconTrash size={28} stroke={1.5} /></div>
             <h2 className="text-xl font-bold text-slate-900">Remove Email Thread</h2>
           </div>
-          <p className="text-slate-600 mb-6">
-            This will remove the email thread and all associated attachments from
-            the current process.
-          </p>
+          <p className="text-slate-600 mb-6">This will remove the email thread and all associated attachments from the current process.</p>
           <div className="flex justify-end gap-3">
-            <button
-              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors"
-              onClick={() => setRemoveEmailThredModel('')}
-            >
-              Cancel
-            </button>
-            <button
-              className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm"
-              onClick={() => {
-                handleremoveEmailThread(removeEmailThredModel);
-                setRemoveEmailThredModel('');
-              }}
-            >
-              Confirm Delete
-            </button>
+            <button className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors" onClick={() => setRemoveEmailThredModel('')}>Cancel</button>
+            <button className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm" onClick={() => { handleremoveEmailThread(removeEmailThredModel); setRemoveEmailThredModel(''); }}>Confirm Delete</button>
           </div>
         </div>
       </CustomModal>
 
-      {/* Confirmation Modal for Print Description Preference */}
-      <CustomModal
-        isOpen={showConfirmModal}
-        onClose={() => setShowConfirmModal(false)}
-        size="lg"
-      >
+      {/* ── Unsaved Description Warning Modal (NEW) ─────────────────────────── */}
+      <CustomModal isOpen={showUnsavedWarningModal} onClose={() => setShowUnsavedWarningModal(false)} size="md">
         <div className="p-6">
-          <div className="flex items-center gap-3 mb-4 border-b pb-4">
-            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-200">
-              <IconPrinter size={28} stroke={1.5} />
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-3 bg-amber-50 text-amber-600 rounded-full border border-amber-200">
+              <IconAlertTriangle size={28} stroke={1.5} />
             </div>
             <div>
-                <h2 className="text-xl font-bold text-slate-900">Confirm Process Details</h2>
-                <p className="text-sm text-slate-500">Please confirm how you'd like to handle descriptions on documents.</p>
-            </div>
-          </div>
-          
-          <div className="mb-6">
-            <h3 className="text-sm font-bold text-slate-700 mb-2">Process Description Preview:</h3>
-            <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg overflow-y-auto max-h-[150px] text-sm text-slate-800 custom-scrollbar break-words whitespace-normal"
-                 dangerouslySetInnerHTML={{ __html: pendingSubmitData?.description || '<i class="text-slate-400">No description</i>' }}>
+              <h2 className="text-xl font-bold text-slate-900">Unsaved Description</h2>
+              <p className="text-sm text-slate-500 mt-0.5">Your process description has not been saved as a document yet.</p>
             </div>
           </div>
 
-          <div className="mb-6 space-y-3">
-             <p className="text-sm font-bold text-slate-700">Would you like to print this description on the uploaded PDF documents?</p>
-             <label className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
-                <input type="radio" name="printPref" value="PROCESS" checked={printPref === 'PROCESS'} onChange={(e) => setPrintPref(e.target.value)} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
-                <span className="text-sm font-medium text-slate-800">Print <span className="font-bold">Process Description</span> on all PDF documents.</span>
-             </label>
-             <label className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
-                <input type="radio" name="printPref" value="INDIVIDUAL" checked={printPref === 'INDIVIDUAL'} onChange={(e) => setPrintPref(e.target.value)} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
-                <span className="text-sm font-medium text-slate-800">Print <span className="font-bold">Individual Document Descriptions</span> on their respective PDFs.</span>
-             </label>
-             <label className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
-                <input type="radio" name="printPref" value="NONE" checked={printPref === 'NONE'} onChange={(e) => setPrintPref(e.target.value)} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
-                <span className="text-sm font-medium text-slate-800">Do <span className="font-bold">NOT</span> print descriptions on documents.</span>
-             </label>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-start gap-3">
+            <IconInfoCircle size={20} className="text-amber-600 shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-800">
+              We recommend saving your description as a standalone PDF document before initiating the process. This ensures reviewers have a clear, printable record of your process intent.
+              <br /><br />
+              You can also continue without saving — the description will still be visible in the process, but no separate description document will be generated.
+            </p>
           </div>
 
-          <div className="flex justify-end gap-3 mt-6">
+          <div className="flex flex-col sm:flex-row justify-end gap-3">
             <button
               className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors"
-              onClick={() => setShowConfirmModal(false)}
+              onClick={() => setShowUnsavedWarningModal(false)}
             >
               Back to Edit
             </button>
             <button
-              className="px-6 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm"
-              onClick={executeFinalSubmit}
+              className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 border border-slate-300 hover:bg-slate-200 rounded-lg transition-colors"
+              onClick={handleContinueWithoutSaving}
             >
-              Confirm & Initiate
+              Continue Without Saving
+            </button>
+            <button
+              className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm flex items-center gap-2"
+              onClick={handleSaveAndContinue}
+            >
+              <IconDeviceFloppy size={16} /> Save Description &amp; Continue
             </button>
           </div>
         </div>
       </CustomModal>
 
-      {actionsLoading || isExtractingEmail ? <TopLoader /> : null}
+      {/* ── Print Preference Confirmation Modal ─────────────────────────────── */}
+      <CustomModal isOpen={showConfirmModal} onClose={() => setShowConfirmModal(false)} size="lg">
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-4 border-b pb-4">
+            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-200"><IconPrinter size={28} stroke={1.5} /></div>
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Confirm Process Details</h2>
+              <p className="text-sm text-slate-500">Please confirm how you'd like to handle descriptions on documents.</p>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <h3 className="text-sm font-bold text-slate-700 mb-2">Process Description Preview:</h3>
+            <div
+              className="bg-slate-50 border border-slate-200 p-4 rounded-lg overflow-y-auto max-h-[150px] text-sm text-slate-800 custom-scrollbar break-words whitespace-normal"
+              dangerouslySetInnerHTML={{ __html: pendingSubmitData?.description || '<i class="text-slate-400">No description</i>' }}
+            />
+          </div>
+
+          <div className="mb-6 space-y-3">
+            <p className="text-sm font-bold text-slate-700">Would you like to print this description on the uploaded PDF documents?</p>
+            <p className="text-xs text-slate-500 italic">Note: The description document itself (if saved) will never have a description printed on it.</p>
+            <label className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
+              <input type="radio" name="printPref" value="PROCESS" checked={printPref === 'PROCESS'} onChange={(e) => setPrintPref(e.target.value)} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
+              <span className="text-sm font-medium text-slate-800">Print <span className="font-bold">Process Description</span> on all PDF documents.</span>
+            </label>
+            <label className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
+              <input type="radio" name="printPref" value="INDIVIDUAL" checked={printPref === 'INDIVIDUAL'} onChange={(e) => setPrintPref(e.target.value)} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
+              <span className="text-sm font-medium text-slate-800">Print <span className="font-bold">Individual Document Descriptions</span> on their respective PDFs.</span>
+            </label>
+            <label className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
+              <input type="radio" name="printPref" value="NONE" checked={printPref === 'NONE'} onChange={(e) => setPrintPref(e.target.value)} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
+              <span className="text-sm font-medium text-slate-800">Do <span className="font-bold">NOT</span> print descriptions on documents.</span>
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6">
+            <button className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors" onClick={() => setShowConfirmModal(false)}>Back to Edit</button>
+            <button className="px-6 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm" onClick={executeFinalSubmit}>Confirm &amp; Initiate</button>
+          </div>
+        </div>
+      </CustomModal>
+
+      {actionsLoading || isExtractingEmail || isSavingDescription ? <TopLoader /> : null}
 
       <div className="max-w-7xl mx-auto space-y-6">
         <div className="mb-6">
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Initiate Process</h1>
-          <p className="text-slate-500 mt-2 text-sm max-w-3xl">
-            Configure workflow parameters and attach supporting documentation. Email
-            files (.eml, .msg) are automatically processed and extracted.
-          </p>
+          <p className="text-slate-500 mt-2 text-sm max-w-3xl">Configure workflow parameters and attach supporting documentation. Email files (.eml, .msg) are automatically processed and extracted.</p>
         </div>
 
         <form className="space-y-6" onSubmit={handleSubmit(handleInitialSubmit)}>
-          {/* Configuration Section */}
+
+          {/* ── Configuration Section ────────────────────────────────────────── */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
             <div className={`flex flex-col gap-6 ${templates?.length > 0 ? 'xl:col-span-8' : 'xl:col-span-12'}`}>
               <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex-grow flex flex-col">
@@ -892,18 +865,72 @@ export default function InitiateProcess() {
                     </div>
                   </div>
 
+                  {/* ── Description with Save button ─────────────────────────── */}
                   <div className="flex-grow flex flex-col">
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Process Description</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-semibold text-slate-700">
+                        Process Description
+                      </label>
+
+                      {/* Save Description Button */}
+                      <div className="flex items-center gap-2">
+                        {/* Saved badge */}
+                        {isDescriptionSaved && descriptionDocName && (
+                          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1.5">
+                            <IconCircleCheck size={13} stroke={2.5} /> Saved as doc
+                          </span>
+                        )}
+
+                        {/* Unsaved badge */}
+                        {!isDescriptionSaved && formDescription && formDescription.trim() !== '' && formDescription !== '<br>' && (
+                          <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 flex items-center gap-1.5">
+                            <IconAlertCircle size={13} stroke={2.5} /> Unsaved
+                          </span>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={handleSaveDescription}
+                          disabled={isSavingDescription || actionsLoading || !workflowId}
+                          className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-all border shadow-sm
+                            ${isSavingDescription || actionsLoading || !workflowId
+                              ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                              : isDescriptionSaved
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                            }`}
+                          title={!workflowId ? 'Select a workflow first' : isDescriptionSaved ? 'Re-save description' : 'Save description as PDF'}
+                        >
+                          {isSavingDescription ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                              Generating PDF...
+                            </>
+                          ) : (
+                            <>
+                              <IconDeviceFloppy size={16} />
+                              {isDescriptionSaved ? 'Re-save Description' : 'Save Description'}
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Helper text */}
+                    <p className="text-xs text-slate-500 mb-2">
+                      Saving generates a professional PDF of the description that is included with your process documents. You can re-save after edits.
+                    </p>
+
                     <Controller
                       name="description"
                       control={control}
                       rules={{ required: 'Description is required' }}
                       render={({ field: { onChange, value } }) => (
-                         <RichTextEditor
-                           value={value}
-                           onChange={onChange}
-                           placeholder="Enter process context and objectives. You can paste tables or formatted text..."
-                         />
+                        <RichTextEditor
+                          value={value}
+                          onChange={onChange}
+                          placeholder="Enter process context and objectives. You can paste tables or formatted text..."
+                        />
                       )}
                     />
                     {errors.description && (
@@ -911,14 +938,28 @@ export default function InitiateProcess() {
                         <IconInfoCircle size={14} /> {errors.description.message}
                       </p>
                     )}
+
+                    {/* Saved description doc info */}
+                    {descriptionDocName && (
+                      <div className="mt-3 flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5">
+                        <IconFileText size={18} className="text-emerald-600 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-emerald-800">Description document generated</p>
+                          <p className="text-xs text-emerald-700 truncate">{descriptionDocName}</p>
+                        </div>
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200 uppercase tracking-wide shrink-0">
+                          Added to docs
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  
-                  {/* PAYMENT CONFIGURATION SECTION */}
+
+                  {/* ── Payment Configuration Section ────────────────────────── */}
                   <div className="flex-grow flex flex-col border-t border-slate-100 pt-6 mt-2">
                     <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 mb-4">
-                      <IconCreditCard size={18} className="text-slate-400" /> Payment & Notifications
+                      <IconCreditCard size={18} className="text-slate-400" /> Payment &amp; Notifications
                     </h4>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <label className={`flex flex-col gap-1 p-4 border rounded-xl cursor-pointer transition-all ${paymentMode === 'NONE' ? 'bg-slate-50 border-slate-400 ring-1 ring-slate-400' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
                         <div className="flex items-center gap-2">
@@ -960,7 +1001,7 @@ export default function InitiateProcess() {
                         </div>
                         {paymentDate && (
                           <div className="text-xs font-medium text-emerald-700 bg-emerald-100 px-3 py-2 rounded-lg border border-emerald-200 ml-auto hidden md:block">
-                            Reminder will trigger on: <br/>
+                            Reminder will trigger on: <br />
                             <span className="font-bold">
                               {new Date(new Date(paymentDate).getTime() - 86400000).toLocaleDateString('en-GB')} at 10:00 AM IST
                             </span>
@@ -969,47 +1010,37 @@ export default function InitiateProcess() {
                       </div>
                     )}
 
-                    {/* Notification Recipients Display block */}
                     {(paymentMode === 'ON_APPROVAL' || paymentMode === 'ON_DATE') && (
                       <div className="mt-4 flex flex-col sm:flex-row items-start gap-4 bg-indigo-50/40 p-4 border border-indigo-100 rounded-xl animate-in fade-in slide-in-from-top-2 duration-300">
                         <IconMail size={24} className="text-indigo-500 shrink-0 mt-0.5" />
                         <div className="flex-1 w-full">
                           <label className="block text-xs font-bold text-indigo-800 uppercase tracking-wide mb-2">Notification Recipients</label>
-                          
                           {fetchingEmails ? (
                             <p className="text-sm text-indigo-600">Loading recipients...</p>
                           ) : tagEmails.length > 0 ? (
                             <div className="flex flex-wrap gap-2 mb-2">
                               {tagEmails.map((t) => (
-                                <span key={t.id} className="text-xs font-bold text-indigo-700 bg-white px-3 py-1 rounded-md border border-indigo-200 shadow-sm">
-                                  {t.email}
-                                </span>
+                                <span key={t.id} className="text-xs font-bold text-indigo-700 bg-white px-3 py-1 rounded-md border border-indigo-200 shadow-sm">{t.email}</span>
                               ))}
                             </div>
                           ) : (
                             <p className="text-sm text-indigo-600 mb-2 italic">
-                              {!processTagId 
-                                ? 'Please select a Process Tag above to load recipients.'
-                                : 'No emails found for the selected tag.'}
+                              {!processTagId ? 'Please select a Process Tag above to load recipients.' : 'No emails found for the selected tag.'}
                             </p>
                           )}
-                          
                           <p className="text-xs text-indigo-700 font-medium mt-3">
                             <span className="font-bold">Note: </span>
-                            {paymentMode === 'ON_APPROVAL' 
-                              ? 'These recipients will be notified upon process completion.' 
-                              : 'These recipients will be notified one day before the payment date at 10:00 AM.'}
+                            {paymentMode === 'ON_APPROVAL' ? 'These recipients will be notified upon process completion.' : 'These recipients will be notified one day before the payment date at 10:00 AM.'}
                           </p>
                         </div>
                       </div>
                     )}
                   </div>
-
                 </div>
               </div>
             </div>
 
-            {/* Templates Section */}
+            {/* ── Templates Section ─────────────────────────────────────────── */}
             {templates?.length > 0 && (
               <div className="xl:col-span-4 flex flex-col h-full">
                 <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col flex-grow overflow-hidden">
@@ -1017,33 +1048,19 @@ export default function InitiateProcess() {
                     <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                       <IconTemplate size={18} className="text-slate-400" /> Templates
                     </h3>
-                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-100">
-                      {templates.length}
-                    </span>
+                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-100">{templates.length}</span>
                   </div>
                   <div className="p-5 overflow-y-auto max-h-[500px] space-y-3 custom-scrollbar">
                     {templates.map((template) => (
-                      <div
-                        key={template.id}
-                        className="flex flex-col p-4 border border-slate-200 rounded-lg hover:border-indigo-300 hover:shadow-sm transition-all bg-white"
-                      >
+                      <div key={template.id} className="flex flex-col p-4 border border-slate-200 rounded-lg hover:border-indigo-300 hover:shadow-sm transition-all bg-white">
                         <div className="flex items-start gap-3 mb-3">
-                          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-md flex-shrink-0">
-                            <IconFileText size={20} stroke={1.5} />
-                          </div>
+                          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-md flex-shrink-0"><IconFileText size={20} stroke={1.5} /></div>
                           <div className="min-w-0">
                             <h4 className="font-semibold text-slate-900 text-sm truncate">{template.name}</h4>
                             <p className="text-xs text-slate-500 truncate mt-0.5">{template.path}</p>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          disabled={actionsLoading}
-                          onClick={() => handleUseTemplate(template)}
-                          className="w-full px-3 py-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors border border-indigo-100"
-                        >
-                          Use Template
-                        </button>
+                        <button type="button" disabled={actionsLoading} onClick={() => handleUseTemplate(template)} className="w-full px-3 py-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors border border-indigo-100">Use Template</button>
                       </div>
                     ))}
                   </div>
@@ -1052,7 +1069,7 @@ export default function InitiateProcess() {
             )}
           </div>
 
-          {/* Document Upload Section */}
+          {/* ── Document Upload Section ──────────────────────────────────────── */}
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
               <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
@@ -1065,27 +1082,14 @@ export default function InitiateProcess() {
 
             <div className="p-6">
               <label className="flex flex-col items-center justify-center w-full py-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/50 hover:bg-slate-50 hover:border-indigo-400 transition-all cursor-pointer group">
-                <div className="p-3 bg-white shadow-sm border border-slate-200 text-slate-400 rounded-full mb-3 group-hover:text-indigo-600 group-hover:scale-105 transition-all">
-                  <IconUpload size={24} stroke={1.5} />
-                </div>
+                <div className="p-3 bg-white shadow-sm border border-slate-200 text-slate-400 rounded-full mb-3 group-hover:text-indigo-600 group-hover:scale-105 transition-all"><IconUpload size={24} stroke={1.5} /></div>
                 <h4 className="text-sm font-bold text-slate-800 mb-1">Click or drag files here to stage</h4>
-                
                 <p className="text-xs text-slate-500 text-center font-medium">PDF, XLSX, XLS, EML</p>
                 <div className="mt-4 bg-red-50 border border-red-200 rounded-lg px-4 py-2 flex items-center gap-2 shadow-sm">
                   <IconAlertCircle size={16} className="text-red-500" />
-                  <p className="text-xs text-red-600 font-bold tracking-wide uppercase">
-                    NOTE: Only .xlsx, .xls, .pdf, and .eml files are allowed.
-                  </p>
+                  <p className="text-xs text-red-600 font-bold tracking-wide uppercase">NOTE: Only .xlsx, .xls, .pdf, and .eml files are allowed.</p>
                 </div>
-
-                <input
-                  ref={inputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={handleFileChange}
-                  accept=".pdf,.xls,.xlsx,.eml"
-                />
+                <input ref={inputRef} type="file" multiple className="hidden" onChange={handleFileChange} accept=".pdf,.xls,.xlsx,.eml" />
               </label>
 
               {selectedFiles.length > 0 && (
@@ -1113,72 +1117,32 @@ export default function InitiateProcess() {
                             <tr key={key} className="hover:bg-slate-50/50 transition-colors">
                               <td className="px-4 py-4 align-top">
                                 <div className="flex items-start gap-3">
-                                  <div className="text-slate-400 mt-0.5">
-                                    <IconPaperclip size={18} stroke={1.5} />
-                                  </div>
+                                  <div className="text-slate-400 mt-0.5"><IconPaperclip size={18} stroke={1.5} /></div>
                                   <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-slate-900 break-all leading-tight mb-1" title={file.name}>
-                                      {file.name}
-                                    </div>
+                                    <div className="text-sm font-semibold text-slate-900 break-all leading-tight mb-1" title={file.name}>{file.name}</div>
                                     <div className="flex items-center gap-2">
                                       <span className="text-xs text-slate-500 font-medium">{(file.size / 1024).toFixed(1)} KB</span>
-                                      {isEmail && (
-                                        <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-indigo-100 text-indigo-700 border border-indigo-200">
-                                          Email
-                                        </span>
-                                      )}
+                                      {isEmail && <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-indigo-100 text-indigo-700 border border-indigo-200">Email</span>}
                                     </div>
                                   </div>
                                 </div>
                               </td>
-
                               <td className="px-4 py-4 align-top">
-                                {/* Compact Rich Text Editor to fit nicely inside the table */}
-                                <RichTextEditor
-                                  compact={true}
-                                  value={meta.fileDescription || ''}
-                                  onChange={(val) => updateMeta(key, { fileDescription: val })}
-                                  placeholder="Add an optional formatted description or paste tables here..."
-                                  disabled={actionsLoading}
-                                />
+                                <RichTextEditor compact={true} value={meta.fileDescription || ''} onChange={(val) => updateMeta(key, { fileDescription: val })} placeholder="Add an optional formatted description or paste tables here..." disabled={actionsLoading} />
                               </td>
-
                               <td className="px-4 py-4 align-top">
-                                <input
-                                  type="text"
-                                  value={meta.issueNo || ''}
-                                  onChange={(e) => updateMeta(key, { issueNo: e.target.value })}
-                                  placeholder="e.g. v1.0"
-                                  className="w-full bg-slate-50 border border-slate-300 focus:bg-white focus:border-indigo-500 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
-                                  disabled={actionsLoading}
-                                />
+                                <input type="text" value={meta.issueNo || ''} onChange={(e) => updateMeta(key, { issueNo: e.target.value })} placeholder="e.g. v1.0" className="w-full bg-slate-50 border border-slate-300 focus:bg-white focus:border-indigo-500 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all" disabled={actionsLoading} />
                               </td>
-
                               <td className="px-4 py-4 align-top text-center pt-6">
-                                <input
-                                  type="checkbox"
-                                  checked={!!meta.preApproved}
-                                  onChange={(e) => updateMeta(key, { preApproved: e.target.checked })}
-                                  className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer"
-                                  disabled={actionsLoading}
-                                />
+                                <input type="checkbox" checked={!!meta.preApproved} onChange={(e) => updateMeta(key, { preApproved: e.target.checked })} className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer" disabled={actionsLoading} />
                               </td>
-
                               <td className="px-4 py-4 align-top text-center pt-5">
                                 {isUploading ? (
                                   <span className="text-indigo-600 text-xs font-bold flex items-center justify-center gap-1">
                                     <div className="w-3 h-3 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
                                   </span>
                                 ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => removeFile(idx, key)}
-                                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                                    disabled={actionsLoading}
-                                    title="Remove staged file"
-                                  >
-                                    <IconTrash size={18} stroke={1.5} />
-                                  </button>
+                                  <button type="button" onClick={() => removeFile(idx, key)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" disabled={actionsLoading} title="Remove staged file"><IconTrash size={18} stroke={1.5} /></button>
                                 )}
                               </td>
                             </tr>
@@ -1189,23 +1153,15 @@ export default function InitiateProcess() {
                   </div>
 
                   <div className="bg-slate-50 border-t border-slate-200 p-4 flex justify-end items-center gap-4">
-                    <span className="text-sm font-medium text-slate-500">
-                      {selectedFiles.length} file(s) staged for upload
-                    </span>
+                    <span className="text-sm font-medium text-slate-500">{selectedFiles.length} file(s) staged for upload</span>
                     <button
                       type="button"
                       onClick={handleUploadAll}
                       disabled={actionsLoading || !workflowId}
-                      className={`px-5 py-2.5 text-sm font-bold rounded-lg text-white shadow-sm transition-all flex items-center gap-2 ${
-                        actionsLoading || !workflowId
-                          ? 'bg-slate-400 cursor-not-allowed'
-                          : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow'
-                      }`}
+                      className={`px-5 py-2.5 text-sm font-bold rounded-lg text-white shadow-sm transition-all flex items-center gap-2 ${actionsLoading || !workflowId ? 'bg-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow'}`}
                     >
                       <IconUpload size={16} />
-                      {actionsLoading
-                        ? `Uploading ${currentUploadingIndex + 1}/${selectedFiles.length}...`
-                        : `Commit Files to Process`}
+                      {actionsLoading ? `Uploading ${currentUploadingIndex + 1}/${selectedFiles.length}...` : `Commit Files to Process`}
                     </button>
                   </div>
                 </div>
@@ -1213,65 +1169,38 @@ export default function InitiateProcess() {
             </div>
           </div>
 
-          {/* Email Threads Section */}
+          {/* ── Email Threads Section ────────────────────────────────────────── */}
           {emailThreads?.length > 0 && (
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                  <IconMessages size={18} className="text-slate-400" /> Parsed Email Threads
-                </h3>
-                <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
-                  {emailThreads.length} Thread(s)
-                </span>
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2"><IconMessages size={18} className="text-slate-400" /> Parsed Email Threads</h3>
+                <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">{emailThreads.length} Thread(s)</span>
               </div>
               <div className="p-6">
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                   {emailThreads.map((thread) => (
-                    <div
-                      key={thread.id}
-                      className="group flex flex-col bg-white border border-slate-200 rounded-xl hover:border-indigo-300 hover:shadow-md transition-all overflow-hidden"
-                    >
+                    <div key={thread.id} className="group flex flex-col bg-white border border-slate-200 rounded-xl hover:border-indigo-300 hover:shadow-md transition-all overflow-hidden">
                       <div className="p-4 border-b border-slate-100 flex items-start justify-between gap-3 bg-slate-50/30">
                         <div className="flex items-start gap-3 min-w-0 flex-1">
-                          <div className="mt-0.5 text-indigo-500 flex-shrink-0 bg-indigo-50 p-1.5 rounded-lg">
-                            <IconMessages size={20} stroke={1.5} />
-                          </div>
+                          <div className="mt-0.5 text-indigo-500 flex-shrink-0 bg-indigo-50 p-1.5 rounded-lg"><IconMessages size={20} stroke={1.5} /></div>
                           <div className="min-w-0">
-                            <h4 className="font-semibold text-slate-900 text-sm truncate mb-0.5" title={thread.emails?.[0]?.subject}>
-                              {thread.emails?.[0]?.subject || 'Email Conversation'}
-                            </h4>
-                            <p className="text-xs text-slate-500 truncate">
-                              From: <span className="font-medium">{thread.emails?.[0]?.from || 'Unknown'}</span>
-                            </p>
+                            <h4 className="font-semibold text-slate-900 text-sm truncate mb-0.5" title={thread.emails?.[0]?.subject}>{thread.emails?.[0]?.subject || 'Email Conversation'}</h4>
+                            <p className="text-xs text-slate-500 truncate">From: <span className="font-medium">{thread.emails?.[0]?.from || 'Unknown'}</span></p>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          className="text-slate-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-md transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0"
-                          onClick={() => setRemoveEmailThredModel(thread.id)}
-                        >
-                          <IconTrash size={16} stroke={1.5} />
-                        </button>
+                        <button type="button" className="text-slate-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-md transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0" onClick={() => setRemoveEmailThredModel(thread.id)}><IconTrash size={16} stroke={1.5} /></button>
                       </div>
                       <div className="p-4 flex-grow flex flex-col gap-2">
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-slate-500 font-medium">Extracted Attachments</span>
-                          <span className="font-bold text-slate-700 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded">
-                            <IconPaperclip size={12} className="text-slate-500" />
-                            {thread.attachmentsMapping?.length || 0}
-                          </span>
+                          <span className="font-bold text-slate-700 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded"><IconPaperclip size={12} className="text-slate-500" />{thread.attachmentsMapping?.length || 0}</span>
                         </div>
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-slate-500 font-medium">Processing Date</span>
                           <span className="text-slate-700 font-medium">{formatDate(thread.extractedAt)}</span>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleViewEmailThread(thread)}
-                        className="w-full py-3 text-xs font-bold text-indigo-600 bg-indigo-50/50 border-t border-indigo-50 hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2"
-                        disabled={actionsLoading}
-                      >
+                      <button type="button" onClick={() => handleViewEmailThread(thread)} className="w-full py-3 text-xs font-bold text-indigo-600 bg-indigo-50/50 border-t border-indigo-50 hover:bg-indigo-50 transition-colors flex items-center justify-center gap-2" disabled={actionsLoading}>
                         <IconEye size={16} stroke={2} /> View Full Thread
                       </button>
                     </div>
@@ -1281,146 +1210,117 @@ export default function InitiateProcess() {
             </div>
           )}
 
-          {/* Committed Documents Section */}
+          {/* ── Committed Documents Section ──────────────────────────────────── */}
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <IconFileText size={18} className="text-slate-400" /> Committed Documents
-              </h3>
-              <span className="text-xs font-bold text-slate-700 bg-slate-200 px-3 py-1 rounded-full border border-slate-300">
-                {documentFields.length} File(s)
-              </span>
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2"><IconFileText size={18} className="text-slate-400" /> Committed Documents</h3>
+              <span className="text-xs font-bold text-slate-700 bg-slate-200 px-3 py-1 rounded-full border border-slate-300">{documentFields.length} File(s)</span>
             </div>
 
             <div className="p-6 bg-slate-50/30">
               {documentFields.length === 0 ? (
                 <div className="text-center py-12 bg-white border-2 border-dashed border-slate-200 rounded-xl">
-                  <div className="w-16 h-16 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <IconAlertCircle size={32} stroke={1.5} />
-                  </div>
+                  <div className="w-16 h-16 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mx-auto mb-4"><IconAlertCircle size={32} stroke={1.5} /></div>
                   <h4 className="text-base font-bold text-slate-800 mb-1">No documents committed</h4>
-                  <p className="text-sm text-slate-500 font-medium max-w-sm mx-auto">
-                    Upload and commit files from the section above to include them in this workflow process.
-                  </p>
+                  <p className="text-sm text-slate-500 font-medium max-w-sm mx-auto">Upload and commit files from the section above to include them in this workflow process.</p>
                 </div>
               ) : (
                 <div className="flex flex-col gap-4">
-                  {documentFields.map((doc, index) => (
-                    <div
-                      key={doc.documentId || index}
-                      className={`flex flex-col bg-white border rounded-xl shadow-sm relative overflow-hidden hover:shadow-md transition-shadow ${
-                        doc.fromEmail ? 'border-indigo-200' : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      {/* Accent Left Border */}
-                      <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${doc.fromEmail ? 'bg-indigo-500' : 'bg-slate-300'}`}></div>
+                  {documentFields.map((doc, index) => {
+                    const isDescDoc = doc.isDescriptionDoc === true;
+                    return (
+                      <div
+                        key={doc.documentId || index}
+                        className={`flex flex-col bg-white border rounded-xl shadow-sm relative overflow-hidden hover:shadow-md transition-shadow ${
+                          isDescDoc ? 'border-violet-200' : doc.fromEmail ? 'border-indigo-200' : 'border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        {/* Accent Left Border */}
+                        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${isDescDoc ? 'bg-violet-500' : doc.fromEmail ? 'bg-indigo-500' : 'bg-slate-300'}`}></div>
 
-                      <div className="flex flex-col md:flex-row md:items-start gap-4 p-5 pl-6">
-                        
-                        {/* Header Info Left */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 mb-2">
-                            <div className={`p-2 rounded-lg ${doc.fromEmail ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-600'}`}>
-                              {doc.fromEmail ? <IconMail size={20} stroke={1.5} /> : <IconFileText size={20} stroke={1.5} />}
-                            </div>
-                            <div className="min-w-0">
-                              <h4 className="text-base font-bold text-slate-900 truncate" title={doc.name}>
-                                {doc.name || 'Unnamed Document'}
-                              </h4>
-                              <div className="flex flex-wrap items-center gap-2 mt-1">
-                                <span className="text-xs font-mono text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-                                  ID: {doc.documentId}
-                                </span>
-                                {doc.issueNo && (
-                                  <span className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                                    Ver: {doc.issueNo}
-                                  </span>
-                                )}
-                                {doc.preApproved && (
-                                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                                    Pre-Approved
-                                  </span>
-                                )}
-                                {doc.fromEmail && (
-                                  <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
-                                    From Email
-                                  </span>
-                                )}
+                        <div className="flex flex-col md:flex-row md:items-start gap-4 p-5 pl-6">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-3 mb-2">
+                              <div className={`p-2 rounded-lg ${isDescDoc ? 'bg-violet-50 text-violet-600' : doc.fromEmail ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-600'}`}>
+                                {isDescDoc ? <IconDeviceFloppy size={20} stroke={1.5} /> : doc.fromEmail ? <IconMail size={20} stroke={1.5} /> : <IconFileText size={20} stroke={1.5} />}
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className="text-base font-bold text-slate-900 truncate" title={doc.name}>{doc.name || 'Unnamed Document'}</h4>
+                                <div className="flex flex-wrap items-center gap-2 mt-1">
+                                  <span className="text-xs font-mono text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">ID: {doc.documentId}</span>
+                                  {doc.issueNo && <span className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">Ver: {doc.issueNo}</span>}
+                                  {doc.preApproved && <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">Pre-Approved</span>}
+                                  {doc.fromEmail && <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">From Email</span>}
+                                  {isDescDoc && (
+                                    <span className="text-xs font-bold text-violet-700 bg-violet-50 px-2 py-0.5 rounded border border-violet-200 flex items-center gap-1">
+                                      <IconDeviceFloppy size={11} /> Description Doc
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
+
+                            {isDescDoc && (
+                              <p className="mt-2 text-xs text-violet-800 bg-violet-50 p-3 rounded-lg border border-violet-200 flex items-start gap-2">
+                                <IconInfoCircle size={16} className="flex-shrink-0 mt-0.5 text-violet-500" />
+                                This is the auto-generated process description document. No description text will be printed on this file.
+                              </p>
+                            )}
+
+                            {doc.info && !isDescDoc && (
+                              <p className="mt-3 text-sm text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-200 flex items-start gap-2">
+                                <IconInfoCircle size={18} className="flex-shrink-0 mt-0.5" /> {doc.info}
+                              </p>
+                            )}
                           </div>
 
-                          {doc.info && (
-                            <p className="mt-3 text-sm text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-200 flex items-start gap-2">
-                              <IconInfoCircle size={18} className="flex-shrink-0 mt-0.5" />
-                              {doc.info}
-                            </p>
-                          )}
+                          <div className="flex items-center gap-2 md:mt-1 self-start md:self-auto">
+                            <button type="button" disabled={actionsLoading} onClick={() => handleViewFile(doc.name, doc.documentPath || '/check', doc.documentId, doc.name?.split('.').pop(), true)} className="px-4 py-2 text-sm font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-2">
+                              <IconEye size={16} /> View
+                            </button>
+                            <button type="button" disabled={actionsLoading} onClick={() => handleDeleteDocument(index, doc.documentId)} className="px-3 py-2 text-sm font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 hover:border-red-300 rounded-lg transition-colors flex items-center" title="Remove Document">
+                              <IconTrash size={18} />
+                            </button>
+                          </div>
                         </div>
 
-                        {/* Actions Right */}
-                        <div className="flex items-center gap-2 md:mt-1 self-start md:self-auto">
-                          <button
-                            type="button"
-                            disabled={actionsLoading}
-                            onClick={() => handleViewFile(doc.name, doc.documentPath || '/check', doc.documentId, doc.name?.split('.').pop(), true)}
-                            className="px-4 py-2 text-sm font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors flex items-center gap-2"
-                          >
-                            <IconEye size={16} /> View
-                          </button>
-                          <button
-                            type="button"
-                            disabled={actionsLoading}
-                            onClick={() => handleDeleteDocument(index, doc.documentId)}
-                            className="px-3 py-2 text-sm font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 hover:border-red-300 rounded-lg transition-colors flex items-center"
-                            title="Remove Document"
-                          >
-                            <IconTrash size={18} />
-                          </button>
-                        </div>
+                        {/* Rich Text Description Area — hidden for description docs */}
+                        {doc.description && !isDescDoc && (
+                          <div className="px-5 pb-5 pl-6">
+                            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 ml-1">Document Description</div>
+                            <div
+                              className="text-sm text-slate-700 bg-slate-50/80 p-4 rounded-xl border border-slate-200 overflow-y-auto max-h-[300px] shadow-inner break-words whitespace-normal
+                              [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full
+                              [&_table]:block [&_table]:overflow-x-auto [&_table]:max-w-full [&_table]:w-full [&_table]:border-collapse [&_table]:border-2 [&_table]:border-slate-300 [&_table]:my-3 [&_table]:bg-white
+                              [&_th]:bg-slate-100 [&_th]:font-bold [&_th]:p-3 [&_th]:border-slate-300 [&_th]:text-left
+                              [&_td]:p-3 [&_td]:border [&_td]:border-slate-200
+                              [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2
+                              [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2
+                              [&_p]:mb-2 last:[&_p]:mb-0 [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap [&_pre]:break-words"
+                              dangerouslySetInnerHTML={{ __html: doc.description }}
+                            />
+                          </div>
+                        )}
                       </div>
-
-                      {/* Rich Text Description Area */}
-                      {doc.description && (
-                        <div className="px-5 pb-5 pl-6">
-                          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 ml-1">Document Description</div>
-                          <div 
-                            className="text-sm text-slate-700 bg-slate-50/80 p-4 rounded-xl border border-slate-200 overflow-y-auto max-h-[300px] shadow-inner break-words whitespace-normal
-                            
-                            [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full
-                            
-                            [&_table]:block [&_table]:overflow-x-auto [&_table]:max-w-full [&_table]:w-full [&_table]:border-collapse [&_table]:border-2 [&_table]:border-slate-300 [&_table]:my-3 [&_table]:bg-white
-                            [&_th]:bg-slate-100 [&_th]:font-bold [&_th]:p-3 [&_th]:border-slate-300 [&_th]:text-left
-                            [&_td]:p-3 [&_td]:border [&_td]:border-slate-200
-                            
-                            [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2
-                            [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2
-                            [&_p]:mb-2 last:[&_p]:mb-0 [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap [&_pre]:break-words
-                            "
-                            dangerouslySetInnerHTML={{ __html: doc.description }}
-                          >
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
           </div>
 
-          {/* Submit Button */}
+          {/* ── Submit Button ────────────────────────────────────────────────── */}
           <div className="flex justify-end pt-4 pb-10">
             <button
               type="submit"
-              disabled={actionsLoading || isExtractingEmail || documentFields.length === 0}
+              disabled={actionsLoading || isExtractingEmail || isSavingDescription || documentFields.length === 0}
               className={`px-8 py-3.5 rounded-xl font-bold text-base text-white shadow-lg transition-all flex items-center gap-2 ${
-                actionsLoading || isExtractingEmail || documentFields.length === 0
+                actionsLoading || isExtractingEmail || isSavingDescription || documentFields.length === 0
                   ? 'bg-slate-400 cursor-not-allowed'
                   : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-indigo-500/30'
               }`}
             >
-              {actionsLoading ? (
+              {actionsLoading || isSavingDescription ? (
                 <>Processing Request...</>
               ) : (
                 <>
@@ -1433,17 +1333,12 @@ export default function InitiateProcess() {
         </form>
       </div>
 
-      {fileView && (
-        <ViewFile docu={fileView} setFileView={setFileView} handleViewClose={() => setFileView(null)} />
-      )}
+      {fileView && <ViewFile docu={fileView} setFileView={setFileView} handleViewClose={() => setFileView(null)} />}
 
       {showEmailThreadModal && selectedEmailThread && (
         <EmailThreadModal
           thread={selectedEmailThread}
-          onClose={() => {
-            setShowEmailThreadModal(false);
-            setSelectedEmailThread(null);
-          }}
+          onClose={() => { setShowEmailThreadModal(false); setSelectedEmailThread(null); }}
           onViewDocument={handleViewFile}
         />
       )}
