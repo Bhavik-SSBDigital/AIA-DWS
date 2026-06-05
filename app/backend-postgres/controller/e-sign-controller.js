@@ -101,15 +101,23 @@ export async function executePythonScript(
   pythonScriptPath,
   absDocumentPath,
 ) {
-  const command = `${pythonEnvPath} ${pythonScriptPath} "${absDocumentPath}"`;
+  const command = `"${pythonEnvPath}" "${pythonScriptPath}" "${absDocumentPath}"`;
   try {
     const { stdout, stderr } = await execPromise(command);
-    if (stderr) {
-      console.error(`Error output: ${stderr}`);
-      throw new Error(stderr);
+
+    // Attempt to parse stdout first. If valid JSON exists, ignore stderr warnings.
+    try {
+      const match = stdout.match(/\{.*\}/s);
+      if (match) {
+        return JSON.parse(match[0]);
+      }
+      return JSON.parse(stdout.trim());
+    } catch (parseError) {
+      console.error(
+        `Script Output Unparseable: STDOUT: ${stdout} | STDERR: ${stderr}`,
+      );
+      throw new Error("Failed to parse coordinates from document.");
     }
-    const scriptOutput = JSON.parse(stdout);
-    return scriptOutput;
   } catch (error) {
     console.error(`Error executing script: ${error.message}`);
     throw error;
@@ -151,30 +159,26 @@ export const sign_document = async (req, res, next) => {
   try {
     const accessToken = req.headers["authorization"].substring(7);
     const userData = await verifyUser(accessToken);
-    if (userData === "Unauthorized") {
+    if (userData === "Unauthorized")
       return res.status(401).json({ message: "Unauthorized request" });
-    }
 
-    const signaturePic = await prisma.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: userData.id },
-      select: { signaturePicFileName: true },
+      select: { signaturePicFileName: true, dscFileName: true },
     });
-    const eSignFileName = signaturePic?.signaturePicFileName;
-
-    if (!eSignFileName) {
+    if (!user?.signaturePicFileName)
       return res
         .status(400)
         .json({ message: "Please upload pic of your signature first" });
-    }
 
     const imagePath = path.join(
       __dirname,
       envVariables.SIGNATURE_FOLDER_PATH,
-      eSignFileName,
+      user.signaturePicFileName,
     );
     try {
       await fs.access(imagePath);
-    } catch (error) {
+    } catch {
       return res
         .status(400)
         .json({ message: "Couldn't find your signature image" });
@@ -193,12 +197,16 @@ export const sign_document = async (req, res, next) => {
     };
 
     const jpegImagePath = await convertToJpeg(imagePath);
+    const dscPath = user.dscFileName
+      ? path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName)
+      : undefined;
+
     const {
       documentId,
       processId,
-      passphrase,
       processStepInstanceId,
       p12password,
+      remarks = "N/A",
     } = req.body;
 
     const document = await prisma.document.findUnique({
@@ -207,143 +215,120 @@ export const sign_document = async (req, res, next) => {
     const process = await prisma.processInstance.findUnique({
       where: { id: processId },
     });
-
-    if (!document || !process) {
-      return res.status(404).json({ message: "Document or process not found" });
-    }
-
     const processDocument = await prisma.processDocument.findFirst({
       where: { processId, documentId },
     });
 
-    if (!processDocument) {
-      return res.status(404).json({ message: "Document not found in process" });
+    if (!document || !process || !processDocument) {
+      return res.status(404).json({ message: "Document or process not found" });
     }
 
     const currentStep = await prisma.workflowStep.findUnique({
       where: { id: process.currentStepId },
     });
-
-    const signature = `[${userData.username}, 
-    }, Timestamp: ${formatDate(Date.now())}, fileName: ${document.name})]`;
-
-    const documentPath = document.path;
     const absDocumentPath = path.join(
       __dirname,
       "../../../../",
       "storage",
-      documentPath,
+      document.path,
     );
     const existingPdfBytes = await fs.readFile(absDocumentPath);
+
     const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
+    const pythonScriptPath = path.join(
+      __dirname,
+      "../../support/getFileSpace.py",
+    );
 
     const pdfDoc = await loadPdfSafely(
       existingPdfBytes,
       absDocumentPath,
       pythonEnvPath,
     );
-
     const pages = pdfDoc.getPages();
-    const lastPageIndex = pages.length - 1;
-    const lastPage = pages[lastPageIndex];
     const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
     const coordinates = await get_sign_coordinates_for_specific_step_in_process(
       documentId,
       currentStep?.id,
     );
-    const remarks = req.body.remarks || "N/A";
 
-    const pythonScriptPath = path.join(
-      __dirname,
-      "../../support/getFileSpace.py",
-    );
+    let finalPdfBytes;
+    let signatureCoordinates;
 
-    const user = await prisma.user.findUnique({
-      where: { username: userData.username },
-      select: { dscFileName: true },
-    });
+    // STEP 1: Generate PDF Bytes in memory (Atomic boundary)
     if (coordinates.length > 0) {
-      if (user.dscFileName) {
-        console.log("dir name", __dirname);
-        await print_signature_at_coordinates(
-          pdfDoc,
-          coordinates,
-          jpegImagePath,
-          userData.username,
-          remarks,
-          formatDate(Date.now()),
-          helveticaFont,
-          absDocumentPath,
-          documentId,
-          userData,
-          path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName),
-          p12password,
-        );
-      } else {
-        console.log("dir name", __dirname);
-        await print_signature_at_coordinates(
-          pdfDoc,
-          coordinates,
-          jpegImagePath,
-          userData.username,
-          remarks,
-          formatDate(Date.now()),
-          helveticaFont,
-          absDocumentPath,
-          documentId,
-          userData,
-        );
-      }
+      finalPdfBytes = await print_signature_at_coordinates(
+        pdfDoc,
+        coordinates,
+        jpegImagePath,
+        userData.username,
+        remarks,
+        formatDate(Date.now()),
+        helveticaFont,
+        dscPath,
+        p12password,
+      );
     } else {
-      const dscPath = user.dscFileName
-        ? path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName)
-        : undefined;
-
-      console.log("dsc path", dscPath);
-      const signatureCoordinates =
-        await print_signature_after_content_on_the_last_page(
-          pdfDoc,
-          lastPage,
-          documentPath,
-          jpegImagePath,
-          userData.username,
-          formatDate(Date.now()),
-          remarks,
-          helveticaFont,
-          pythonEnvPath,
-          pythonScriptPath,
-        );
-
-      await prisma.signCoordinate.create({
-        data: {
-          processDocumentId: processDocument.id,
-          page: signatureCoordinates.newlyAdded
-            ? lastPageIndex + 2
-            : lastPageIndex + 1,
-          x: signatureCoordinates.x,
-          y: signatureCoordinates.y,
-          width: signatureCoordinates.width,
-          height: signatureCoordinates.height,
-          stepId: currentStep?.id,
-          isSigned: true,
-          signedById: userData.id,
-        },
-      });
+      const result = await print_signature_after_content_on_the_last_page(
+        pdfDoc,
+        pages[pages.length - 1],
+        document.path,
+        jpegImagePath,
+        userData.username,
+        formatDate(Date.now()),
+        remarks,
+        helveticaFont,
+        pythonEnvPath,
+        pythonScriptPath,
+        dscPath,
+        p12password,
+      );
+      finalPdfBytes = result.pdfBytes;
+      signatureCoordinates = result.coords;
     }
 
-    const signDetails = await prisma.documentSignature.create({
-      data: {
-        processDocumentId: processDocument.id,
-        userId: userData.id,
-        processStepInstanceId: processStepInstanceId,
-        reason: remarks,
-      },
+    // STEP 2: Database updates via Transaction
+    await prisma.$transaction(async (tx) => {
+      if (coordinates.length > 0) {
+        await tx.signCoordinate.updateMany({
+          where: {
+            processDocumentId: documentId.toString(),
+            page: { in: coordinates.map((c) => c.page) },
+          },
+          data: { isSigned: true, signedById: userData.id },
+        });
+      } else if (signatureCoordinates) {
+        await tx.signCoordinate.create({
+          data: {
+            processDocumentId: processDocument.id,
+            page: signatureCoordinates.newlyAdded
+              ? pages.length + 1
+              : pages.length,
+            x: signatureCoordinates.x,
+            y: signatureCoordinates.y,
+            width: signatureCoordinates.width,
+            height: signatureCoordinates.height,
+            stepId: currentStep?.id,
+            isSigned: true,
+            signedById: userData.id,
+          },
+        });
+      }
+
+      await tx.documentSignature.create({
+        data: {
+          processDocumentId: processDocument.id,
+          userId: userData.id,
+          processStepInstanceId: processStepInstanceId,
+          reason: remarks,
+        },
+      });
     });
 
-    console.log("signed details", signDetails);
-    const processResult = await is_process_forwardable(process, userData.id);
+    // STEP 3: Write File (Only reached if memory generation and DB succeed)
+    await fs.writeFile(absDocumentPath, finalPdfBytes);
 
+    const processResult = await is_process_forwardable(process, userData.id);
     return res.status(200).json({
       message: "Document signed successfully",
       isForwardable: processResult.isForwardable,
@@ -351,7 +336,9 @@ export const sign_document = async (req, res, next) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Internal Server Error" });
+    res
+      .status(500)
+      .json({ message: "Internal Server Error", error: error.message });
   }
 };
 
@@ -359,30 +346,26 @@ export const sign_documents = async (req, res, next) => {
   try {
     const accessToken = req.headers["authorization"].substring(7);
     const userData = await verifyUser(accessToken);
-    if (userData === "Unauthorized") {
+    if (userData === "Unauthorized")
       return res.status(401).json({ message: "Unauthorized request" });
-    }
 
-    const signaturePic = await prisma.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: userData.id },
-      select: { signaturePicFileName: true },
+      select: { signaturePicFileName: true, dscFileName: true },
     });
-    const eSignFileName = signaturePic?.signaturePicFileName;
-
-    if (!eSignFileName) {
+    if (!user?.signaturePicFileName)
       return res
         .status(400)
         .json({ message: "Please upload pic of your signature first" });
-    }
 
     const imagePath = path.join(
       __dirname,
       envVariables.SIGNATURE_FOLDER_PATH,
-      eSignFileName,
+      user.signaturePicFileName,
     );
     try {
       await fs.access(imagePath);
-    } catch (error) {
+    } catch {
       return res
         .status(400)
         .json({ message: "Couldn't find your signature image" });
@@ -401,46 +384,21 @@ export const sign_documents = async (req, res, next) => {
     };
 
     const jpegImagePath = await convertToJpeg(imagePath);
-
-    const user = await prisma.user.findUnique({
-      where: { username: userData.username },
-      select: { dscFileName: true },
-    });
-
     const dscPath = user.dscFileName
       ? path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName)
       : undefined;
 
-    const { documents, processId, passphrase, p12password } = req.body;
-
+    const { documents, processId, p12password } = req.body;
     const process = await prisma.processInstance.findUnique({
       where: { id: processId },
     });
-
-    if (!process) {
-      return res.status(404).json({ message: "Process not found" });
-    }
+    if (!process) return res.status(404).json({ message: "Process not found" });
 
     const results = [];
     const errors = [];
-
-    if (!Array.isArray(documents) || documents.length === 0) {
-      const processResult = await is_process_forwardable(process, userData.id);
-      const response = {
-        message: "Batch signing completed",
-        signedCount: results.length,
-        failedCount: errors.length,
-        results: results,
-        isForwardable: processResult.isForwardable,
-        isRevertable: processResult.isRevertable,
-      };
-      return res.status(200).json(response);
-    }
-
     const currentStep = await prisma.workflowStep.findUnique({
       where: { id: process.currentStepId },
     });
-
     const pythonScriptPath = path.join(
       __dirname,
       "../../support/getFileSpace.py",
@@ -450,100 +408,91 @@ export const sign_documents = async (req, res, next) => {
     for (const doc of documents) {
       try {
         const { documentId, processStepInstanceId, remarks = "N/A" } = doc;
-
         const document = await prisma.document.findUnique({
           where: { id: documentId },
         });
-
-        if (!document) {
-          errors.push({
-            documentId,
-            error: "Document not found",
-            success: false,
-          });
-          continue;
-        }
+        if (!document) throw new Error("Document not found");
 
         const processDocument = await prisma.processDocument.findFirst({
           where: { processId, documentId },
         });
-
-        if (!processDocument) {
-          errors.push({
-            documentId,
-            error: "Document not found in process",
-            success: false,
-          });
-          continue;
-        }
+        if (!processDocument) throw new Error("Document not found in process");
 
         const extension = document.name?.split(".").pop()?.toLowerCase();
-        const documentPath = document.path;
+        if (extension !== "pdf") throw new Error("Only PDF supported");
 
-        if (extension === "pdf") {
-          const absDocumentPath = path.join(
-            __dirname,
-            "../../../../",
-            "storage",
-            documentPath,
+        const absDocumentPath = path.join(
+          __dirname,
+          "../../../../",
+          "storage",
+          document.path,
+        );
+        const existingPdfBytes = await fs.readFile(absDocumentPath);
+        const pdfDoc = await loadPdfSafely(
+          existingPdfBytes,
+          absDocumentPath,
+          pythonEnvPath,
+        );
+        const pages = pdfDoc.getPages();
+        const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        const coordinates =
+          await get_sign_coordinates_for_specific_step_in_process(
+            documentId,
+            currentStep?.id,
           );
-          const existingPdfBytes = await fs.readFile(absDocumentPath);
 
-          const pdfDoc = await loadPdfSafely(
-            existingPdfBytes,
-            absDocumentPath,
+        let finalPdfBytes;
+        let signatureCoordinates;
+
+        // IN-MEMORY GENERATION (Atomic boundary)
+        if (coordinates.length > 0) {
+          finalPdfBytes = await print_signature_at_coordinates(
+            pdfDoc,
+            coordinates,
+            jpegImagePath,
+            userData.username,
+            remarks,
+            formatDate(Date.now()),
+            helveticaFont,
+            dscPath,
+            p12password,
+          );
+        } else {
+          const result = await print_signature_after_content_on_the_last_page(
+            pdfDoc,
+            pages[pages.length - 1],
+            document.path,
+            jpegImagePath,
+            userData.username,
+            formatDate(Date.now()),
+            remarks,
+            helveticaFont,
             pythonEnvPath,
+            pythonScriptPath,
+            dscPath,
+            p12password,
           );
+          finalPdfBytes = result.pdfBytes;
+          signatureCoordinates = result.coords;
+        }
 
-          const pages = pdfDoc.getPages();
-          const lastPageIndex = pages.length - 1;
-          const lastPage = pages[lastPageIndex];
-          const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
-          const coordinates =
-            await get_sign_coordinates_for_specific_step_in_process(
-              documentId,
-              currentStep?.id,
-            );
-
+        // DATABASE TRANSACTION
+        await prisma.$transaction(async (tx) => {
           if (coordinates.length > 0) {
-            await print_signature_at_coordinates(
-              pdfDoc,
-              coordinates,
-              jpegImagePath,
-              userData.username,
-              remarks,
-              formatDate(Date.now()),
-              helveticaFont,
-              absDocumentPath,
-              documentId,
-              userData,
-              dscPath,
-              p12password,
-            );
-          } else {
-            const signatureCoordinates =
-              await print_signature_after_content_on_the_last_page(
-                pdfDoc,
-                lastPage,
-                documentPath,
-                jpegImagePath,
-                userData.username,
-                formatDate(Date.now()),
-                remarks,
-                helveticaFont,
-                pythonEnvPath,
-                pythonScriptPath,
-                dscPath,
-                p12password,
-              );
-
-            await prisma.signCoordinate.create({
+            await tx.signCoordinate.updateMany({
+              where: {
+                processDocumentId: documentId.toString(),
+                page: { in: coordinates.map((c) => c.page) },
+              },
+              data: { isSigned: true, signedById: userData.id },
+            });
+          } else if (signatureCoordinates) {
+            await tx.signCoordinate.create({
               data: {
                 processDocumentId: processDocument.id,
                 page: signatureCoordinates.newlyAdded
-                  ? lastPageIndex + 2
-                  : lastPageIndex + 1,
+                  ? pages.length + 1
+                  : pages.length,
                 x: signatureCoordinates.x,
                 y: signatureCoordinates.y,
                 width: signatureCoordinates.width,
@@ -554,23 +503,24 @@ export const sign_documents = async (req, res, next) => {
               },
             });
           }
-        }
-
-        const signDetails = await prisma.documentSignature.create({
-          data: {
-            processDocumentId: processDocument.id,
-            userId: userData.id,
-            processStepInstanceId: processStepInstanceId,
-            reason: remarks,
-          },
+          await tx.documentSignature.create({
+            data: {
+              processDocumentId: processDocument.id,
+              userId: userData.id,
+              processStepInstanceId,
+              reason: remarks,
+            },
+          });
         });
+
+        // FILE WRITE (Only triggers if everything above succeeds)
+        await fs.writeFile(absDocumentPath, finalPdfBytes);
 
         results.push({
           documentId,
           documentName: document.name,
-          signDetailsId: signDetails.id,
           success: true,
-          message: "Document signed successfully",
+          message: "Signed successfully",
         });
       } catch (error) {
         console.error(`Error signing document ${doc.documentId}:`, error);
@@ -583,31 +533,24 @@ export const sign_documents = async (req, res, next) => {
     }
 
     const processResult = await is_process_forwardable(process, userData.id);
-
     const response = {
       message: "Batch signing completed",
       signedCount: results.length,
       failedCount: errors.length,
-      results: results,
+      results,
       isForwardable: processResult.isForwardable,
       isRevertable: processResult.isRevertable,
+      ...(errors.length > 0 && { errors }),
     };
 
-    if (errors.length > 0) {
-      response.errors = errors;
-    }
-
-    if (results.length === 0 && errors.length > 0) {
-      return res.status(500).json({
-        ...response,
-        message: "Failed to sign any documents",
-      });
-    } else if (errors.length > 0) {
-      return res.status(207).json({
-        ...response,
-        message: "Some documents failed to sign",
-      });
-    }
+    if (results.length === 0 && errors.length > 0)
+      return res
+        .status(500)
+        .json({ ...response, message: "Failed to sign any documents" });
+    if (errors.length > 0)
+      return res
+        .status(207)
+        .json({ ...response, message: "Some documents failed to sign" });
 
     return res.status(200).json(response);
   } catch (error) {
@@ -1043,14 +986,20 @@ async function print_signature_after_content_on_the_last_page(
     "storage",
     documentPath,
   );
-
   const lastContentCoordinates = await executePythonScript(
     pythonEnvPath,
     pythonScriptPath,
     absDocumentPath,
   );
 
-  const pageHeight = lastContentCoordinates.height || lastPage.getHeight();
+  const rotationAngle = lastPage.getRotation().angle;
+  const isLandscape = rotationAngle === 90 || rotationAngle === 270;
+
+  // Normalize dimensions to represent the visual layout
+  const visualWidth = isLandscape ? lastPage.getHeight() : lastPage.getWidth();
+  const visualHeight = isLandscape ? lastPage.getWidth() : lastPage.getHeight();
+
+  const pageHeight = lastContentCoordinates.height || visualHeight;
   const startingYFromTop = lastContentCoordinates.last_y || pageHeight;
   const availableSpaceAtBottom = Math.max(0, pageHeight - startingYFromTop);
 
@@ -1059,61 +1008,48 @@ async function print_signature_after_content_on_the_last_page(
 
   const signatureImageWidth = 200;
   const signatureImageHeight = 75;
-
   const fontSize = 12;
   const lineSpacing = fontSize + 5;
   const MAX_WIDTH = 300;
   const LEFT_MARGIN = 50;
   const SAFETY_MARGIN = 120;
 
-  const safeUsername = sanitizeText(username);
-  const safeTimestamp = sanitizeText(timestamp);
-  const safeRemarks = sanitizeText(remarks);
+  let currentPage = lastPage;
+  let rotation = rotationAngle;
+  let startY =
+    availableSpaceAtBottom > 150 ? availableSpaceAtBottom - SAFETY_MARGIN : -1;
 
-  const signedByLines = wrapText(
-    `Signed By: ${safeUsername}`,
-    helveticaFont,
-    fontSize,
-    MAX_WIDTH,
-  );
+  // If there's no room, create a natively correctly-oriented page
+  if (startY < 150) {
+    currentPage = pdfDoc.addPage([visualWidth, visualHeight]);
+    rotation = 0;
+    startY = currentPage.getHeight() - 90;
+  }
 
-  const timestampLines = wrapText(
-    `Timestamp: ${safeTimestamp}`,
-    helveticaFont,
-    fontSize,
-    MAX_WIDTH,
-  );
+  let currentY = startY;
 
-  const remarksLines = wrapText(
-    `Remarks: ${safeRemarks}`,
-    helveticaFont,
-    fontSize,
-    MAX_WIDTH,
-  );
-
-  const drawRotatedText = (page, text, x, y, rotation, font, size) => {
+  const drawRotatedText = (page, text, x, y, rot, font, size) => {
     try {
       const W = page.getWidth();
       const H = page.getHeight();
+      let rawX, rawY, actualRot;
 
-      let rawX, rawY, rot;
-
-      if (rotation === 0) {
+      if (rot === 0) {
         rawX = x;
         rawY = y;
-        rot = 0;
-      } else if (rotation === 90) {
-        rawX = W - y;
-        rawY = x;
-        rot = 90;
-      } else if (rotation === 270 || rotation === -90) {
+        actualRot = 0;
+      } else if (rot === 90) {
         rawX = y;
         rawY = H - x;
-        rot = -90;
-      } else {
+        actualRot = -90;
+      } else if (rot === 180) {
         rawX = W - x;
         rawY = H - y;
-        rot = 180;
+        actualRot = 180;
+      } else {
+        rawX = W - y;
+        rawY = x;
+        actualRot = 90;
       }
 
       page.drawText(text, {
@@ -1122,35 +1058,34 @@ async function print_signature_after_content_on_the_last_page(
         size,
         font,
         color: rgb(0, 0, 0),
-        rotate: degrees(rot),
+        rotate: degrees(actualRot),
       });
     } catch (e) {
       console.warn("Skipped bad text:", text);
     }
   };
 
-  const drawRotatedImage = (page, img, x, y, w, h, rotation) => {
+  const drawRotatedImage = (page, img, x, y, w, h, rot) => {
     const W = page.getWidth();
     const H = page.getHeight();
+    let rawX, rawY, actualRot;
 
-    let rawX, rawY, rot;
-
-    if (rotation === 0) {
+    if (rot === 0) {
       rawX = x;
       rawY = y;
-      rot = 0;
-    } else if (rotation === 90) {
-      rawX = W - y;
-      rawY = x;
-      rot = 90;
-    } else if (rotation === 270 || rotation === -90) {
+      actualRot = 0;
+    } else if (rot === 90) {
       rawX = y;
       rawY = H - x;
-      rot = -90;
-    } else {
+      actualRot = -90;
+    } else if (rot === 180) {
       rawX = W - x;
       rawY = H - y;
-      rot = 180;
+      actualRot = 180;
+    } else {
+      rawX = W - y;
+      rawY = x;
+      actualRot = 90;
     }
 
     page.drawImage(img, {
@@ -1158,29 +1093,9 @@ async function print_signature_after_content_on_the_last_page(
       y: rawY,
       width: w,
       height: h,
-      rotate: degrees(rot),
+      rotate: degrees(actualRot),
     });
   };
-
-  let currentPage = lastPage;
-  let rotation = lastPage.getRotation().angle;
-
-  let startY =
-    availableSpaceAtBottom > 150 ? availableSpaceAtBottom - SAFETY_MARGIN : -1;
-
-  if (startY < 150) {
-    currentPage = pdfDoc.addPage();
-    rotation = 0;
-    startY = currentPage.getHeight() - 90;
-  }
-
-  let currentY = startY;
-
-  if (currentY < signatureImageHeight + 20) {
-    currentPage = pdfDoc.addPage();
-    rotation = 0;
-    currentY = currentPage.getHeight() - 100;
-  }
 
   drawRotatedImage(
     currentPage,
@@ -1191,78 +1106,55 @@ async function print_signature_after_content_on_the_last_page(
     signatureImageHeight,
     rotation,
   );
-
   currentY -= signatureImageHeight + 4;
 
-  for (const line of signedByLines) {
-    if (currentY < 50) {
-      currentPage = pdfDoc.addPage();
-      rotation = 0;
-      currentY = currentPage.getHeight() - 50;
+  const labels = [
+    `Signed By: ${username}`,
+    `Timestamp: ${timestamp}`,
+    `Remarks: ${remarks || "N/A"}`,
+  ];
+
+  for (const label of labels) {
+    const lines = wrapText(label, helveticaFont, fontSize, MAX_WIDTH);
+    for (const line of lines) {
+      drawRotatedText(
+        currentPage,
+        line,
+        LEFT_MARGIN,
+        currentY,
+        rotation,
+        helveticaFont,
+        fontSize,
+      );
+      currentY -= lineSpacing;
     }
-
-    drawRotatedText(
-      currentPage,
-      line,
-      LEFT_MARGIN,
-      currentY,
-      rotation,
-      helveticaFont,
-      fontSize,
-    );
-
-    currentY -= lineSpacing;
   }
 
-  for (const line of timestampLines) {
-    if (currentY < 50) {
-      currentPage = pdfDoc.addPage();
-      rotation = 0;
-      currentY = currentPage.getHeight() - 50;
-    }
-
-    drawRotatedText(
-      currentPage,
-      line,
-      LEFT_MARGIN,
-      currentY,
-      rotation,
-      helveticaFont,
-      fontSize,
-    );
-
-    currentY -= lineSpacing;
+  let finalPdfBytes;
+  if (!p12Path) {
+    finalPdfBytes = await pdfDoc.save();
+  } else {
+    const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+    const pdfWithPlaceholder = plainAddPlaceholder({
+      pdfBuffer: Buffer.from(pdfBytes),
+      reason: "Digital Signature",
+      signatureLength: 8192,
+    });
+    const p12Buffer = readFileSync(p12Path);
+    const signer = new P12Signer(p12Buffer, { passphrase: p12password });
+    const signPdf = new SignPdf();
+    finalPdfBytes = await signPdf.sign(pdfWithPlaceholder, signer);
   }
-
-  for (const line of remarksLines) {
-    if (currentY < 50) {
-      currentPage = pdfDoc.addPage();
-      rotation = 0;
-      currentY = currentPage.getHeight() - 50;
-    }
-
-    drawRotatedText(
-      currentPage,
-      line,
-      LEFT_MARGIN,
-      currentY,
-      rotation,
-      helveticaFont,
-      fontSize,
-    );
-
-    currentY -= lineSpacing;
-  }
-
-  const pdfBytes = await pdfDoc.save();
-  await fs.writeFile(absDocumentPath, pdfBytes);
 
   return {
-    x: LEFT_MARGIN,
-    y: currentY,
-    width: MAX_WIDTH,
-    height: 200,
-    newlyAdded: true,
+    pdfBytes: finalPdfBytes,
+    coords: {
+      x: LEFT_MARGIN,
+      y: currentY,
+      width: MAX_WIDTH,
+      height: 200,
+      newlyAdded: rotation === 0 && startY === currentPage.getHeight() - 90,
+    },
   };
 }
 
@@ -1274,18 +1166,10 @@ async function print_signature_at_coordinates(
   remarks,
   timestamp,
   helveticaFont,
-  absDocumentPath,
-  documentId,
-  userData,
   p12Path,
   p12password,
 ) {
-  const user = await prisma.user.findUnique({
-    where: { username: username },
-    select: { dscFileName: true },
-  });
-
-  const signatureImageBytes = await fs.readFile(jpegImagePath);
+  const signatureImageBytes = await readFileSync(jpegImagePath); // Use sync or await fs.readFile
   const signatureImage = await pdfDoc.embedJpg(signatureImageBytes);
 
   for (const coord of coordinates) {
@@ -1297,6 +1181,7 @@ async function print_signature_at_coordinates(
     const textFontSize = Math.min(10, textHeight / 3);
     const textPadding = 2;
 
+    // pdf-lib origin is bottom-left
     page.drawImage(signatureImage, {
       x,
       y: page.getHeight() - y - imageHeight,
@@ -1320,26 +1205,14 @@ async function print_signature_at_coordinates(
     drawTextLine(`SignedBy: ${username}`);
     drawTextLine(`Remarks: ${remarks}`);
     drawTextLine(`Timestamp: ${timestamp}`);
-
-    await prisma.signCoordinate.updateMany({
-      where: {
-        processDocumentId: documentId.toString(),
-        page: coord.page,
-      },
-      data: {
-        isSigned: true,
-        signedById: userData.id,
-      },
-    });
   }
 
-  let pdfBytes;
-  if (!user.dscFileName) {
-    pdfBytes = await pdfDoc.save();
-    await fs.writeFile(absDocumentPath, pdfBytes);
+  let finalPdfBytes;
+  if (!p12Path) {
+    finalPdfBytes = await pdfDoc.save();
   } else {
-    pdfBytes = await pdfDoc.save({ useObjectStreams: false });
-    const pdfWithPlaceholder = await plainAddPlaceholder({
+    const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+    const pdfWithPlaceholder = plainAddPlaceholder({
       pdfBuffer: Buffer.from(pdfBytes),
       reason: "Digital Signature",
       signatureLength: 8192,
@@ -1348,7 +1221,8 @@ async function print_signature_at_coordinates(
     const p12Buffer = readFileSync(p12Path);
     const signer = new P12Signer(p12Buffer, { passphrase: p12password });
     const signPdf = new SignPdf();
-    const signedPdf = await signPdf.sign(pdfWithPlaceholder, signer);
-    await fs.writeFile(absDocumentPath, signedPdf);
+    finalPdfBytes = await signPdf.sign(pdfWithPlaceholder, signer);
   }
+
+  return finalPdfBytes;
 }
