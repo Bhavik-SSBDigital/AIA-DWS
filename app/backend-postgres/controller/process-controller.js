@@ -903,7 +903,9 @@ export const initiate_process = async (req, res, next) => {
           });
         }
       }
-    } catch (emailError) {}
+    } catch (emailError) {
+      console.log("error getting email after initiate process", emailError);
+    }
 
     const { paymentMode, paymentDate, processTagId } = req.body;
 
