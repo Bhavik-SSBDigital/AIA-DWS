@@ -3,6 +3,9 @@ import { verifyUser } from "../utility/verifyUser.js";
 // Note: If you have a centralized prisma client instance (e.g., in utility/prisma.js),
 // import that instead of instantiating a new one here.
 import prisma from "../config/prisma-config.js";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const DEFAULT_CONFIG = {
   normalUser: [
