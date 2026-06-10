@@ -724,6 +724,7 @@ enum ProcessStatus {
   COMPLETED
   REJECTED
   PO_NO_ATTACHED
+  NOT_COMPLETED
 }
 
 enum StepStatus {
