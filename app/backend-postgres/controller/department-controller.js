@@ -1,7 +1,6 @@
-import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 /**
  * Registers a new department.
@@ -31,7 +30,6 @@ export const add_department = async (req, res) => {
       });
     }
 
-    console.log("User data", userData); // Full user details logged here
     const { code, type, status } = req.body;
 
     const parentDepartmentId =
@@ -106,8 +104,6 @@ export const get_department = async (req, res) => {
     const department = await prisma.department.findUnique({
       where: { id: parseInt(id) },
     });
-
-    console.log("department", department);
 
     department["department"] = department.name || "";
     if (!department) {

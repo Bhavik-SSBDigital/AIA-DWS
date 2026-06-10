@@ -1,6 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 class SearchIndexService {
   // Existing searchContent method
@@ -92,7 +90,7 @@ class SearchIndexService {
     } catch (error) {
       console.error(
         `Failed to index content for document ${documentId}:`,
-        error
+        error,
       );
       throw error; // Re-throw to allow caller to handle the error
     } finally {

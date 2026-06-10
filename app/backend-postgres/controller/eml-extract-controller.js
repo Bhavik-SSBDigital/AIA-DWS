@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import fsSync from "fs";
 import { dirname } from "path";
 import fs from "fs/promises";
-import { PrismaClient } from "@prisma/client";
+
 import { verifyUser } from "../utility/verifyUser.js";
 import { generateUniqueDocumentName } from "./process-controller.js";
 import PDFDocument from "pdfkit";
@@ -14,7 +14,7 @@ import os from "os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 const STORAGE_PATH = process.env.STORAGE_PATH || "../storage";
 
 // ======================================================================

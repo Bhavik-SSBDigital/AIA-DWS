@@ -1,4 +1,3 @@
-import { PrismaClient } from "@prisma/client";
 import { Document, Packer, Paragraph } from "docx";
 import { verifyUser } from "../utility/verifyUser.js";
 import { fileURLToPath } from "url";
@@ -21,7 +20,7 @@ import dotnev from "dotenv";
 import fs from "fs/promises";
 dotnev.config();
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 const STORAGE_PATH = process.env.STORAGE_PATH;
 

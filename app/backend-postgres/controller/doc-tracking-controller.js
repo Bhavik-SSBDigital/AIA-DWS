@@ -17,10 +17,9 @@ import { pipeline } from "stream";
 // import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import dotnev from "dotenv";
 
-import { PrismaClient } from "@prisma/client";
 import { execSync } from "child_process";
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 dotnev.config();
 
@@ -128,7 +127,6 @@ export const get_physical_requests = async (req, res) => {
     const role =
       req.query.role || (isAdmin ? "admin" : isDepartmentHead ? "hod" : "user");
 
-    console.log("role", role);
     let requests;
 
     if (role === "user") {
@@ -237,8 +235,6 @@ export const update_physical_request = async (req, res) => {
     const isAdmin = await checkIfUserIsAdmin(userData);
     const isHod = await checkHodRole(userData, request.departmentId);
 
-    console.log("is admin", isAdmin);
-    console.log("is hod", isHod);
     const isRequestingUser = userData.id === request.requestingUserId;
 
     // Validate action permissions
@@ -258,7 +254,6 @@ export const update_physical_request = async (req, res) => {
         else if (action === "queryUser") newStatus = "PENDING_USER_RESPONSE";
       }
     } else if (isHod && request.status === "PENDING_HOD_APPROVAL") {
-      console.log("reached right");
       if (action === "approve") newStatus = "HOD_APPROVED";
       else if (action === "reject") newStatus = "HOD_REJECTED";
       else if (action === "queryUser") newStatus = "PENDING_USER_RESPONSE";

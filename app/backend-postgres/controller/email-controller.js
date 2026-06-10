@@ -13,8 +13,7 @@ const STORAGE_PATH =
 import dotenv from "dotenv";
 dotenv.config();
 
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 // ===================== EMAIL MANAGEMENT =====================
 

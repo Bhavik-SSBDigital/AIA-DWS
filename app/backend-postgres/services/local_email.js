@@ -1,12 +1,12 @@
 import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
-import { PrismaClient } from "@prisma/client";
+
 import dotenv from "dotenv";
 dotenv.config();
 
 const { env } = process;
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 // Configure email transporter
 

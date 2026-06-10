@@ -7,7 +7,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { PrismaClient } from "@prisma/client";
+
 import { transporter } from "./emailService.js";
 import dotenv from "dotenv";
 
@@ -19,7 +19,7 @@ const STORAGE_PATH =
 dotenv.config();
 const { env } = process;
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 // ─── IST offset ────────────────────────────────────────────
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // UTC+5:30

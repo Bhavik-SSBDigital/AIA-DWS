@@ -1,9 +1,8 @@
 import { verifyUser } from "../utility/verifyUser.js";
-import { PrismaClient } from "@prisma/client";
 
 // Note: If you have a centralized prisma client instance (e.g., in utility/prisma.js),
 // import that instead of instantiating a new one here.
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 const DEFAULT_CONFIG = {
   normalUser: [

@@ -28,15 +28,9 @@ const P2P_SERVER = process.env.P2P_SERVER;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const {
-  PrismaClient,
-  AccessType,
-  NotificationType,
-  ProcessStatus,
-  StepStatus,
-} = pkg;
+const { AccessType, NotificationType, ProcessStatus, StepStatus } = pkg;
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 async function connectWithRetry(maxRetries = 5, delay = 1000) {
   for (let i = 0; i < maxRetries; i++) {
@@ -1566,8 +1560,6 @@ export const view_process = async (req, res) => {
       }
     };
 
-    console.log("process id", processId);
-
     // Fetch ProcessInstance with minimal relations
     const process = await retry(() =>
       prisma.processInstance.findUnique({
@@ -2832,8 +2824,6 @@ const ftpUploadFile = async (client, localPath, remoteName) => {
     localPath,
     remoteUrl,
   ]);
-
-  console.log("[CURL LOG]\n", stderr);
 };
 
 /**
@@ -2968,10 +2958,6 @@ export const attach_po_numbers = async (req, res) => {
     };
 
     try {
-      console.log("---- MONGO SYNC ----");
-      console.log("Mongo Sync URL:", `${P2P_SERVER}/sync-po-details`);
-      console.log("Mongo Sync Payload:", JSON.stringify(syncPayload, null, 2));
-
       const mongoResponse = await axios.post(
         `${P2P_SERVER}/sync-po-details`,
         syncPayload,
@@ -2979,13 +2965,6 @@ export const attach_po_numbers = async (req, res) => {
           timeout: 15000,
           httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         },
-      );
-
-      console.log("Mongo Sync SUCCESS ✅");
-      console.log("Mongo Response Status:", mongoResponse.status);
-      console.log(
-        "Mongo Response Data:",
-        JSON.stringify(mongoResponse.data, null, 2),
       );
     } catch (err) {
       console.log("Mongo Sync FAILED ❌");
@@ -2995,19 +2974,6 @@ export const attach_po_numbers = async (req, res) => {
 
       if (err.response) {
         // Server responded with a non-2xx status
-        console.log(
-          "  → Response Status  :",
-          err.response.status,
-          err.response.statusText,
-        );
-        console.log(
-          "  → Response Data    :",
-          JSON.stringify(err.response.data, null, 2),
-        );
-        console.log(
-          "  → Response Headers :",
-          JSON.stringify(err.response.headers, null, 2),
-        );
       } else if (err.request) {
         // Request was made but no response received
         console.log(
@@ -3015,10 +2981,6 @@ export const attach_po_numbers = async (req, res) => {
         );
         console.log("  → Request URL  :", err.config?.url);
         console.log("  → Request Method:", err.config?.method?.toUpperCase());
-        console.log(
-          "  → Request Payload Sent:",
-          JSON.stringify(err.config?.data, null, 2),
-        );
       } else {
         // Error in setting up the request
         console.log("  → Error occurred before request was sent");
@@ -3174,12 +3136,6 @@ export const sync_missing_po_data = async (req, res) => {
       );
 
       mongoSuccess = true;
-      console.log("Mongo Sync SUCCESS ✅");
-      console.log("Mongo Response Status:", mongoResponse.status);
-      console.log(
-        "Mongo Response Data:",
-        JSON.stringify(mongoResponse.data, null, 2),
-      );
     } catch (err) {
       console.log("Mongo Sync FAILED ❌");
       console.log("  → Error Message :", err.message);

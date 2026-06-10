@@ -1,7 +1,7 @@
 import pkg from "@prisma/client";
-const { PrismaClient, NotificationType } = pkg;
+const { NotificationType } = pkg;
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 export async function createNotification(tx, data) {
   const notification = await tx.processNotification.create({
@@ -25,7 +25,7 @@ export async function createQueryNotifications(
   queryId,
   processId,
   stepInstanceId,
-  recirculateFromStepId
+  recirculateFromStepId,
 ) {
   const query = await tx.processQuery.findUnique({
     where: { id: queryId },
@@ -85,7 +85,7 @@ export async function createRecommendationNotifications(
   tx,
   recommendationId,
   processId,
-  stepInstanceId
+  stepInstanceId,
 ) {
   const recommendation = await tx.processRecommendation.findUnique({
     where: { id: recommendationId },

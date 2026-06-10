@@ -1,5 +1,3 @@
-import { PrismaClient } from "@prisma/client";
-
 import { verifyUser } from "../utility/verifyUser.js";
 import { file_copy } from "./file-controller.js";
 import { buildRoleHierarchyForAssignment } from "./process-controller.js";
@@ -24,7 +22,7 @@ import { generateUniqueDocumentName } from "./process-controller.js";
 
 const STORAGE_PATH = process.env.STORAGE_PATH;
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 export const add_workflow = async (req, res) => {
   const accessToken = req.headers["authorization"]?.substring(7);

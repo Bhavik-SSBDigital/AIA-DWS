@@ -1,8 +1,8 @@
 import { createNotification } from "./notificationHelper.js";
 
-import { PrismaClient, AccessType } from "@prisma/client";
+import { AccessType } from "@prisma/client";
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 async function updateRecommendationHighlightsWithContext(
   tx,
@@ -10,7 +10,7 @@ async function updateRecommendationHighlightsWithContext(
   tempContextType,
   contextFlag,
   contextId,
-  contextField
+  contextField,
 ) {
   await tx.documentHighlight.updateMany({
     where: {
@@ -65,7 +65,7 @@ export const requestRecommendation = async (req, res) => {
         processId,
         "recommendation",
         newRec.id,
-        "recommendationId"
+        "recommendationId",
       );
 
       if (documentSummaries.length > 0) {
@@ -223,7 +223,7 @@ export const createRecommendationDoubt = async (req, res) => {
         "recommendationDoubt",
         "doubt",
         newDoubt.id,
-        "recommendationDoubtId"
+        "recommendationDoubtId",
       );
 
       await createNotification(tx, {
@@ -308,7 +308,7 @@ export const respondToRecommendationDoubt = async (req, res) => {
         doubt.recommendation.processId,
         "recommendationDoubtResponse",
         newResponse.id,
-        "recommendationDoubtResponseId"
+        "recommendationDoubtResponseId",
       );
 
       const notificationRecipient =
@@ -375,7 +375,7 @@ export const requestRecommendationClarification = async (req, res) => {
 
       if (!recommendation) {
         throw new Error(
-          "Recommendation not found or not eligible for clarification"
+          "Recommendation not found or not eligible for clarification",
         );
       }
 
@@ -437,7 +437,7 @@ export const respondToRecommendationClarification = async (req, res) => {
 
       if (!recommendation) {
         throw new Error(
-          "Recommendation not found or not in clarification requested state"
+          "Recommendation not found or not in clarification requested state",
         );
       }
 
@@ -497,7 +497,7 @@ export const submitRecommendation = async (req, res) => {
         "recommendationResponse",
         "response",
         response.id,
-        "recommendationResponseId"
+        "recommendationResponseId",
       );
 
       if (documentReferences?.length) {

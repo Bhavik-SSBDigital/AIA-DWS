@@ -1,7 +1,6 @@
 import { verifyUser } from "../utility/verifyUser.js";
-import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 export const pick_process_step = async (req, res, next) => {
   try {
@@ -237,8 +236,8 @@ async function createRoleSteps(tx, params) {
           status: "IN_PROGRESS",
           deadline: new Date(Date.now() + 48 * 60 * 60 * 1000),
         },
-      })
-    )
+      }),
+    ),
   );
 }
 

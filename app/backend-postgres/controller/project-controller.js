@@ -9,9 +9,7 @@ import {
 } from "../utility/accessFunction.js";
 import { read } from "fs";
 
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -118,7 +116,7 @@ export const getRootDocumentsWithAccess = async (req, res) => {
         const fileAbsolutePath = path.join(
           __dirname,
           process.env.STORAGE_PATH,
-          doc.path.substring(1)
+          doc.path.substring(1),
         );
 
         try {
@@ -144,7 +142,7 @@ export const getRootDocumentsWithAccess = async (req, res) => {
           console.error(`Failed to retrieve file stats for ${doc.path}:`, err);
           return null;
         }
-      })
+      }),
     );
 
     // Filter out null values
@@ -253,7 +251,7 @@ export const getRootDocumentsForEdit = async (req, res) => {
         const fileAbsolutePath = path.join(
           __dirname,
           process.env.STORAGE_PATH,
-          doc.path
+          doc.path,
         );
         try {
           const fileStats = await fs.stat(fileAbsolutePath);
@@ -261,7 +259,7 @@ export const getRootDocumentsForEdit = async (req, res) => {
           // Check if this document has full access
           const hasFullAccess = roleAccesses.some(
             (access) =>
-              access.documentId === doc.id && access.accessLevel === "FULL"
+              access.documentId === doc.id && access.accessLevel === "FULL",
           );
 
           // If full access, add all children to the respective arrays
@@ -299,7 +297,7 @@ export const getRootDocumentsForEdit = async (req, res) => {
           console.error(`Error accessing file at ${fileAbsolutePath}:`, error);
           return null;
         }
-      })
+      }),
     );
 
     // Filter out null results and prepare response
@@ -311,7 +309,7 @@ export const getRootDocumentsForEdit = async (req, res) => {
       selectedDownload: Array.from(new Set(selectedDownload)),
       selectedView: Array.from(new Set(selectedView)),
       fullAccess: Array.from(
-        new Set(fullAccess.map((obj) => JSON.stringify(obj)))
+        new Set(fullAccess.map((obj) => JSON.stringify(obj))),
       ).map((str) => JSON.parse(str)),
     });
   } catch (error) {

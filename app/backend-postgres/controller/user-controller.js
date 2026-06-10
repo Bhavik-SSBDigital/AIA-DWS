@@ -19,9 +19,7 @@ const __dirname = dirname(__filename);
 
 dotenv.config();
 
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 /**
  * Get users based on the `isRootUser` parameter.
  * - If `isRootUser` is true, return only root-level users.

@@ -25,10 +25,9 @@ import SearchIndexService from "../services/seach-index-service.js";
 // import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import dotnev from "dotenv";
 
-import { PrismaClient } from "@prisma/client";
 import { execSync } from "child_process";
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 dotnev.config();
 
@@ -603,7 +602,6 @@ export const createFolder = async (isProject, path_, userData) => {
 
             // Store document details in the database
 
-            console.log("path", path_);
             const newDocument = await prisma.document.create({
               data: {
                 name: element,
@@ -2422,7 +2420,6 @@ export const wopiFiles = async (req, res) => {
     const stat = await fs.stat(filePath);
     const fileName = document.path.split("/").pop();
 
-    console.log("read only", readOnly);
     res.json({
       BaseFileName: fileName,
       Size: stat.size,
@@ -2464,8 +2461,6 @@ export const wopiFilePost = async (req, res) => {
       include: { department: true },
     });
 
-    console.log("reached at post contents");
-
     if (!document) {
       return res.status(404).json({ message: "File not found" });
     }
@@ -2478,8 +2473,6 @@ export const wopiFilePost = async (req, res) => {
       document.path,
     );
 
-    console.log("file path", filePath);
-
     const dir = dirname(filePath);
     await fs.mkdir(dir, { recursive: true });
 
@@ -2487,7 +2480,6 @@ export const wopiFilePost = async (req, res) => {
     const chunks = [];
 
     req.on("data", (chunk) => {
-      console.log("chunk", chunk);
       chunks.push(chunk);
     });
 
@@ -2496,8 +2488,6 @@ export const wopiFilePost = async (req, res) => {
 
       try {
         await fs.writeFile(filePath, buffer);
-
-        console.log("end");
 
         await prisma.document.update({
           where: { id: parseInt(fileId) },
@@ -3460,9 +3450,6 @@ import puppeteer from "puppeteer";
 export const download_converted_signed_pdf = async (req, res) => {
   try {
     const { documentId, processId } = req.params;
-    console.log(
-      `\n[DMS CONVERT] --- Starting conversion for DocID: ${documentId} ---`,
-    );
 
     // 1. Fetch Document Details
     const document = await prisma.document.findUnique({
@@ -3496,7 +3483,6 @@ export const download_converted_signed_pdf = async (req, res) => {
     // 2. CONVERSION LOGIC
     // ==========================================
     if (["jpg", "jpeg", "png"].includes(ext)) {
-      console.log("[DMS CONVERT] File type is Image.");
       const imageBuffer = await fs.readFile(originalPath);
       const pdfDoc = await PDFDocument.create();
 
@@ -3508,10 +3494,6 @@ export const download_converted_signed_pdf = async (req, res) => {
       page.drawImage(embeddedImage, { x: 0, y: 0 });
       pdfBytes = await pdfDoc.save();
     } else if (["xls", "xlsx"].includes(ext)) {
-      console.log(
-        `[DMS CONVERT] File type is Spreadsheet (${ext}). Applying wide-column fixes...`,
-      );
-
       try {
         const workbook = XLSX.readFile(originalPath);
         let allSheetsHtml = "";
@@ -3575,9 +3557,6 @@ export const download_converted_signed_pdf = async (req, res) => {
         });
       }
     } else if (["doc", "docx"].includes(ext)) {
-      console.log(
-        `[DMS CONVERT] File type is Word (${ext}). Preparing LibreOffice...`,
-      );
       const outputDir = path.join(__dirname, "../../../../", "storage", "temp");
       await fs.mkdir(outputDir, { recursive: true });
 

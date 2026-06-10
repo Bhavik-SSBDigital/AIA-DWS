@@ -1,6 +1,5 @@
-import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 // Helper function to format timestamp
 const formatDate = (date) => {
@@ -247,7 +246,6 @@ export const get_user_activity_log = async (req, res) => {
 
           const processDoc = docIdToProcessDoc.get(currentDocId);
           if (!processDoc) {
-            console.log("No processDoc found for docId:", currentDocId);
             break;
           }
 
@@ -1637,7 +1635,6 @@ export const get_process_activity_logs = async (req, res) => {
 
           const processDoc = docIdToProcessDoc.get(currentDocId);
           if (!processDoc) {
-            console.log("No processDoc found for docId:", currentDocId);
             break;
           }
 

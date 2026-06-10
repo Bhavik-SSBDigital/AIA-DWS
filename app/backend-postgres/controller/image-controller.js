@@ -7,9 +7,7 @@ import { dirname } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 // uploadSignature.js
 export const upload_signature = async (req, res) => {
@@ -32,7 +30,6 @@ export const upload_signature = async (req, res) => {
     let fileName;
     let updateData;
 
-    console.log("purpose", req.body.purpose);
     const approverId = req.body.userId;
 
     const approver = await prisma.user.findFirst({
@@ -42,7 +39,7 @@ export const upload_signature = async (req, res) => {
     });
 
     let userData = approver ? approver : requestingUser;
-    console.log("user data", userData);
+
     switch (req.body.purpose) {
       case "signature":
         fileName = `${userData.username.toLowerCase()}${fileExtension}`;

@@ -1,8 +1,8 @@
 import ExcelJS from "exceljs";
-import { PrismaClient } from "@prisma/client";
+
 import logger from "./logger.js";
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 const verifyUser = async (accessToken) => {
   // Placeholder for user verification logic
@@ -120,11 +120,11 @@ export const export_file_logs = async (req, res) => {
     // Set response headers
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="logs_${fromDate}_${toDate}.xlsx"`
+      `attachment; filename="logs_${fromDate}_${toDate}.xlsx"`,
     );
 
     // Write to response

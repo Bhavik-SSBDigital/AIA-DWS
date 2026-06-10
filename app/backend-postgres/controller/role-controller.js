@@ -1,7 +1,5 @@
-import { PrismaClient } from "@prisma/client";
-
 import { verifyUser } from "../utility/verifyUser.js";
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 // Utility function to remove duplicates
 const removeDuplicates = (arr) => [...new Set(arr)];

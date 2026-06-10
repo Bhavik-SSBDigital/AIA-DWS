@@ -8,14 +8,14 @@ import path from "path";
 import fs from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
-import { PrismaClient } from "@prisma/client";
+
 import puppeteer from "puppeteer";
 import { verifyUser } from "../utility/verifyUser.js";
 import { generateUniqueDocumentName } from "./process-controller.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 const STORAGE_PATH = process.env.STORAGE_PATH || "../storage";
 
 // ── Helper ─────────────────────────────────────────────────────────────────

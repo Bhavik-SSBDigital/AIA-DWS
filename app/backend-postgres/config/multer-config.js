@@ -5,14 +5,14 @@ import { verifyUser } from "../utility/verifyUser.js";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import fs from "fs/promises";
-import { PrismaClient } from "@prisma/client";
+
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const STORAGE_PATH = process.env.STORAGE_PATH;
 const router = express.Router();
-const prisma = new PrismaClient();
+import prisma from "./prisma-config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

@@ -3,16 +3,16 @@ import {
   createQueryNotifications,
 } from "./notificationHelper.js";
 
-import { PrismaClient, AccessType } from "@prisma/client";
+import { AccessType } from "@prisma/client";
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 async function updateHighlightsWithContext(
   tx,
   processInstanceId,
   tempContextType,
   contextId,
-  contextField
+  contextField,
 ) {
   await tx.documentHighlight.updateMany({
     where: {
@@ -68,7 +68,7 @@ export const createQuery = async (req, res) => {
         processId,
         "query",
         newQuery.id,
-        "queryId"
+        "queryId",
       );
 
       if (documentSummaries.length > 0) {
@@ -109,7 +109,7 @@ export const createQuery = async (req, res) => {
                 tx,
                 processId,
                 change.documentId,
-                change.replacesDocumentId
+                change.replacesDocumentId,
               );
               await tx.queryDocumentApproval.createMany({
                 data: approvers.map((approverId) => ({
@@ -119,7 +119,7 @@ export const createQuery = async (req, res) => {
                 })),
               });
             }
-          })
+          }),
         );
       }
 
@@ -127,7 +127,7 @@ export const createQuery = async (req, res) => {
         const approvers = await getRecirculationApprovers(
           tx,
           processId,
-          recirculateFromStepId
+          recirculateFromStepId,
         );
         await tx.queryRecirculationApproval.createMany({
           data: approvers.map((approverId) => ({
@@ -148,7 +148,7 @@ export const createQuery = async (req, res) => {
         newQuery.id,
         processId,
         stepInstanceId,
-        recirculateFromStepId
+        recirculateFromStepId,
       );
 
       return await tx.processQuery.findUnique({
@@ -307,7 +307,7 @@ export const createQueryDoubt = async (req, res) => {
         query.processId,
         "queryDoubt",
         newDoubt.id,
-        "queryDoubtId"
+        "queryDoubtId",
       );
 
       await createNotification(tx, {
@@ -392,7 +392,7 @@ export const respondToQueryDoubt = async (req, res) => {
         doubt.query.processId,
         "queryDoubtResponse",
         newResponse.id,
-        "queryDoubtResponseId"
+        "queryDoubtResponseId",
       );
 
       const notificationRecipient =
@@ -669,7 +669,7 @@ export const respondToQuery = async (req, res) => {
         query.process.id,
         "queryResponse",
         newResponse.id,
-        "queryResponseId"
+        "queryResponseId",
       );
 
       if (documentReferences?.length) {
@@ -976,7 +976,7 @@ async function initiateRecirculation(tx, query) {
 
   const documentIds = process.documents.map((d) => d.documentId);
   const step = process.workflow.steps.find(
-    (s) => s.id === query.recirculationFromStepId
+    (s) => s.id === query.recirculationFromStepId,
   );
 
   // 3. Create new step instances for recirculation
@@ -988,7 +988,7 @@ async function initiateRecirculation(tx, query) {
       assignment,
       documentIds,
       true,
-      query.id
+      query.id,
     );
   }
 

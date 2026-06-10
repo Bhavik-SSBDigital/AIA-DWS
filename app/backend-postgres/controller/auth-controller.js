@@ -1,12 +1,12 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { PrismaClient } from "@prisma/client";
+
 import { verifyUser } from "../utility/verifyUser.js";
 import ExcelJS from "exceljs";
 import { sendUserEmail } from "../services/emailService.js";
 import CryptoJS from "crypto-js"; // ✅ Added CryptoJS for decryption
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 function generateRandomPassword(length) {
   const charset =
@@ -201,8 +201,6 @@ export const login = async (req, res) => {
         success: true,
       },
     });
-
-    console.log("isRootLevel", isRootLevel);
 
     res.status(200).json({
       accessToken,
@@ -506,7 +504,6 @@ export const change_password = async (req, res) => {
         .json({ message: "Invalid encrypted password payload" });
     }
 
-    console.log("hellossm");
     if (plainNew.length < 8) {
       return res
         .status(400)

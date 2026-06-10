@@ -1,7 +1,6 @@
 import winston from "winston";
-import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 // Function to get local time as Date object (adjusted from UTC)
 const getLocalDate = () => {
@@ -53,7 +52,7 @@ const logger = winston.createLogger({
   level: "info",
   format: winston.format.combine(
     winston.format.timestamp(),
-    winston.format.json()
+    winston.format.json(),
   ),
   transports: [
     // Log to file

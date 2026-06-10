@@ -1,7 +1,6 @@
-import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 
 // Helper function to validate date range
 const validateDateRange = (startDate, endDate) => {

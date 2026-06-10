@@ -1,4 +1,3 @@
-import { PrismaClient } from "@prisma/client";
 import { verifyUser } from "../utility/verifyUser.js";
 import fs from "fs/promises";
 import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
@@ -20,7 +19,7 @@ import { P12Signer } from "@signpdf/signer-p12";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const prisma = new PrismaClient();
+import prisma from "../config/prisma-config.js";
 const execPromise = promisify(exec);
 
 const envVariables = process.env;
