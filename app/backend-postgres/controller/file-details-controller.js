@@ -664,7 +664,6 @@ export const getDocumentDetailsForAdmin = async (req, res) => {
       message: "Error in returning document details",
     });
   } finally {
-    await prisma.$disconnect();
   }
 };
 

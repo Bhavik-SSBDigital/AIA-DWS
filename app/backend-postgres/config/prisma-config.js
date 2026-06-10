@@ -21,8 +21,6 @@ export const prisma =
 
 globalForPrisma.prisma = prisma;
 
-process.on("beforeExit", async () => {
-  await prisma.$disconnect();
-});
+process.on("beforeExit", async () => {});
 
 export default prisma;

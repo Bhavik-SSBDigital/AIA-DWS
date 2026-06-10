@@ -152,6 +152,5 @@ export const export_file_logs = async (req, res) => {
     });
     res.status(500).json({ message: "Error exporting logs: " + error.message });
   } finally {
-    await prisma.$disconnect();
   }
 };

@@ -259,7 +259,7 @@ export async function generateUniqueDocumentName({
     console.error("Error generating unique document name:", error);
     throw error;
   } finally {
-    // await prisma.$disconnect();
+    //
   }
 }
 
@@ -320,7 +320,7 @@ const generate_unique_process_name = async (workflowId) => {
     console.error("Error generating unique process name:", error);
     throw error;
   } finally {
-    // await prisma.$disconnect();
+    //
   }
 };
 
@@ -6700,7 +6700,7 @@ export const get_process_documents = async (req, res) => {
     console.error("Error fetching process documents:", error);
     return res.status(500).json({ error: "Internal server error" });
   } finally {
-    // await prisma.$disconnect();
+    //
   }
 };
 

@@ -34,7 +34,6 @@ async function setupFullTextSearch() {
     console.error("Error setting up full-text search:", error);
     throw error;
   } finally {
-    await prisma.$disconnect();
   }
 }
 

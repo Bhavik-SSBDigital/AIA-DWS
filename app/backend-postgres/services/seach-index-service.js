@@ -70,7 +70,6 @@ class SearchIndexService {
         totalPages: Math.ceil(totalCount / pageSize),
       };
     } finally {
-      await prisma.$disconnect();
     }
   }
 
@@ -94,7 +93,6 @@ class SearchIndexService {
       );
       throw error; // Re-throw to allow caller to handle the error
     } finally {
-      await prisma.$disconnect();
     }
   }
 }

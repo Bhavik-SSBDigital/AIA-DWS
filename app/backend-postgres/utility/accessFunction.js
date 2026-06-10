@@ -193,7 +193,6 @@ export const getParents = async (view) => {
     console.error("Error in getParents:", error);
     return null;
   } finally {
-    await prisma.$disconnect();
   }
 };
 

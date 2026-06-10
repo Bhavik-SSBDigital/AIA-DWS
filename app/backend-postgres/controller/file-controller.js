@@ -1390,7 +1390,6 @@ export const file_delete = async (req, res) => {
     });
     res.status(500).json({ message: "Internal server error during deletion" }); // ✅ VAPT FIX #16
   } finally {
-    await prisma.$disconnect();
   }
 };
 
@@ -2059,7 +2058,6 @@ export const archive_file = async (req, res) => {
     logger.error({ action: "ARCHIVE_FILE_ERROR", userId: userData?.id });
     res.status(500).json({ message: "Internal server error" }); // VAPT FIX #16
   } finally {
-    await prisma.$disconnect();
   }
 };
 export const delete_file = async (req, res) => {
@@ -2110,7 +2108,6 @@ export const delete_file = async (req, res) => {
     logger.error({ action: "FILE_BIN_ERROR", userId: userData?.id });
     res.status(500).json({ message: "Error moving file to recycle bin" }); // VAPT FIX #16
   } finally {
-    await prisma.$disconnect();
   }
 };
 
@@ -2167,7 +2164,6 @@ export const unarchive_file = async (req, res) => {
     logger.error({ action: "UNARCHIVE_FILE_ERROR", userId: userData?.id });
     res.status(500).json({ message: "Internal server error" }); // VAPT FIX #16
   } finally {
-    await prisma.$disconnect();
   }
 };
 
@@ -2223,7 +2219,6 @@ export const recover_from_recycle_bin = async (req, res) => {
     logger.error({ action: "RECOVER_FROM_BIN_ERROR", userId: userData?.id });
     res.status(500).json({ message: "Internal server error" }); // VAPT FIX #16
   } finally {
-    await prisma.$disconnect();
   }
 };
 
