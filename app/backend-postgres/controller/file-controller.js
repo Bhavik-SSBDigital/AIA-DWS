@@ -3489,6 +3489,9 @@ export const download_converted_signed_pdf = async (req, res) => {
       page.drawImage(embeddedImage, { x: 0, y: 0 });
       pdfBytes = await pdfDoc.save();
     } else if (["xls", "xlsx"].includes(ext)) {
+      // <-- CRITICAL FIX: Declare browser outside try block
+      let browser;
+
       try {
         const workbook = XLSX.readFile(originalPath);
         let allSheetsHtml = "";
@@ -3529,10 +3532,15 @@ export const download_converted_signed_pdf = async (req, res) => {
           </html>
         `;
 
-        const browser = await puppeteer.launch({
+        browser = await puppeteer.launch({
           headless: "new",
-          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+          ],
         });
+
         const page = await browser.newPage();
         await page.setContent(styledHtml, { waitUntil: "networkidle0" });
 
@@ -3543,13 +3551,22 @@ export const download_converted_signed_pdf = async (req, res) => {
           printBackground: true,
           margin: { top: "20px", right: "20px", bottom: "20px", left: "20px" },
         });
-
-        await browser.close();
       } catch (excelError) {
+        console.error(
+          "[DMS CONVERT ERROR] Spreadsheet conversion failed:",
+          excelError,
+        );
         return res.status(500).json({
           message: "Spreadsheet conversion failed",
           error: "error processing Excel file",
         });
+      } finally {
+        // <-- CRITICAL FIX: Guaranteed kill switch
+        if (browser) {
+          await browser
+            .close()
+            .catch((e) => console.error("Failed to close browser:", e));
+        }
       }
     } else if (["doc", "docx"].includes(ext)) {
       const outputDir = path.join(__dirname, "../../../../", "storage", "temp");
@@ -3557,10 +3574,11 @@ export const download_converted_signed_pdf = async (req, res) => {
 
       const command = `soffice --headless --convert-to pdf "${originalPath}" --outdir "${outputDir}"`;
       try {
-        await execPromise(command);
+        // <-- CRITICAL FIX: 60 second timeout for LibreOffice
+        await execPromise(command, { timeout: 60000 });
       } catch (execError) {
         return res.status(500).json({
-          message: "LibreOffice conversion failed",
+          message: "LibreOffice conversion failed or timed out",
           error: "conversion failed",
         });
       }
@@ -3635,8 +3653,10 @@ export const download_converted_signed_pdf = async (req, res) => {
         "../../support/venv/bin/python",
       );
 
+      // <-- CRITICAL FIX: 30 second timeout for Python script
       const { stdout } = await execPromise(
         `"${pythonEnvPath}" "${pythonScriptPath}" "${tempPdfPath}"`,
+        { timeout: 30000 },
       );
       const spaceResult = JSON.parse(stdout.trim());
 
@@ -3654,7 +3674,7 @@ export const download_converted_signed_pdf = async (req, res) => {
       await fs.unlink(tempPdfPath).catch(() => {});
     } catch (err) {
       console.error(
-        "[DMS CONVERT WARNING] Failed to execute getFileSpace.py, using default Y.",
+        "[DMS CONVERT WARNING] Failed to execute getFileSpace.py or timed out, using default Y.",
         err.message,
       );
     }
@@ -3676,8 +3696,6 @@ export const download_converted_signed_pdf = async (req, res) => {
 
       if (sig.user.signaturePicFileName) {
         try {
-          // --- FIXED PATH RESOLUTION to match sign_documents structure ---
-          // Assuming you have process.env.SIGNATURE_FOLDER_PATH or you can inject envVariables here
           const signatureFolder =
             process.env.SIGNATURE_FOLDER_PATH ||
             envVariables.SIGNATURE_FOLDER_PATH;
