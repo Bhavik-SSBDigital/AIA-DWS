@@ -2,6 +2,13 @@
 // description-doc-controller.js
 // Generates / replaces a professional "Process Description" PDF document
 // and links it to the process, mimicking standard file upload behavior.
+//
+// Changes from original:
+//  - Browser reuse via singleton (no repeated launch/close per request)
+//  - page.close() in finally block (clean tab teardown)
+//  - Path traversal protection (normalize + containment check)
+//  - HTML sanitization via sanitize-html before injecting into PDF template
+//  - Graceful browser restart on crash
 // ======================================================================
 
 import path from "path";
@@ -10,15 +17,58 @@ import { fileURLToPath } from "url";
 import { dirname } from "path";
 
 import puppeteer from "puppeteer";
+import sanitizeHtml from "sanitize-html"; // npm install sanitize-html
 import { verifyUser } from "../utility/verifyUser.js";
 import { generateUniqueDocumentName } from "./process-controller.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import prisma from "../config/prisma-config.js";
+
 const STORAGE_PATH = process.env.STORAGE_PATH || "../storage";
 
-// ── Helper ─────────────────────────────────────────────────────────────────
+// ── Allowed storage sub-directories (whitelist approach) ───────────────────
+// If you want open-ended paths, remove this and rely on the containment check
+// alone. Keeping a whitelist is the safest option.
+const ALLOWED_SUBDIRS = new Set(["check", "descriptions", "documents"]);
+
+// ── Browser singleton ──────────────────────────────────────────────────────
+let _browser = null;
+
+/**
+ * Returns a shared Puppeteer browser instance.
+ * Automatically (re)launches if it crashed or was never started.
+ */
+const getBrowser = async () => {
+  if (_browser) {
+    try {
+      // Quick liveness probe — throws if process is dead
+      await _browser.version();
+      return _browser;
+    } catch {
+      // Browser crashed; fall through to relaunch
+      _browser = null;
+    }
+  }
+
+  _browser = await puppeteer.launch({
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+    ],
+    headless: "new",
+  });
+
+  // Clean up reference when the browser closes for any reason
+  _browser.once("disconnected", () => {
+    _browser = null;
+  });
+
+  return _browser;
+};
+
+// ── HTML escaping (for trusted meta fields only) ───────────────────────────
 const escapeHtml = (str = "") =>
   String(str)
     .replace(/&/g, "&amp;")
@@ -26,9 +76,60 @@ const escapeHtml = (str = "") =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
+// ── sanitize-html config for user-supplied rich-text description ───────────
+const SANITIZE_OPTIONS = {
+  allowedTags: [
+    "p",
+    "br",
+    "b",
+    "strong",
+    "i",
+    "em",
+    "u",
+    "s",
+    "ul",
+    "ol",
+    "li",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "span",
+    "div",
+    "blockquote",
+    "pre",
+    "code",
+  ],
+  allowedAttributes: {
+    "*": ["style"], // allow inline style for rich-text editors
+    td: ["colspan", "rowspan"],
+    th: ["colspan", "rowspan"],
+  },
+  // Strip all URL-based attributes to prevent SSRF / tracking pixels
+  allowedSchemes: [], // disallows href/src on any tag
+  disallowedTagsMode: "discard",
+};
+
 /**
- * Renders the description HTML into a polished A4 PDF using Puppeteer.
- * Returns the PDF as a Buffer.
+ * Sanitizes user-supplied HTML before embedding in the PDF template.
+ * @param {string} html
+ * @returns {string}
+ */
+const sanitizeDescription = (html) =>
+  sanitizeHtml(html || "", SANITIZE_OPTIONS);
+
+// ── PDF renderer ───────────────────────────────────────────────────────────
+/**
+ * Renders the description HTML into a polished A4 PDF using a shared
+ * Puppeteer browser. Returns the PDF as a Buffer.
  */
 const renderDescriptionPdf = async ({
   processName,
@@ -37,8 +138,10 @@ const renderDescriptionPdf = async ({
   descriptionHtml,
   generatedAt,
 }) => {
-  const pageHtml = `<!DOCTYPE html>
-<html lang="en">
+  // Sanitize user-controlled HTML; meta fields are escaped separately
+  const safeDescriptionHtml = sanitizeDescription(descriptionHtml);
+
+  const pageHtml = `<!DOCTYPE html><html lang="en">
 <head>
   <meta charset="UTF-8" />
   <style>
@@ -199,24 +302,17 @@ const renderDescriptionPdf = async ({
   <div class="content-wrapper">
     <div class="section-heading">Description</div>
     <div class="description-content">
-      ${descriptionHtml || '<p style="color:#94a3b8;font-style:italic;">No description provided.</p>'}
+      ${safeDescriptionHtml || '<p style="color:#94a3b8;font-style:italic;">No description provided.</p>'}
     </div>
   </div>
 
 </body>
 </html>`;
 
-  const browser = await puppeteer.launch({
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-    ],
-    headless: "new",
-  });
+  const browser = await getBrowser();
+  const page = await browser.newPage();
 
   try {
-    const page = await browser.newPage();
     await page.setContent(pageHtml, { waitUntil: "networkidle0" });
 
     const pdfBuffer = await page.pdf({
@@ -228,31 +324,86 @@ const renderDescriptionPdf = async ({
 
     return Buffer.from(pdfBuffer);
   } finally {
-    await browser.close();
+    // Always close the tab; the shared browser stays alive
+    await page.close().catch(() => {});
   }
+};
+
+// ── Path validation helper ─────────────────────────────────────────────────
+/**
+ * Validates and resolves the storage sub-path from the request header.
+ * Throws if the resolved path escapes the base storage directory.
+ *
+ * @param {string} rawHeaderPath   Value of x-file-path header
+ * @param {string} baseStorageDir  Absolute path of the root storage directory
+ * @returns {{ cleanSubPath: string, descDir: string, responseDocumentPath: string }}
+ */
+const resolveStoragePath = (rawHeaderPath, baseStorageDir) => {
+  // Normalise away any . / .. segments
+  const normalized = path.normalize(rawHeaderPath);
+
+  // Reject absolute paths and any remaining traversal segments
+  if (
+    path.isAbsolute(normalized) ||
+    normalized.split(path.sep).includes("..")
+  ) {
+    throw Object.assign(new Error("Invalid x-file-path header"), {
+      statusCode: 400,
+    });
+  }
+
+  // Optional whitelist — comment out if you need arbitrary sub-dirs
+  const topLevel = normalized.split(path.sep)[0];
+  if (!ALLOWED_SUBDIRS.has(topLevel)) {
+    throw Object.assign(new Error(`Directory '${topLevel}' is not allowed`), {
+      statusCode: 400,
+    });
+  }
+
+  const descDir = path.resolve(baseStorageDir, normalized);
+
+  // Containment check: resolved path must still be inside baseStorageDir
+  if (
+    !descDir.startsWith(baseStorageDir + path.sep) &&
+    descDir !== baseStorageDir
+  ) {
+    throw Object.assign(new Error("Path traversal detected"), {
+      statusCode: 400,
+    });
+  }
+
+  return {
+    cleanSubPath: normalized,
+    descDir,
+    responseDocumentPath: `/${normalized}`,
+  };
 };
 
 // ======================================================================
 // POST /saveDescriptionDocument
 // Body: { workflowId, processName, description, existingDescDocId? }
-// Headers: { x-file-path: "../check" } (Optional, defaults to "check")
+// Headers: { x-file-path: "check" }  (defaults to "check")
 // Returns: { documentId, documentName, documentPath, message }
 // ======================================================================
 export const saveDescriptionDocument = async (req, res) => {
   try {
+    // ── Auth ────────────────────────────────────────────────────────────
     const accessToken =
       req.headers["authorization"]?.replace("Bearer ", "") ||
       req.headers["x-authorization"]?.substring(7);
 
-    if (!accessToken)
+    if (!accessToken) {
       return res
         .status(401)
         .json({ message: "No authorization token provided" });
+    }
 
     const userData = await verifyUser(accessToken);
-    if (userData === "Unauthorized")
+    if (userData === "Unauthorized") {
       return res.status(401).json({ message: "Unauthorized request" });
+    }
 
+    // ── Body validation ─────────────────────────────────────────────────
     const { workflowId, processName, description, existingDescDocId } =
       req.body;
 
@@ -260,31 +411,32 @@ export const saveDescriptionDocument = async (req, res) => {
       return res.status(400).json({ message: "workflowId is required" });
     }
 
-    // ── 1. Resolve Path from Headers ──────────────────────────────────────
+    // ── 1. Resolve & validate path ──────────────────────────────────────
     const rawHeaderPath = req.headers["x-file-path"] || "check";
-
-    // Sanitize the path: remove leading relative indicators like "../", "./", or "/"
-    // This gives us a clean directory name (e.g., "../check" becomes "check")
-    const cleanSubPath = rawHeaderPath.replace(/^(\.\.\/|\.\/|\/)+/, "");
-
-    // Formulate the strict response path requested (e.g., "/check")
-    const responseDocumentPath = `/${cleanSubPath}`;
-
-    // Resolve absolute path for directory creation
     const baseStorageDir = path.resolve(__dirname, STORAGE_PATH);
-    const descDir = path.resolve(baseStorageDir, cleanSubPath);
 
-    // Ensure directory exists
+    let cleanSubPath, descDir, responseDocumentPath;
+    try {
+      ({ cleanSubPath, descDir, responseDocumentPath } = resolveStoragePath(
+        rawHeaderPath,
+        baseStorageDir,
+      ));
+    } catch (err) {
+      return res.status(err.statusCode || 400).json({ message: err.message });
+    }
+
     await fs.mkdir(descDir, { recursive: true });
 
-    // ── 2. Resolve Workflow Info & Generate PDF ───────────────────────────
+    // ── 2. Resolve workflow info ────────────────────────────────────────
     const workflow = await prisma.workflow.findUnique({
       where: { id: workflowId },
       select: { name: true },
     });
-    if (!workflow)
+    if (!workflow) {
       return res.status(404).json({ message: "Workflow not found" });
+    }
 
+    // ── 3. Generate PDF ─────────────────────────────────────────────────
     const generatedAt = new Date().toLocaleString("en-IN", {
       year: "numeric",
       month: "short",
@@ -302,45 +454,49 @@ export const saveDescriptionDocument = async (req, res) => {
       generatedAt,
     });
 
-    // ── 3. Handle File Naming and Saving ──────────────────────────────────
+    // ── 4. Save PDF to disk ─────────────────────────────────────────────
     const docName = await generateUniqueDocumentName({
       workflowId,
       extension: "pdf",
     });
 
-    // The physical location to write the file
     const absPath = path.join(descDir, docName);
-
-    // Save to disk
     await fs.writeFile(absPath, pdfBuffer);
 
-    // ── 4. Delete Old Description Doc (If Replacing) ──────────────────────
+    // ── 5. Delete old description doc if replacing ──────────────────────
     if (existingDescDocId) {
       try {
         const oldDoc = await prisma.document.findUnique({
-          where: { id: parseInt(existingDescDocId) },
+          where: { id: parseInt(existingDescDocId, 10) },
           select: { path: true },
         });
 
-        if (oldDoc) {
-          // Reconstruct the physical path from the DB path
-          const cleanOldPath = oldDoc.path.replace(/^(\.\.\/|\.\/|\/)+/, "");
-          const oldAbsPath = path.resolve(baseStorageDir, cleanOldPath);
-          await fs.unlink(oldAbsPath).catch(() => {});
+        if (oldDoc?.path) {
+          // Reuse resolveStoragePath to safely reconstruct the old absolute path
+          const cleanOld = path.normalize(
+            oldDoc.path.replace(/^(\.\.\/|\.\/|\/)+/, ""),
+          );
+          const oldAbsPath = path.resolve(baseStorageDir, cleanOld);
+
+          // Only delete if still inside storage root
+          if (oldAbsPath.startsWith(baseStorageDir + path.sep)) {
+            await fs.unlink(oldAbsPath).catch(() => {});
+          }
         }
 
         await prisma.document.delete({
-          where: { id: parseInt(existingDescDocId) },
+          where: { id: parseInt(existingDescDocId, 10) },
         });
       } catch (e) {
         console.warn("Could not delete old description doc:", e.message);
       }
     }
 
-    // ── 5. Create Document Record in DB ───────────────────────────────────
-    // FIX: We MUST prepend a leading '/' to the DB path so it matches the
-    // exact string format generated in file_download (extra + "/" + fileName)
-    const dbRelPath = `/${path.posix.join(cleanSubPath, docName)}`;
+    // ── 6. Create DB record ─────────────────────────────────────────────
+    const dbRelPath = `/${path.posix.join(
+      cleanSubPath.split(path.sep).join("/"),
+      docName,
+    )}`;
 
     const newDoc = await prisma.document.create({
       data: {
@@ -353,12 +509,11 @@ export const saveDescriptionDocument = async (req, res) => {
       },
     });
 
-    // ── 6. Return strict documentPath as requested ────────────────────────
     return res.status(200).json({
       message: "Description document saved successfully",
       documentId: newDoc.id,
       documentName: newDoc.name,
-      documentPath: responseDocumentPath, // strictly returns "/check"
+      documentPath: responseDocumentPath,
     });
   } catch (error) {
     console.error("saveDescriptionDocument error:", error);

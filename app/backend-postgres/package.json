@@ -53,6 +53,7 @@
     "pdfkit": "^0.18.0",
     "pg": "^8.13.1",
     "puppeteer": "^24.42.0",
+    "sanitize-html": "^2.17.5",
     "sharp": "^0.33.5",
     "tesseract.js": "^6.0.1",
     "textract": "^2.5.0",
