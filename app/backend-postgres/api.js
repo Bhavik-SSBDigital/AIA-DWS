@@ -10,6 +10,23 @@ import { dirname } from "path";
 import dotenv from "dotenv";
 import { startPaymentScheduler } from "./services/paymentScheduler.js";
 
+// ==========================================
+// 🚨 GLOBAL CRASH CATCHERS (CRITICAL FOR DEBUGGING SILENT DEATHS)
+// ==========================================
+process.on("uncaughtException", (err) => {
+  console.error("\n[FATAL CRASH] Uncaught Exception:", err);
+  // Optional: process.exit(1) if you want systemd to immediately restart it
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error(
+    "\n[FATAL CRASH] Unhandled Rejection at:",
+    promise,
+    "reason:",
+    reason,
+  );
+});
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -25,16 +42,16 @@ app.disable("x-powered-by");
 // ✅ VAPT FIX #21 & #13: Applies critical security headers
 app.use(
   helmet({
-    contentSecurityPolicy: false, // Disabled to prevent blocking existing React inline scripts
+    contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
-    crossOriginResourcePolicy: { policy: "cross-origin" }, // <-- CRITICAL FIX: Allows the cross-origin file read
-    crossOriginOpenerPolicy: false, // <-- ADD THIS: Stops Chrome from blocking new tabs
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: false,
     frameguard: false,
   }),
 );
 
 // ==========================================
-// 🌐 STRICT CORS CONFIGURATION (CRITICAL FIX FOR blocked:origin)
+// 🌐 STRICT CORS CONFIGURATION
 // ==========================================
 const corsOptions = {
   origin: ["http://localhost:3000", "https://ai-audit.aia.local"],
@@ -49,7 +66,6 @@ const corsOptions = {
     "Origin",
     "Accept",
     "X-Requested-With",
-    // Add all the custom headers expected by file_upload controller below:
     "x-file-name",
     "x-current-chunk",
     "x-total-chunks",
@@ -64,27 +80,46 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Middleware to log incoming request URLs (Uncomment for debugging)
-// app.use((req, res, next) => {
-//   console.log(`Request received at: ${req.method} ${req.url}`);
-//   next();
-// });
-
-// Apply express.raw specifically for WOPI POST and PUT requests
-// app.use(
-//   "/wopi/files/:id/contents",
-//   express.raw({ type: "*/*", limit: "50mb" }) // Use */* to handle any Content-Type
-// );
-
-// Other Middleware
-// ✅ FIXED: Increased limit to 50mb to prevent PayloadTooLargeError for large files/data
+// ✅ INCREASED PAYLOAD LIMIT
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+// ==========================================
+// 🕵️ ADVANCED REQUEST LOGGER (PLACED BEFORE ROUTER)
+// ==========================================
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  const requestId = Math.random().toString(36).substring(7); // Unique ID per request
+
+  // 1. Log the moment the request arrives
+  console.log(
+    `[${timestamp}] [REQ: ${requestId}] INCOMING: ${req.method} ${req.originalUrl}`,
+  );
+
+  // 2. Log the moment the response finishes (or fails)
+  res.on("finish", () => {
+    console.log(
+      `[${new Date().toISOString()}] [REQ: ${requestId}] COMPLETED: Status ${res.statusCode}`,
+    );
+  });
+
+  res.on("close", () => {
+    if (!res.writableEnded) {
+      console.error(
+        `[${new Date().toISOString()}] [REQ: ${requestId}] TERMINATED: Connection closed by client before finishing!`,
+      );
+    }
+  });
+
+  next();
+});
+
 app.use(express.static(path.join(__dirname, "build")));
+
+// MAIN ROUTER
 app.use("/", router);
 
-// Add support for OPTIONS requests (include PUT for WOPI)
+// Add support for OPTIONS requests
 app.options("/wopi/files/:id", (req, res) => {
   res
     .set({
@@ -105,9 +140,9 @@ app.use((req, res, next) => {
   res.status(404).json({ message: "Resource not found" });
 });
 
-// Catch 500s (Internal Server Errors) so Express doesn't leak stack traces or its name
+// Catch 500s
 app.use((err, req, res, next) => {
-  console.error("System error encountered", err); // Safely logged internally
+  console.error("[EXPRESS ROUTE ERROR]", err);
   res.status(500).json({ message: "Internal server error" });
 });
 
