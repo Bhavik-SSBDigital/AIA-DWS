@@ -2696,9 +2696,11 @@ export const view_process = async (req, res) => {
         workflow,
         currentStepNumber: process.currentStep?.stepNumber || null,
         currentStepType:
-          process.status === "COMPLETED" || process.initiator.id === userData.id
-            ? "APPROVAL"
-            : process.currentStep?.stepType || null,
+          process.status === "COMPLETED"
+            ? null // ← COMPLETED = no action possible
+            : process.initiator.id === userData.id
+              ? "APPROVAL"
+              : process.currentStep?.stepType || null,
         emailThreads: normalizedEmailThreads,
         isReadOnly: isReadOnly, // <-- This ensures frontend knows to disable action buttons for Admins
       },
@@ -4544,6 +4546,12 @@ async function checkAllAssignmentsCompleted(tx, processId, stepId) {
 export const complete_process_step = async (req, res) => {
   try {
     const { stepInstanceId } = req.body;
+
+    // ← ONLY CHANGE: guard against null/undefined stepInstanceId
+    if (!stepInstanceId) {
+      return res.status(400).json({ message: "stepInstanceId is required" });
+    }
+
     const accessToken = req.headers["authorization"]?.substring(7);
     const userData = await verifyUser(accessToken);
     if (userData === "Unauthorized") {
