@@ -341,6 +341,226 @@ export const sign_document = async (req, res, next) => {
   }
 };
 
+// export const sign_documents = async (req, res, next) => {
+//   try {
+//     const accessToken = req.headers["authorization"].substring(7);
+//     const userData = await verifyUser(accessToken);
+//     if (userData === "Unauthorized")
+//       return res.status(401).json({ message: "Unauthorized request" });
+
+//     const user = await prisma.user.findUnique({
+//       where: { id: userData.id },
+//       select: { signaturePicFileName: true, dscFileName: true },
+//     });
+//     if (!user?.signaturePicFileName)
+//       return res
+//         .status(400)
+//         .json({ message: "Please upload pic of your signature first" });
+
+//     const imagePath = path.join(
+//       __dirname,
+//       envVariables.SIGNATURE_FOLDER_PATH,
+//       user.signaturePicFileName,
+//     );
+//     try {
+//       await fs.access(imagePath);
+//     } catch {
+//       return res
+//         .status(400)
+//         .json({ message: "Couldn't find your signature image" });
+//     }
+
+//     const convertToJpeg = async (inputPath) => {
+//       const metadata = await sharp(inputPath).metadata();
+//       if (metadata.format === "jpeg") return inputPath;
+//       const outputFilePath = path.join(
+//         __dirname,
+//         envVariables.SIGNATURE_FOLDER_PATH,
+//         `${userData.username.toLowerCase()}.jpeg`,
+//       );
+//       await sharp(inputPath).jpeg().toFile(outputFilePath);
+//       return outputFilePath;
+//     };
+
+//     const jpegImagePath = await convertToJpeg(imagePath);
+//     const dscPath = user.dscFileName
+//       ? path.join(__dirname, envVariables.DSC_FOLDER_PATH, user.dscFileName)
+//       : undefined;
+
+//     const { documents, processId, p12password } = req.body;
+//     const process = await prisma.processInstance.findUnique({
+//       where: { id: processId },
+//     });
+//     if (!process) return res.status(404).json({ message: "Process not found" });
+
+//     const results = [];
+//     const errors = [];
+//     const currentStep = await prisma.workflowStep.findUnique({
+//       where: { id: process.currentStepId },
+//     });
+//     const pythonScriptPath = path.join(
+//       __dirname,
+//       "../../support/getFileSpace.py",
+//     );
+//     const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
+
+//     for (const doc of documents) {
+//       try {
+//         const { documentId, processStepInstanceId, remarks = "N/A" } = doc;
+//         const document = await prisma.document.findUnique({
+//           where: { id: documentId },
+//         });
+//         if (!document) throw new Error("Document not found");
+
+//         const processDocument = await prisma.processDocument.findFirst({
+//           where: { processId, documentId },
+//         });
+//         if (!processDocument) throw new Error("Document not found in process");
+
+//         const extension = document.name?.split(".").pop()?.toLowerCase();
+//         if (extension !== "pdf") throw new Error("Only PDF supported");
+
+//         const absDocumentPath = path.join(
+//           __dirname,
+//           "../../../../",
+//           "storage",
+//           document.path,
+//         );
+//         const existingPdfBytes = await fs.readFile(absDocumentPath);
+//         const pdfDoc = await loadPdfSafely(
+//           existingPdfBytes,
+//           absDocumentPath,
+//           pythonEnvPath,
+//         );
+//         const pages = pdfDoc.getPages();
+//         const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+//         const coordinates =
+//           await get_sign_coordinates_for_specific_step_in_process(
+//             documentId,
+//             currentStep?.id,
+//           );
+
+//         let finalPdfBytes;
+//         let signatureCoordinates;
+
+//         // IN-MEMORY GENERATION (Atomic boundary)
+//         if (coordinates.length > 0) {
+//           finalPdfBytes = await print_signature_at_coordinates(
+//             pdfDoc,
+//             coordinates,
+//             jpegImagePath,
+//             userData.username,
+//             remarks,
+//             formatDate(Date.now()),
+//             helveticaFont,
+//             dscPath,
+//             p12password,
+//           );
+//         } else {
+//           const result = await print_signature_after_content_on_the_last_page(
+//             pdfDoc,
+//             pages[pages.length - 1],
+//             document.path,
+//             jpegImagePath,
+//             userData.username,
+//             formatDate(Date.now()),
+//             remarks,
+//             helveticaFont,
+//             pythonEnvPath,
+//             pythonScriptPath,
+//             dscPath,
+//             p12password,
+//           );
+//           finalPdfBytes = result.pdfBytes;
+//           signatureCoordinates = result.coords;
+//         }
+
+//         // DATABASE TRANSACTION
+//         await prisma.$transaction(async (tx) => {
+//           if (coordinates.length > 0) {
+//             await tx.signCoordinate.updateMany({
+//               where: {
+//                 processDocumentId: documentId.toString(),
+//                 page: { in: coordinates.map((c) => c.page) },
+//               },
+//               data: { isSigned: true, signedById: userData.id },
+//             });
+//           } else if (signatureCoordinates) {
+//             await tx.signCoordinate.create({
+//               data: {
+//                 processDocumentId: processDocument.id,
+//                 page: signatureCoordinates.newlyAdded
+//                   ? pages.length + 1
+//                   : pages.length,
+//                 x: signatureCoordinates.x,
+//                 y: signatureCoordinates.y,
+//                 width: signatureCoordinates.width,
+//                 height: signatureCoordinates.height,
+//                 stepId: currentStep?.id,
+//                 isSigned: true,
+//                 signedById: userData.id,
+//               },
+//             });
+//           }
+//           await tx.documentSignature.create({
+//             data: {
+//               processDocumentId: processDocument.id,
+//               userId: userData.id,
+//               processStepInstanceId,
+//               reason: remarks,
+//             },
+//           });
+//         });
+
+//         // FILE WRITE (Only triggers if everything above succeeds)
+//         await fs.writeFile(absDocumentPath, finalPdfBytes);
+
+//         results.push({
+//           documentId,
+//           documentName: document.name,
+//           success: true,
+//           message: "Signed successfully",
+//         });
+//       } catch (error) {
+//         console.error(`Error signing document ${doc.documentId}:`, error);
+//         errors.push({
+//           documentId: doc.documentId,
+//           error: error.message,
+//           success: false,
+//         });
+//       }
+//     }
+
+//     const processResult = await is_process_forwardable(process, userData.id);
+//     const response = {
+//       message: "Batch signing completed",
+//       signedCount: results.length,
+//       failedCount: errors.length,
+//       results,
+//       isForwardable: processResult.isForwardable,
+//       isRevertable: processResult.isRevertable,
+//       ...(errors.length > 0 && { errors }),
+//     };
+
+//     if (results.length === 0 && errors.length > 0)
+//       return res
+//         .status(500)
+//         .json({ ...response, message: "Failed to sign any documents" });
+//     if (errors.length > 0)
+//       return res
+//         .status(207)
+//         .json({ ...response, message: "Some documents failed to sign" });
+
+//     return res.status(200).json(response);
+//   } catch (error) {
+//     console.error("Batch signing error:", error);
+//     res.status(500).json({
+//       message: "Internal Server Error",
+//       error: "An error occurred during batch signing",
+//     });
+//   }
+// };
+
 export const sign_documents = async (req, res, next) => {
   try {
     const accessToken = req.headers["authorization"].substring(7);
@@ -418,108 +638,124 @@ export const sign_documents = async (req, res, next) => {
         if (!processDocument) throw new Error("Document not found in process");
 
         const extension = document.name?.split(".").pop()?.toLowerCase();
-        if (extension !== "pdf") throw new Error("Only PDF supported");
+        const isPdf = extension === "pdf";
 
-        const absDocumentPath = path.join(
-          __dirname,
-          "../../../../",
-          "storage",
-          document.path,
-        );
-        const existingPdfBytes = await fs.readFile(absDocumentPath);
-        const pdfDoc = await loadPdfSafely(
-          existingPdfBytes,
-          absDocumentPath,
-          pythonEnvPath,
-        );
-        const pages = pdfDoc.getPages();
-        const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-        const coordinates =
-          await get_sign_coordinates_for_specific_step_in_process(
-            documentId,
-            currentStep?.id,
-          );
-
-        let finalPdfBytes;
-        let signatureCoordinates;
-
-        // IN-MEMORY GENERATION (Atomic boundary)
-        if (coordinates.length > 0) {
-          finalPdfBytes = await print_signature_at_coordinates(
-            pdfDoc,
-            coordinates,
-            jpegImagePath,
-            userData.username,
-            remarks,
-            formatDate(Date.now()),
-            helveticaFont,
-            dscPath,
-            p12password,
-          );
-        } else {
-          const result = await print_signature_after_content_on_the_last_page(
-            pdfDoc,
-            pages[pages.length - 1],
+        // ── PDF PATH: print signature + DB + file write ──────────────────
+        if (isPdf) {
+          const absDocumentPath = path.join(
+            __dirname,
+            "../../../../",
+            "storage",
             document.path,
-            jpegImagePath,
-            userData.username,
-            formatDate(Date.now()),
-            remarks,
-            helveticaFont,
-            pythonEnvPath,
-            pythonScriptPath,
-            dscPath,
-            p12password,
           );
-          finalPdfBytes = result.pdfBytes;
-          signatureCoordinates = result.coords;
-        }
+          const existingPdfBytes = await fs.readFile(absDocumentPath);
+          const pdfDoc = await loadPdfSafely(
+            existingPdfBytes,
+            absDocumentPath,
+            pythonEnvPath,
+          );
+          const pages = pdfDoc.getPages();
+          const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+          const coordinates =
+            await get_sign_coordinates_for_specific_step_in_process(
+              documentId,
+              currentStep?.id,
+            );
 
-        // DATABASE TRANSACTION
-        await prisma.$transaction(async (tx) => {
+          let finalPdfBytes;
+          let signatureCoordinates;
+
+          // IN-MEMORY GENERATION (Atomic boundary)
           if (coordinates.length > 0) {
-            await tx.signCoordinate.updateMany({
-              where: {
-                processDocumentId: documentId.toString(),
-                page: { in: coordinates.map((c) => c.page) },
-              },
-              data: { isSigned: true, signedById: userData.id },
-            });
-          } else if (signatureCoordinates) {
-            await tx.signCoordinate.create({
+            finalPdfBytes = await print_signature_at_coordinates(
+              pdfDoc,
+              coordinates,
+              jpegImagePath,
+              userData.username,
+              remarks,
+              formatDate(Date.now()),
+              helveticaFont,
+              dscPath,
+              p12password,
+            );
+          } else {
+            const result = await print_signature_after_content_on_the_last_page(
+              pdfDoc,
+              pages[pages.length - 1],
+              document.path,
+              jpegImagePath,
+              userData.username,
+              formatDate(Date.now()),
+              remarks,
+              helveticaFont,
+              pythonEnvPath,
+              pythonScriptPath,
+              dscPath,
+              p12password,
+            );
+            finalPdfBytes = result.pdfBytes;
+            signatureCoordinates = result.coords;
+          }
+
+          // DATABASE TRANSACTION
+          await prisma.$transaction(async (tx) => {
+            if (coordinates.length > 0) {
+              await tx.signCoordinate.updateMany({
+                where: {
+                  processDocumentId: documentId.toString(),
+                  page: { in: coordinates.map((c) => c.page) },
+                },
+                data: { isSigned: true, signedById: userData.id },
+              });
+            } else if (signatureCoordinates) {
+              await tx.signCoordinate.create({
+                data: {
+                  processDocumentId: processDocument.id,
+                  page: signatureCoordinates.newlyAdded
+                    ? pages.length + 1
+                    : pages.length,
+                  x: signatureCoordinates.x,
+                  y: signatureCoordinates.y,
+                  width: signatureCoordinates.width,
+                  height: signatureCoordinates.height,
+                  stepId: currentStep?.id,
+                  isSigned: true,
+                  signedById: userData.id,
+                },
+              });
+            }
+            await tx.documentSignature.create({
               data: {
                 processDocumentId: processDocument.id,
-                page: signatureCoordinates.newlyAdded
-                  ? pages.length + 1
-                  : pages.length,
-                x: signatureCoordinates.x,
-                y: signatureCoordinates.y,
-                width: signatureCoordinates.width,
-                height: signatureCoordinates.height,
-                stepId: currentStep?.id,
-                isSigned: true,
-                signedById: userData.id,
+                userId: userData.id,
+                processStepInstanceId,
+                reason: remarks,
               },
             });
-          }
-          await tx.documentSignature.create({
-            data: {
-              processDocumentId: processDocument.id,
-              userId: userData.id,
-              processStepInstanceId,
-              reason: remarks,
-            },
           });
-        });
 
-        // FILE WRITE (Only triggers if everything above succeeds)
-        await fs.writeFile(absDocumentPath, finalPdfBytes);
+          // FILE WRITE (Only triggers if everything above succeeds)
+          await fs.writeFile(absDocumentPath, finalPdfBytes);
+
+          // ── NON-PDF PATH: DB only, no printing ───────────────────────────
+        } else {
+          await prisma.$transaction(async (tx) => {
+            await tx.documentSignature.create({
+              data: {
+                processDocumentId: processDocument.id,
+                userId: userData.id,
+                processStepInstanceId,
+                reason: remarks,
+              },
+            });
+          });
+        }
 
         results.push({
           documentId,
           documentName: document.name,
           success: true,
-          message: "Signed successfully",
+          message: isPdf ? "Signed successfully" : "Acknowledged successfully",
         });
       } catch (error) {
         console.error(`Error signing document ${doc.documentId}:`, error);
