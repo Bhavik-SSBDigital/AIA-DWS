@@ -615,9 +615,11 @@ export const sign_documents = async (req, res, next) => {
 
     const results = [];
     const errors = [];
-    const currentStep = await prisma.workflowStep.findUnique({
-      where: { id: process.currentStepId },
-    });
+    const currentStep = process.currentStepId // ← ONLY LINE CHANGED
+      ? await prisma.workflowStep.findUnique({
+          where: { id: process.currentStepId },
+        })
+      : null;
     const pythonScriptPath = path.join(
       __dirname,
       "../../support/getFileSpace.py",
