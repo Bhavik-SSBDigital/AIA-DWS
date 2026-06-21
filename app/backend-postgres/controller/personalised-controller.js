@@ -1,14 +1,12 @@
 import { verifyUser } from "../utility/verifyUser.js";
-
 import prisma from "../config/prisma-config.js";
 
-// ---------- Helper: consistent date range (local time, end of day) ----------
+// ---------- Helper: consistent date range ----------
 const buildDateRange = (startDate, endDate) => {
   let start = startDate
     ? new Date(startDate)
     : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
   let end = endDate ? new Date(endDate) : new Date();
-  // set to beginning of day for start, end of day for end
   start.setHours(0, 0, 0, 0);
   end.setHours(23, 59, 59, 999);
   return { start, end };
@@ -29,7 +27,8 @@ const isUserAdmin = async (userId) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════
-// GET /personalized  — Main Dashboard (Filters Fixed)
+// GET /personalized  — Main Dashboard with pagination + admin support
+// Query params: startDate, endDate, page (default 1), limit (default 20)
 // ═══════════════════════════════════════════════════════════════════════
 export const getPersonalizedDashboard = async (req, res) => {
   try {
@@ -40,12 +39,84 @@ export const getPersonalizedDashboard = async (req, res) => {
 
     const userId = userData.id;
     const { startDate, endDate } = req.query;
-    const { start, end } = buildDateRange(startDate, endDate);
 
+    // Pagination for preview arrays
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const { start, end } = buildDateRange(startDate, endDate);
     const isAdmin = await isUserAdmin(userId);
     const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
-    const TAKE_LIMIT = 20;
 
+    // ── Build scoped where clauses ─────────────────────────────────────
+    // Admin sees everything; regular user sees only their own data
+    const stepWhere = isAdmin
+      ? { createdAt: { gte: start, lte: end } }
+      : { assignedTo: userId, createdAt: { gte: start, lte: end } };
+
+    const stepApprovedWhere = isAdmin
+      ? { status: "APPROVED", decisionAt: { gte: start, lte: end } }
+      : {
+          assignedTo: userId,
+          status: "APPROVED",
+          decisionAt: { gte: start, lte: end },
+        };
+
+    const stepPendingWhere = isAdmin
+      ? { status: "IN_PROGRESS", createdAt: { gte: start, lte: end } }
+      : {
+          assignedTo: userId,
+          status: "IN_PROGRESS",
+          createdAt: { gte: start, lte: end },
+        };
+
+    const stepOverdueWhere = isAdmin
+      ? {
+          status: "IN_PROGRESS",
+          createdAt: { gte: start, lte: end, lt: fortyEightHoursAgo },
+        }
+      : {
+          assignedTo: userId,
+          status: "IN_PROGRESS",
+          createdAt: { gte: start, lte: end, lt: fortyEightHoursAgo },
+        };
+
+    const processWhere = isAdmin
+      ? { createdAt: { gte: start, lte: end } }
+      : { initiatorId: userId, createdAt: { gte: start, lte: end } };
+
+    const processCompletedWhere = isAdmin
+      ? { status: "COMPLETED", createdAt: { gte: start, lte: end } }
+      : {
+          initiatorId: userId,
+          status: "COMPLETED",
+          createdAt: { gte: start, lte: end },
+        };
+
+    const processActiveWhere = isAdmin
+      ? { status: "IN_PROGRESS", createdAt: { gte: start, lte: end } }
+      : {
+          initiatorId: userId,
+          status: "IN_PROGRESS",
+          createdAt: { gte: start, lte: end },
+        };
+
+    const signedWhere = isAdmin
+      ? { signedAt: { gte: start, lte: end } }
+      : { userId: userId, signedAt: { gte: start, lte: end } };
+
+    const qaWhere = isAdmin
+      ? { status: "OPEN", createdAt: { gte: start, lte: end } }
+      : {
+          OR: [
+            { initiatorId: userId, status: "OPEN" },
+            { entityId: userId, status: "OPEN" },
+          ],
+          createdAt: { gte: start, lte: end },
+        };
+
+    // ── User profile (always scoped to self) ──────────────────────────
     const userProfilePromise = prisma.user.findUnique({
       where: { id: userId },
       include: {
@@ -65,7 +136,7 @@ export const getPersonalizedDashboard = async (req, res) => {
       },
     });
 
-    // ── 1. EXACT METRICS WITH STRICT DATE FILTERING ───────────────────────
+    // ── 1. METRICS (counts) ────────────────────────────────────────────
     const [
       pendingTasksCount,
       overdueTasksCount,
@@ -76,59 +147,17 @@ export const getPersonalizedDashboard = async (req, res) => {
       signedDocsCount,
       openQueriesCount,
     ] = await Promise.all([
-      prisma.processStepInstance.count({
-        where: {
-          assignedTo: userId,
-          status: "IN_PROGRESS",
-          createdAt: { gte: start, lte: end },
-        },
-      }),
-      prisma.processStepInstance.count({
-        where: {
-          assignedTo: userId,
-          status: "IN_PROGRESS",
-          createdAt: { gte: start, lte: end, lt: fortyEightHoursAgo },
-        },
-      }),
-      prisma.processStepInstance.count({
-        where: {
-          assignedTo: userId,
-          status: "APPROVED",
-          decisionAt: { gte: start, lte: end },
-        },
-      }),
-      prisma.processInstance.count({
-        where: { initiatorId: userId, createdAt: { gte: start, lte: end } },
-      }),
-      prisma.processInstance.count({
-        where: {
-          initiatorId: userId,
-          status: "COMPLETED",
-          createdAt: { gte: start, lte: end },
-        },
-      }),
-      prisma.processInstance.count({
-        where: {
-          initiatorId: userId,
-          status: "IN_PROGRESS",
-          createdAt: { gte: start, lte: end },
-        },
-      }),
-      prisma.documentSignature.count({
-        where: { userId: userId, signedAt: { gte: start, lte: end } },
-      }),
-      prisma.processQA.count({
-        where: {
-          OR: [
-            { initiatorId: userId, status: "OPEN" },
-            { entityId: userId, status: "OPEN" },
-          ],
-          createdAt: { gte: start, lte: end },
-        },
-      }),
+      prisma.processStepInstance.count({ where: stepPendingWhere }),
+      prisma.processStepInstance.count({ where: stepOverdueWhere }),
+      prisma.processStepInstance.count({ where: stepApprovedWhere }),
+      prisma.processInstance.count({ where: processWhere }),
+      prisma.processInstance.count({ where: processCompletedWhere }),
+      prisma.processInstance.count({ where: processActiveWhere }),
+      prisma.documentSignature.count({ where: signedWhere }),
+      prisma.processQA.count({ where: qaWhere }),
     ]);
 
-    // ── 2. PREVIEW ARRAYS WITH STRICT DATE FILTERING ─────────────────────────
+    // ── 2. PAGINATED PREVIEW ARRAYS ────────────────────────────────────
     const [
       userProfile,
       initiatedProcesses,
@@ -139,9 +168,11 @@ export const getPersonalizedDashboard = async (req, res) => {
       recentActivity,
     ] = await Promise.all([
       userProfilePromise,
+
       prisma.processInstance.findMany({
-        where: { initiatorId: userId, createdAt: { gte: start, lte: end } },
-        take: TAKE_LIMIT,
+        where: processWhere,
+        skip,
+        take: limit,
         orderBy: { createdAt: "desc" },
         select: {
           id: true,
@@ -155,13 +186,11 @@ export const getPersonalizedDashboard = async (req, res) => {
           issueNo: true,
         },
       }),
+
       prisma.processStepInstance.findMany({
-        where: {
-          assignedTo: userId,
-          status: "IN_PROGRESS",
-          createdAt: { gte: start, lte: end },
-        },
-        take: TAKE_LIMIT,
+        where: stepPendingWhere,
+        skip,
+        take: limit,
         orderBy: { createdAt: "asc" },
         include: {
           process: {
@@ -181,13 +210,11 @@ export const getPersonalizedDashboard = async (req, res) => {
           },
         },
       }),
+
       prisma.processStepInstance.findMany({
-        where: {
-          assignedTo: userId,
-          status: "APPROVED",
-          decisionAt: { gte: start, lte: end },
-        },
-        take: TAKE_LIMIT,
+        where: stepApprovedWhere,
+        skip,
+        take: limit,
         orderBy: { decisionAt: "desc" },
         include: {
           process: {
@@ -200,9 +227,11 @@ export const getPersonalizedDashboard = async (req, res) => {
           workflowStep: { select: { stepName: true, stepNumber: true } },
         },
       }),
+
       prisma.documentSignature.findMany({
-        where: { userId: userId, signedAt: { gte: start, lte: end } },
-        take: TAKE_LIMIT,
+        where: signedWhere,
+        skip,
+        take: limit,
         orderBy: { signedAt: "desc" },
         include: {
           processDocument: {
@@ -213,15 +242,11 @@ export const getPersonalizedDashboard = async (req, res) => {
           },
         },
       }),
+
       prisma.processQA.findMany({
-        where: {
-          OR: [
-            { initiatorId: userId, status: "OPEN" },
-            { entityId: userId, status: "OPEN" },
-          ],
-          createdAt: { gte: start, lte: end },
-        },
-        take: TAKE_LIMIT,
+        where: qaWhere,
+        skip,
+        take: limit,
         orderBy: { createdAt: "desc" },
         include: {
           process: {
@@ -234,9 +259,11 @@ export const getPersonalizedDashboard = async (req, res) => {
           initiator: { select: { id: true, username: true } },
         },
       }),
+
       prisma.processStepInstance.findMany({
-        where: { assignedTo: userId, createdAt: { gte: start, lte: end } },
-        take: 20,
+        where: stepWhere,
+        skip,
+        take: limit,
         orderBy: { createdAt: "desc" },
         include: {
           process: {
@@ -252,17 +279,16 @@ export const getPersonalizedDashboard = async (req, res) => {
       }),
     ]);
 
-    // Average Calc
+    // ── 3. Average completion time (cap at 100 rows) ───────────────────
     const completedForAvg = await prisma.processStepInstance.findMany({
       where: {
-        assignedTo: userId,
-        status: "APPROVED",
+        ...stepApprovedWhere,
         decisionAt: { not: null },
-        createdAt: { gte: start, lte: end },
       },
       select: { createdAt: true, decisionAt: true },
       take: 100,
     });
+
     const avgCompletionHours =
       completedForAvg.length > 0
         ? parseFloat(
@@ -276,6 +302,7 @@ export const getPersonalizedDashboard = async (req, res) => {
           )
         : 0;
 
+    // ── 4. Workflow stats for involved workflows only ──────────────────
     const involvedWorkflowIds = [
       ...new Set([
         ...initiatedProcesses.map((p) => p.workflow?.id).filter(Boolean),
@@ -287,23 +314,17 @@ export const getPersonalizedDashboard = async (req, res) => {
 
     const workflowStats = await Promise.all(
       involvedWorkflowIds.map(async (wfId) => {
+        const baseWhere = isAdmin
+          ? { workflowId: wfId, createdAt: { gte: start, lte: end } }
+          : { workflowId: wfId, createdAt: { gte: start, lte: end } };
+        // Admin and user both see global workflow stats (it's about the workflow, not the user)
         const [total, active, completed] = await Promise.all([
+          prisma.processInstance.count({ where: baseWhere }),
           prisma.processInstance.count({
-            where: { workflowId: wfId, createdAt: { gte: start, lte: end } },
+            where: { ...baseWhere, status: "IN_PROGRESS" },
           }),
           prisma.processInstance.count({
-            where: {
-              workflowId: wfId,
-              status: "IN_PROGRESS",
-              createdAt: { gte: start, lte: end },
-            },
-          }),
-          prisma.processInstance.count({
-            where: {
-              workflowId: wfId,
-              status: "COMPLETED",
-              createdAt: { gte: start, lte: end },
-            },
+            where: { ...baseWhere, status: "COMPLETED" },
           }),
         ]);
         const wf =
@@ -327,6 +348,17 @@ export const getPersonalizedDashboard = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+      // Pagination metadata
+      page,
+      limit,
+      totals: {
+        initiatedTotal: initiatedTotalCount,
+        pendingTasks: pendingTasksCount,
+        completedTasks: completedTasksCount,
+        signedDocuments: signedDocsCount,
+        openQueries: openQueriesCount,
+        recentActivity: null, // same as stepWhere count — not surfaced separately
+      },
       data: {
         profile: {
           id: userProfile.id,
@@ -435,7 +467,7 @@ export const getPersonalizedDashboard = async (req, res) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════
-// DRILL DOWNS WITH SERVER-SIDE PAGINATION AND CONSISTENT DATES
+// DRILL DOWNS — all support admin (sees global data) + pagination
 // ═══════════════════════════════════════════════════════════════════════
 
 export const getPendingTasksDrillDown = async (req, res) => {
@@ -454,15 +486,17 @@ export const getPendingTasksDrillDown = async (req, res) => {
       page = 1,
       limit = 10,
     } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const { start, end } = buildDateRange(startDate, endDate);
 
-    const where = {
-      assignedTo: userData.id,
+    const isAdmin = await isUserAdmin(userData.id);
+
+    let where = {
       status: "IN_PROGRESS",
       createdAt: { gte: start, lte: end },
     };
+    if (!isAdmin) where.assignedTo = userData.id;
     if (workflowId) where.process = { workflowId };
     if (isOverdue === "true") {
       where.createdAt = {
@@ -548,15 +582,17 @@ export const getCompletedTasksDrillDown = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
 
     const { startDate, endDate, page = 1, limit = 10 } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const { start, end } = buildDateRange(startDate, endDate);
 
+    const isAdmin = await isUserAdmin(userData.id);
+
     const where = {
-      assignedTo: userData.id,
       status: "APPROVED",
       decisionAt: { gte: start, lte: end },
     };
+    if (!isAdmin) where.assignedTo = userData.id;
 
     const [total, tasks] = await Promise.all([
       prisma.processStepInstance.count({ where }),
@@ -619,14 +655,16 @@ export const getInitiatedProcessesDrillDown = async (req, res) => {
       page = 1,
       limit = 10,
     } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const { start, end } = buildDateRange(startDate, endDate);
 
+    const isAdmin = await isUserAdmin(userData.id);
+
     const where = {
-      initiatorId: userData.id,
       createdAt: { gte: start, lte: end },
     };
+    if (!isAdmin) where.initiatorId = userData.id;
     if (status && status !== "All") where.status = status;
     if (workflowId) where.workflowId = workflowId;
 
@@ -706,11 +744,14 @@ export const getSignedDocumentsDrillDown = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
 
     const { startDate, endDate, page = 1, limit = 10 } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const { start, end } = buildDateRange(startDate, endDate);
 
-    const where = { userId: userData.id, signedAt: { gte: start, lte: end } };
+    const isAdmin = await isUserAdmin(userData.id);
+
+    const where = { signedAt: { gte: start, lte: end } };
+    if (!isAdmin) where.userId = userData.id;
 
     const [total, signatures] = await Promise.all([
       prisma.documentSignature.count({ where }),
@@ -776,14 +817,18 @@ export const getOpenQueriesDrillDown = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized request" });
 
     const { startDate, endDate, page = 1, limit = 10 } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const { start, end } = buildDateRange(startDate, endDate);
 
-    const where = {
-      OR: [{ initiatorId: userData.id }, { entityId: userData.id }],
-      createdAt: { gte: start, lte: end },
-    };
+    const isAdmin = await isUserAdmin(userData.id);
+
+    const where = isAdmin
+      ? { createdAt: { gte: start, lte: end } }
+      : {
+          OR: [{ initiatorId: userData.id }, { entityId: userData.id }],
+          createdAt: { gte: start, lte: end },
+        };
 
     const [total, queries] = await Promise.all([
       prisma.processQA.count({ where }),
