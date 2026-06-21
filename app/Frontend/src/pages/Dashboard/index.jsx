@@ -1852,7 +1852,7 @@ export default function PersonalizedDashboard() {
                     verticalAlign: "middle",
                   }}
                 >
-                  👑 Admin View
+                  ⚙️ Admin View
                 </span>
               )}
             </h1>
