@@ -1512,7 +1512,9 @@ export const file_though_url = async (req, res) => {
       process.env.STATIC_FILE_TOKEN || "SHARED_SECRET_STATIC_TOKEN_123";
     let userData = null;
 
+    console.log("called the path");
     if (accessToken === STATIC_TOKEN) {
+      console.log("reached right");
       // Create a mock admin object to bypass file ownership checks
       userData = {
         id: -1,
@@ -1544,6 +1546,7 @@ export const file_though_url = async (req, res) => {
     });
 
     if (!document) {
+      console.log("fell for 404");
       return res.status(404).json({ message: "File not found in database" });
     }
 
