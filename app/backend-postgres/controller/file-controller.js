@@ -1510,6 +1510,10 @@ export const file_though_url = async (req, res) => {
     // ✅ FIX: Check for Static Token to bypass User Verification
     const STATIC_TOKEN =
       process.env.STATIC_FILE_TOKEN || "SHARED_SECRET_STATIC_TOKEN_123";
+
+    console.log("STATIC_TOKEN from env:", STATIC_TOKEN?.substring(0, 20));
+    console.log("accessToken received:", accessToken?.substring(0, 20));
+    console.log("match:", accessToken === STATIC_TOKEN);
     let userData = null;
 
     console.log("called the path");
