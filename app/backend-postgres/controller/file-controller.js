@@ -1496,7 +1496,6 @@ const setProtectionHeaders = (res, fileName) => {
 };
 export const file_though_url = async (req, res) => {
   try {
-    // Accept token from headers OR query string
     const authHeader =
       req.headers["authorization"] || req.headers["x-authorization"];
     const accessToken = authHeader?.substring(7) || req.query.token;
@@ -1507,35 +1506,39 @@ export const file_though_url = async (req, res) => {
         .json({ message: "Unauthorized request: Missing token" });
     }
 
-    // ✅ FIX: Check for Static Token to bypass User Verification
     const STATIC_TOKEN =
       process.env.STATIC_FILE_TOKEN || "SHARED_SECRET_STATIC_TOKEN_123";
 
-    console.log("STATIC_TOKEN from env:", STATIC_TOKEN?.substring(0, 20));
-    console.log("accessToken received:", accessToken?.substring(0, 20));
-    console.log("match:", accessToken === STATIC_TOKEN);
-    let userData = null;
-
-    console.log("called the path");
+    // ✅ STATIC TOKEN PATH: full absolute path, skip DB entirely
     if (accessToken === STATIC_TOKEN) {
-      console.log("reached right");
-      // Create a mock admin object to bypass file ownership checks
-      userData = {
-        id: -1,
-        isAdmin: true,
-        isRootLevel: true,
-        username: "system_bypass",
-      };
-    } else {
-      userData = await verifyUser(accessToken);
-      if (userData === "Unauthorized") {
-        return res
-          .status(401)
-          .json({ message: "Unauthorized request: Invalid token" });
+      const rawFilePathParam = req.params.filePath;
+      const absoluteFilePath = "/" + rawFilePathParam;
+
+      try {
+        await fs.access(absoluteFilePath);
+      } catch {
+        return res.status(404).json({ message: "File not found in storage" });
       }
+
+      const fileName = basename(absoluteFilePath);
+      const fileExtension = fileName.split(".").pop().toLowerCase();
+      const contentType =
+        typeof getContentTypeFromExtension === "function"
+          ? getContentTypeFromExtension(fileExtension)
+          : "application/pdf";
+
+      res.setHeader("Content-Type", contentType);
+      return res.sendFile(absoluteFilePath);
     }
 
-    // Path Traversal Protection
+    // ✅ NORMAL USER PATH: verify JWT, look up DB
+    const userData = await verifyUser(accessToken);
+    if (userData === "Unauthorized") {
+      return res
+        .status(401)
+        .json({ message: "Unauthorized request: Invalid token" });
+    }
+
     const rawFilePathParam = req.params.filePath;
     if (!rawFilePathParam) {
       return res.status(400).json({ message: "File path is missing" });
@@ -1550,28 +1553,14 @@ export const file_though_url = async (req, res) => {
     });
 
     if (!document) {
-      console.log("fell for 404");
       return res.status(404).json({ message: "File not found in database" });
     }
-
-    // Check Access Permissions (System bypass gets through automatically due to mock isAdmin)
-    // if (
-    //   document.createdById !== userData.id &&
-    //   !userData.isAdmin &&
-    //   !userData.isRootLevel
-    // ) {
-    //   // Fallback logic if needed
-    //   return res.status(403).json({
-    //     message: "Forbidden: You do not have permission to view this document.",
-    //   });
-    // }
 
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
     const STORAGE_PATH = process.env.STORAGE_PATH || "../storage";
     const fileName = basename(document.path);
 
-    // Construct real path
     const originalFilePath = join(
       __dirname,
       STORAGE_PATH,
@@ -1584,7 +1573,6 @@ export const file_though_url = async (req, res) => {
       return res.status(404).json({ message: "File not found in storage" });
     }
 
-    // Assuming these helper functions are defined elsewhere in your file
     const isEditable =
       typeof isEditableFile === "function" ? isEditableFile(fileName) : false;
     const fileExtension = fileName.split(".").pop().toLowerCase();
@@ -1625,7 +1613,6 @@ export const file_though_url = async (req, res) => {
     res.setHeader("Content-Type", contentType);
     res.sendFile(originalFilePath);
   } catch (error) {
-    // Assuming logger is defined
     if (typeof logger !== "undefined") {
       logger.error({
         action: "FILE_VIEW_SERVER_ERROR",
