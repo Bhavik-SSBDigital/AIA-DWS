@@ -42,7 +42,7 @@ app.disable("x-powered-by");
 // ✅ VAPT FIX #21 & #13: Applies critical security headers
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: false, // <-- Your current config has this disabled, so we add it manually below
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
     crossOriginOpenerPolicy: false,
@@ -79,6 +79,27 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// ==========================================
+// 🛡️ CUSTOM CSP HOTFIX FOR IFRAMES & REDIRECTS
+// ==========================================
+// We are injecting this manually to allow localhost:9000 and your prod domain
+// without breaking your existing Helmet/CORS setups.
+app.use((req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self' http://localhost:9000 https://dwsauditprd.aia-engineering.com; " +
+      "script-src 'self' 'unsafe-inline'; " +
+      "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; " +
+      "font-src 'self' https://fonts.gstatic.com; " +
+      "connect-src 'self' http://localhost:9000 https://dwsauditprd.aia-engineering.com; " +
+      "img-src 'self' data:; " +
+      "frame-src 'self' http://localhost:9000 https://dwsauditprd.aia-engineering.com; " +
+      "object-src 'self' http://localhost:9000 https://dwsauditprd.aia-engineering.com; " +
+      "frame-ancestors 'self';",
+  );
+  next();
+});
 
 // ✅ INCREASED PAYLOAD LIMIT
 app.use(express.json({ limit: "50mb" }));
