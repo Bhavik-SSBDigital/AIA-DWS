@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import { dirname } from "path";
 import dotenv from "dotenv";
 import { startPaymentScheduler } from "./services/paymentScheduler.js";
+import fs from "fs"; // 🚀 Added for direct file serving
 
 // ==========================================
 // 🚨 GLOBAL CRASH CATCHERS (CRITICAL FOR DEBUGGING SILENT DEATHS)
@@ -42,7 +43,7 @@ app.disable("x-powered-by");
 // ✅ VAPT FIX #21 & #13: Applies critical security headers
 app.use(
   helmet({
-    contentSecurityPolicy: false, // <-- Your current config has this disabled, so we add it manually below
+    contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
     crossOriginOpenerPolicy: false,
@@ -83,8 +84,6 @@ app.use(cors(corsOptions));
 // ==========================================
 // 🛡️ CUSTOM CSP HOTFIX FOR IFRAMES & REDIRECTS
 // ==========================================
-// We are injecting this manually to allow localhost:9000 and your prod domain
-// without breaking your existing Helmet/CORS setups.
 app.use((req, res, next) => {
   res.setHeader(
     "Content-Security-Policy",
@@ -136,6 +135,33 @@ app.use((req, res, next) => {
 });
 
 app.use(express.static(path.join(__dirname, "build")));
+
+// ==========================================
+// 🚀 THE FIX: DIRECT FILE SERVER INTERCEPTOR
+// ==========================================
+// This catches the weird double-slash URL (/api//getDocument)
+// and serves the file directly off the Ubuntu disk, bypassing any bad redirects.
+app.get(
+  ["/api/getDocument/:filename", "/api//getDocument/:filename"],
+  (req, res) => {
+    const absoluteFilePath = req.query.path;
+
+    // 1. Check if the path was provided in the URL
+    if (!absoluteFilePath) {
+      return res.status(400).send("No file path provided in URL.");
+    }
+
+    // 2. Check if the file actually exists on the Ubuntu hard drive
+    if (!fs.existsSync(absoluteFilePath)) {
+      console.error(`[FILE ERROR] File not found at: ${absoluteFilePath}`);
+      return res.status(404).send("File not found on server.");
+    }
+
+    // 3. Send the file directly to the browser (NO redirect)
+    console.log(`[FILE SUCCESS] Serving file directly: ${absoluteFilePath}`);
+    res.sendFile(absoluteFilePath);
+  },
+);
 
 // MAIN ROUTER
 app.use("/", router);
