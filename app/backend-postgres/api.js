@@ -1,7 +1,7 @@
 import express from "express";
 import http from "http";
 import cors from "cors";
-import helmet from "helmet"; // ✅ VAPT FIX #21: Missing HTTP Headers
+import helmet from "helmet";
 import router from "./routes/routes.js";
 import db from "./db.js";
 import path from "path";
@@ -9,13 +9,13 @@ import { fileURLToPath } from "url";
 import { dirname } from "path";
 import dotenv from "dotenv";
 import { startPaymentScheduler } from "./services/paymentScheduler.js";
+import { closeBrowser } from "./controller/description-controller.js";
 
 // ==========================================
-// 🚨 GLOBAL CRASH CATCHERS (CRITICAL FOR DEBUGGING SILENT DEATHS)
+// 🚨 GLOBAL CRASH CATCHERS
 // ==========================================
 process.on("uncaughtException", (err) => {
   console.error("\n[FATAL CRASH] Uncaught Exception:", err);
-  // Optional: process.exit(1) if you want systemd to immediately restart it
 });
 
 process.on("unhandledRejection", (reason, promise) => {
@@ -85,18 +85,16 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // ==========================================
-// 🕵️ ADVANCED REQUEST LOGGER (PLACED BEFORE ROUTER)
+// 🕵️ ADVANCED REQUEST LOGGER
 // ==========================================
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
-  const requestId = Math.random().toString(36).substring(7); // Unique ID per request
+  const requestId = Math.random().toString(36).substring(7);
 
-  // 1. Log the moment the request arrives
   console.log(
     `[${timestamp}] [REQ: ${requestId}] INCOMING: ${req.method} ${req.originalUrl}`,
   );
 
-  // 2. Log the moment the response finishes (or fails)
   res.on("finish", () => {
     console.log(
       `[${new Date().toISOString()}] [REQ: ${requestId}] COMPLETED: Status ${res.statusCode}`,
@@ -146,7 +144,38 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: "Internal server error" });
 });
 
-app.listen(PORT, () => {
+// ==========================================
+// 🚀 SERVER STARTUP & GRACEFUL SHUTDOWN
+// ==========================================
+const server = app.listen(PORT, () => {
   startPaymentScheduler();
   console.log("listening on", `${PORT}`);
 });
+
+const gracefulShutdown = async (signal) => {
+  console.log(
+    `\n[Shutdown] ${signal} received. Initiating graceful shutdown...`,
+  );
+
+  server.close(async () => {
+    console.log("[Shutdown] HTTP server closed. Cleaning up Puppeteer...");
+    try {
+      await closeBrowser();
+      console.log("[Shutdown] Cleanup complete. Exiting cleanly.");
+      process.exit(0);
+    } catch (err) {
+      console.error("[Shutdown] Error during cleanup:", err);
+      process.exit(1);
+    }
+  });
+
+  setTimeout(() => {
+    console.error(
+      "[Shutdown] Graceful shutdown timed out after 10s. Forcing exit.",
+    );
+    process.exit(1);
+  }, 10000);
+};
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

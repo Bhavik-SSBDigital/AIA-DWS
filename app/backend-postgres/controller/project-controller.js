@@ -123,7 +123,6 @@ export const getRootDocumentsWithAccess = async (req, res) => {
           const fileStats = await fs.stat(fileAbsolutePath);
           const access = documentAccessMap.get(doc.id) || {};
 
-          console.log("dpc path", doc.path);
           return {
             id: doc.id,
             name: doc.name,
