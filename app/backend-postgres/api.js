@@ -16,6 +16,7 @@ import { closeBrowser } from "./controller/description-controller.js";
 // ==========================================
 process.on("uncaughtException", (err) => {
   console.error("\n[FATAL CRASH] Uncaught Exception:", err);
+  setImmediate(() => process.exit(1));
 });
 
 process.on("unhandledRejection", (reason, promise) => {
@@ -25,6 +26,7 @@ process.on("unhandledRejection", (reason, promise) => {
     "reason:",
     reason,
   );
+  setImmediate(() => process.exit(1));
 });
 
 const __filename = fileURLToPath(import.meta.url);
@@ -84,12 +86,23 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+app.get("/healthz", (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: "dws-backend",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // ==========================================
 // 🕵️ ADVANCED REQUEST LOGGER
 // ==========================================
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   const requestId = Math.random().toString(36).substring(7);
+  req.requestId = requestId;
+  req.startedAt = Date.now();
 
   console.log(
     `[${timestamp}] [REQ: ${requestId}] INCOMING: ${req.method} ${req.originalUrl}`,
@@ -97,7 +110,7 @@ app.use((req, res, next) => {
 
   res.on("finish", () => {
     console.log(
-      `[${new Date().toISOString()}] [REQ: ${requestId}] COMPLETED: Status ${res.statusCode}`,
+      `[${new Date().toISOString()}] [REQ: ${requestId}] COMPLETED: Status ${res.statusCode} Duration ${Date.now() - req.startedAt}ms`,
     );
   });
 

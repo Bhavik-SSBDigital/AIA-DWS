@@ -339,6 +339,42 @@ import { exec } from "child_process";
 import { promisify } from "util";
 const execPromise = promisify(exec);
 
+const PDF_RENDER_TIMEOUT_MS = Number(
+  process.env.PDF_RENDER_TIMEOUT_MS || 30000,
+);
+const INITIATE_PROCESS_EMAIL_TIMEOUT_MS = Number(
+  process.env.INITIATE_PROCESS_EMAIL_TIMEOUT_MS || 15000,
+);
+
+const withTimeout = (promise, timeoutMs, label, onTimeout) => {
+  let timer;
+
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      if (onTimeout) {
+        Promise.resolve()
+          .then(onTimeout)
+          .catch((error) => {
+            console.error(`[timeout-cleanup] ${label} cleanup failed`, error);
+          });
+      }
+
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    if (typeof timer.unref === "function") timer.unref();
+  });
+
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
+
+const logInitiateProcess = (phase, details = {}) => {
+  console.log(
+    `[initiate_process] ${phase}`,
+    JSON.stringify({ at: new Date().toISOString(), ...details }),
+  );
+};
+
 /**
  * Appends an HTML description to an existing PDF, placing it right after the
  * last content on the last page (like a signature), using the same Y‑coordinate
@@ -367,6 +403,7 @@ async function appendDescriptionToPdf(
   const { marginLeft = 50, marginTop = 50, safetyMargin = 25 } = options;
 
   let browser = null;
+  let page = null;
 
   try {
     const absDocumentPath = path.join(
@@ -376,17 +413,18 @@ async function appendDescriptionToPdf(
       documentPath,
     );
 
-    // -----------------------------------------
-    // ✅ CORRECT SPACE CALCULATION (FIXED)
-    // -----------------------------------------
     let contentExtremes;
     try {
-      contentExtremes = await executePythonScript(
-        pythonEnvPath,
-        pythonScriptPath,
-        absDocumentPath,
+      contentExtremes = await withTimeout(
+        executePythonScript(pythonEnvPath, pythonScriptPath, absDocumentPath),
+        PDF_RENDER_TIMEOUT_MS,
+        "PDF space calculation",
       );
     } catch (e) {
+      console.error("[appendDescriptionToPdf] space calculation failed", {
+        documentPath,
+        error: e?.message || e,
+      });
       contentExtremes = {
         height: lastPage.getHeight(),
         last_y: 0,
@@ -394,27 +432,32 @@ async function appendDescriptionToPdf(
     }
 
     const pageHeight = contentExtremes.height || lastPage.getHeight();
-
-    // 🔥 Convert TOP-based (pdfplumber) → BOTTOM-based (pdf-lib)
     const usedFromTop = contentExtremes.last_y || 0;
     const freeSpaceBottom = Math.max(0, pageHeight - usedFromTop);
-
-    // Start Y from bottom coordinate system
     let startY = freeSpaceBottom - safetyMargin;
 
-    // -----------------------------------------
-    // 🚀 RENDER HTML USING PUPPETEER (UNCHANGED)
-    // -----------------------------------------
-    browser = await puppeteer.launch({
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-      ],
-      headless: "new",
-    });
+    browser = await withTimeout(
+      puppeteer.launch({
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+        ],
+        headless: "new",
+      }),
+      PDF_RENDER_TIMEOUT_MS,
+      "Puppeteer launch",
+    );
 
-    const page = await browser.newPage();
+    page = await withTimeout(
+      browser.newPage(),
+      PDF_RENDER_TIMEOUT_MS,
+      "Puppeteer page creation",
+      () => browser?.close(),
+    );
+    page.setDefaultTimeout(PDF_RENDER_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(PDF_RENDER_TIMEOUT_MS);
     await page.setViewport({ width: 800, height: 1080 });
 
     const fullHtml = `
@@ -456,40 +499,50 @@ async function appendDescriptionToPdf(
       </html>
     `;
 
-    await page.setContent(fullHtml, { waitUntil: "networkidle0" });
+    await withTimeout(
+      page.setContent(fullHtml, { waitUntil: "domcontentloaded" }),
+      PDF_RENDER_TIMEOUT_MS,
+      "Description HTML render",
+      () => page?.close(),
+    );
 
     const container = await page.$(".description-container");
+    if (!container) {
+      throw new Error("Description container was not rendered");
+    }
+
     const box = await container.boundingBox();
+    if (!box) {
+      throw new Error("Description container has no render box");
+    }
 
     const rawWidth = Math.ceil(box.width) + 10;
     const rawHeight = Math.ceil(box.height) + 10;
 
-    const pdfBuffer = await page.pdf({
-      width: `${rawWidth}px`,
-      height: `${rawHeight}px`,
-      printBackground: true,
-      margin: { top: 0, bottom: 0, left: 0, right: 0 },
-    });
+    const pdfBuffer = await withTimeout(
+      page.pdf({
+        width: `${rawWidth}px`,
+        height: `${rawHeight}px`,
+        printBackground: true,
+        margin: { top: 0, bottom: 0, left: 0, right: 0 },
+      }),
+      PDF_RENDER_TIMEOUT_MS,
+      "Description PDF render",
+      () => page?.close(),
+    );
 
     const tempDoc = await PDFDocument.load(pdfBuffer);
     const embeddedPage = await pdfDoc.embedPage(tempDoc.getPages()[0]);
 
-    // -----------------------------------------
-    // 📐 SCALE TO FIT WIDTH
-    // -----------------------------------------
     const maxWidth = lastPage.getWidth() - marginLeft * 2;
     const scale = rawWidth > maxWidth ? maxWidth / rawWidth : 1;
 
     const finalWidth = rawWidth * scale;
     const finalHeight = rawHeight * scale;
 
-    // -----------------------------------------
-    // 🎯 SMART PLACEMENT (FIXED)
-    // -----------------------------------------
     let targetPage = lastPage;
     let pagesAdded = 0;
 
-    // If not enough space → new page
     if (startY < marginTop || finalHeight > startY) {
       targetPage = pdfDoc.addPage([lastPage.getWidth(), lastPage.getHeight()]);
       startY = targetPage.getHeight() - marginTop;
@@ -497,11 +550,9 @@ async function appendDescriptionToPdf(
     }
 
     let remainingHeight = finalHeight;
-    let offsetY = 0;
 
     while (remainingHeight > 0) {
       const availableHeight = startY - marginTop;
-
       const drawHeight = Math.min(availableHeight, remainingHeight);
 
       targetPage.drawPage(embeddedPage, {
@@ -531,10 +582,9 @@ async function appendDescriptionToPdf(
       pagesAdded,
       newlyAdded: pagesAdded > 0,
     };
-  } catch (err) {
-    throw err;
   } finally {
-    if (browser) await browser.close();
+    if (page) await page.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
   }
 }
 
@@ -561,6 +611,15 @@ export const initiate_process = async (req, res, next) => {
       printDescriptionPref = "NONE",
     } = req.body;
 
+    logInitiateProcess("request accepted", {
+      workflowId,
+      documentCount: req.body.documents?.length || 0,
+      printDescriptionPref,
+      hasDescription: Boolean(description),
+      emailThreadCount: emailThreads.length,
+      userId: userData.id,
+    });
+
     const processName = await generate_unique_process_name(workflowId);
 
     const workflowDetails = await prisma.workflow.findUnique({
@@ -568,7 +627,17 @@ export const initiate_process = async (req, res, next) => {
       select: { name: true },
     });
 
+    if (!workflowDetails) {
+      throw new Error(`Workflow with ID ${workflowId} not found`);
+    }
+
     const workflowName = workflowDetails.name;
+
+    logInitiateProcess("process folder creation started", {
+      workflowId,
+      workflowName,
+      processName,
+    });
 
     await createFolder(false, `../${workflowName}/${processName}`, userData);
 
@@ -629,7 +698,21 @@ export const initiate_process = async (req, res, next) => {
               },
             );
           });
-        } catch (error) {}
+        } catch (error) {
+          console.error("[initiate_process] document copy/delete failed", {
+            processName,
+            workflowName,
+            documentId,
+            sourcePath,
+            destinationPath,
+            error: error?.message || error,
+          });
+        }
+      } else {
+        console.error("[initiate_process] source document not found", {
+          processName,
+          documentId,
+        });
       }
     }
 
@@ -712,7 +795,27 @@ export const initiate_process = async (req, res, next) => {
 
                 const updatedPdfBytes = await pdfDoc.save();
                 await fs.writeFile(absolutePath, updatedPdfBytes);
-              } catch (pdfError) {}
+              } catch (pdfError) {
+                console.error(
+                  "[initiate_process] description PDF append failed",
+                  {
+                    processName,
+                    workflowName,
+                    documentId: docObj.newDocId,
+                    originalDocumentId: docObj.oldDocId,
+                    documentPath,
+                    error: pdfError?.message || pdfError,
+                  },
+                );
+              }
+            } else {
+              console.error(
+                "[initiate_process] copied PDF document row not found",
+                {
+                  processName,
+                  documentId: docObj.newDocId,
+                },
+              );
             }
           }
         }
@@ -722,6 +825,8 @@ export const initiate_process = async (req, res, next) => {
     documentIds = copiedDocumentIds.map((d) => d.newDocId);
 
     const initiatorId = userData.id;
+
+    logInitiateProcess("database transaction started", { processName });
 
     const process = await prisma.$transaction(async (tx) => {
       const process_ = await tx.processInstance.create({
@@ -853,6 +958,11 @@ export const initiate_process = async (req, res, next) => {
       return process_;
     });
 
+    logInitiateProcess("database transaction completed", {
+      processId: process.id,
+      processName,
+    });
+
     try {
       const firstStepInstance = await prisma.processStepInstance.findFirst({
         where: {
@@ -885,20 +995,41 @@ export const initiate_process = async (req, res, next) => {
         const processDescription = process.description;
 
         if (assignedUser) {
-          await sendProcessNotification("stepAssigned", {
-            params: [
-              firstStepInstance.process,
-              firstStepInstance,
-              processDocs,
-              assignedUser,
-              processDescription,
-              tags,
-            ],
+          logInitiateProcess("step assignment email started", {
+            processId: process.id,
+            stepInstanceId: firstStepInstance.id,
+            assignedTo: assignedUser.id,
+            assignedEmail: assignedUser.email,
+          });
+
+          await withTimeout(
+            sendProcessNotification("stepAssigned", {
+              params: [
+                firstStepInstance.process,
+                firstStepInstance,
+                processDocs,
+                assignedUser,
+                processDescription,
+                tags,
+              ],
+            }),
+            INITIATE_PROCESS_EMAIL_TIMEOUT_MS,
+            "step assignment email",
+          );
+
+          logInitiateProcess("step assignment email completed", {
+            processId: process.id,
+            stepInstanceId: firstStepInstance.id,
+            assignedTo: assignedUser.id,
           });
         }
       }
     } catch (emailError) {
-      console.log("error getting email after initiate process", emailError);
+      console.error("[initiate_process] step assignment email failed", {
+        processId: process.id,
+        processName,
+        error: emailError?.message || emailError,
+      });
     }
 
     const { paymentMode, paymentDate, processTagId } = req.body;
@@ -916,12 +1047,20 @@ export const initiate_process = async (req, res, next) => {
       console.log("Error creating payment schedule:", error);
     }
 
+    logInitiateProcess("request completed", {
+      processId: process.id,
+      processName,
+    });
+
     return res.status(200).json({
       message: `Process with the name ${processName} initiated successfully`,
       processId: process.id,
     });
   } catch (error) {
-    console.log("error initiating process", error);
+    console.error("[initiate_process] request failed", {
+      error: error?.message || error,
+      stack: error?.stack,
+    });
     return res.status(500).json({
       message: "Error initiating the process",
       error: "Error initiating the process",
