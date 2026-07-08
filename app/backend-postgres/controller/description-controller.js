@@ -120,6 +120,26 @@ const SANITIZE_OPTIONS = {
 const sanitizeDescription = (html) =>
   sanitizeHtml(html || "", SANITIZE_OPTIONS);
 
+/**
+ * FULL REPLACEMENT for renderDescriptionPdf in description-controller.js
+ *
+ * What changed vs your original:
+ *  - Deleted the local `let _browser = null;` / `getBrowser` / `closeBrowser`
+ *    block that used to live above this function — that logic now lives in
+ *    puppeteer-manager.js (shared with process-controller.js).
+ *  - Added: import { withPage } from "./puppeteer-manager.js";  at the top
+ *    of the file.
+ *  - browser.newPage() now happens INSIDE the timeout-protected block
+ *    instead of before it. This is the fix for Bug 1 (the confirmed leak
+ *    after saveDescriptionDocument).
+ *
+ * Everything else — sanitizeDescription, escapeHtml, the HTML template,
+ * SANITIZE_OPTIONS — is UNCHANGED. Only paste this over the old
+ * renderDescriptionPdf function itself.
+ */
+
+import { withPage } from "../puppeteer-manager.js";
+
 const renderDescriptionPdf = async ({
   processName,
   initiatorName,
@@ -188,40 +208,22 @@ const renderDescriptionPdf = async ({
   </body>
   </html>`;
 
-  const browser = await getBrowser();
-  const page = await browser.newPage();
+  return withPage(
+    async (page) => {
+      await page.setContent(pageHtml, { waitUntil: "domcontentloaded" });
 
-  const PDF_TIMEOUT_MS = 30000;
-  let timeoutHandle;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutHandle = setTimeout(() => {
-      reject(
-        new Error(`PDF generation timed out after ${PDF_TIMEOUT_MS / 1000}s`),
-      );
-    }, PDF_TIMEOUT_MS);
-  });
-
-  try {
-    await Promise.race([
-      page.setContent(pageHtml, { waitUntil: "domcontentloaded" }),
-      timeoutPromise,
-    ]);
-
-    const pdfBuffer = await Promise.race([
-      page.pdf({
+      const pdfBuffer = await page.pdf({
         format: "A4",
         printBackground: true,
         margin: { top: "0mm", bottom: "18mm", left: "0mm", right: "0mm" },
         displayHeaderFooter: false,
-      }),
-      timeoutPromise,
-    ]);
+      });
 
-    clearTimeout(timeoutHandle);
-    return Buffer.from(pdfBuffer);
-  } finally {
-    await page.close().catch(() => {});
-  }
+      return Buffer.from(pdfBuffer);
+    },
+    "renderDescriptionPdf",
+    30000,
+  );
 };
 
 const resolveStoragePath = (rawHeaderPath, baseStorageDir) => {

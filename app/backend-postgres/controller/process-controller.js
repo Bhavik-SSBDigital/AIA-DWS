@@ -391,6 +391,31 @@ const logInitiateProcess = (phase, details = {}) => {
  * @param {number} options.marginRight - Right margin (default 20).
  */
 
+import { withPage } from "../puppeteer-manager.js";
+
+/**
+ * FULL REPLACEMENT for appendDescriptionToPdf.
+ *
+ * NEW in this version (on top of the freeze fix from before):
+ *
+ *  Problem: when the original PDF's last page was tiny (e.g. 192x61pt,
+ *  a real-world case we hit — document 2122), the old code created
+ *  "overflow" pages by cloning that SAME tiny size:
+ *      pdfDoc.addPage([lastPage.getWidth(), lastPage.getHeight()])
+ *  So every new page was just as tiny as the original, and there was
+ *  structurally never enough room — no matter how many pages you added.
+ *
+ *  Fix: if the last page can't offer a reasonable amount of usable space
+ *  after margins, overflow pages are now sized to standard A4
+ *  (595.28 x 841.89pt) instead of cloning the tiny original. Real
+ *  documents with normal-sized pages are completely unaffected — they
+ *  keep using their own page size as before.
+ *
+ *  The iteration cap + drawHeight guard from before are KEPT as a safety
+ *  net — even with correct sizing, nothing in this function should ever
+ *  be able to loop forever again.
+ */
+
 async function appendDescriptionToPdf(
   pdfDoc,
   lastPage,
@@ -400,192 +425,268 @@ async function appendDescriptionToPdf(
   pythonScriptPath,
   options = {},
 ) {
+  const fnStartTime = Date.now();
+  const logStep = (step, extra = {}) => {
+    console.log(`[appendDescriptionToPdf] ${step}`, {
+      documentPath,
+      elapsedMs: Date.now() - fnStartTime,
+      ...extra,
+    });
+  };
+
+  logStep("function entered");
+
   const { marginLeft = 50, marginTop = 50, safetyMargin = 25 } = options;
 
-  let browser = null;
-  let page = null;
+  const absDocumentPath = path.join(
+    __dirname,
+    "../../../../",
+    "storage",
+    documentPath,
+  );
 
+  let contentExtremes;
   try {
-    const absDocumentPath = path.join(
-      __dirname,
-      "../../../../",
-      "storage",
+    logStep("calling executePythonScript (space calculation)");
+    contentExtremes = await withTimeout(
+      executePythonScript(pythonEnvPath, pythonScriptPath, absDocumentPath),
+      PDF_RENDER_TIMEOUT_MS,
+      "PDF space calculation",
+    );
+    logStep("executePythonScript done", { contentExtremes });
+  } catch (e) {
+    logStep("executePythonScript failed/timed out", {
+      error: e?.message || e,
+    });
+    console.error("[appendDescriptionToPdf] space calculation failed", {
       documentPath,
-    );
+      error: e?.message || e,
+    });
+    contentExtremes = {
+      height: lastPage.getHeight(),
+      last_y: 0,
+    };
+  }
 
-    let contentExtremes;
-    try {
-      contentExtremes = await withTimeout(
-        executePythonScript(pythonEnvPath, pythonScriptPath, absDocumentPath),
-        PDF_RENDER_TIMEOUT_MS,
-        "PDF space calculation",
-      );
-    } catch (e) {
-      console.error("[appendDescriptionToPdf] space calculation failed", {
-        documentPath,
-        error: e?.message || e,
-      });
-      contentExtremes = {
-        height: lastPage.getHeight(),
-        last_y: 0,
-      };
-    }
+  const pageHeight = contentExtremes.height || lastPage.getHeight();
+  const usedFromTop = contentExtremes.last_y || 0;
+  const freeSpaceBottom = Math.max(0, pageHeight - usedFromTop);
+  let startY = freeSpaceBottom - safetyMargin;
 
-    const pageHeight = contentExtremes.height || lastPage.getHeight();
-    const usedFromTop = contentExtremes.last_y || 0;
-    const freeSpaceBottom = Math.max(0, pageHeight - usedFromTop);
-    let startY = freeSpaceBottom - safetyMargin;
+  const fullHtml = `
+    <html>
+      <head>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body {
+            font-family: Helvetica, Arial, sans-serif;
+            font-size: 13px;
+            line-height: 1.6;
+          }
+          .description-container {
+            padding: 10px;
+            white-space: pre-wrap;
+            word-break: break-word;
+          }
+          table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 10px;
+          }
+          th, td {
+            border: 1px solid #999;
+            padding: 6px;
+            font-size: 12px;
+          }
+          th {
+            background: #f2f2f2;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="description-container">
+          <b>Description:</b><br/><br/>
+          ${descriptionHtml}
+        </div>
+      </body>
+    </html>
+  `;
 
-    browser = await withTimeout(
-      puppeteer.launch({
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-        ],
-        headless: "new",
-      }),
-      PDF_RENDER_TIMEOUT_MS,
-      "Puppeteer launch",
-    );
+  logStep("calling withPage");
 
-    page = await withTimeout(
-      browser.newPage(),
-      PDF_RENDER_TIMEOUT_MS,
-      "Puppeteer page creation",
-      () => browser?.close(),
-    );
-    page.setDefaultTimeout(PDF_RENDER_TIMEOUT_MS);
-    page.setDefaultNavigationTimeout(PDF_RENDER_TIMEOUT_MS);
-    await page.setViewport({ width: 800, height: 1080 });
+  return withPage(
+    async (page) => {
+      logStep("withPage: page acquired, setting viewport");
+      await page.setViewport({ width: 800, height: 1080 });
 
-    const fullHtml = `
-      <html>
-        <head>
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-              font-family: Helvetica, Arial, sans-serif;
-              font-size: 13px;
-              line-height: 1.6;
-            }
-            .description-container {
-              padding: 10px;
-              white-space: pre-wrap;
-              word-break: break-word;
-            }
-            table {
-              border-collapse: collapse;
-              width: 100%;
-              margin-top: 10px;
-            }
-            th, td {
-              border: 1px solid #999;
-              padding: 6px;
-              font-size: 12px;
-            }
-            th {
-              background: #f2f2f2;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="description-container">
-            <b>Description:</b><br/><br/>
-            ${descriptionHtml}
-          </div>
-        </body>
-      </html>
-    `;
+      logStep("withPage: viewport set, setting content");
+      await page.setContent(fullHtml, { waitUntil: "domcontentloaded" });
 
-    await withTimeout(
-      page.setContent(fullHtml, { waitUntil: "domcontentloaded" }),
-      PDF_RENDER_TIMEOUT_MS,
-      "Description HTML render",
-      () => page?.close(),
-    );
+      logStep("withPage: content set, querying container");
+      const container = await page.$(".description-container");
+      if (!container) {
+        throw new Error("Description container was not rendered");
+      }
 
-    const container = await page.$(".description-container");
-    if (!container) {
-      throw new Error("Description container was not rendered");
-    }
+      logStep("withPage: container found, getting bounding box");
+      const box = await container.boundingBox();
+      if (!box) {
+        throw new Error("Description container has no render box");
+      }
 
-    const box = await container.boundingBox();
-    if (!box) {
-      throw new Error("Description container has no render box");
-    }
+      logStep("withPage: bounding box obtained", { box });
 
-    const rawWidth = Math.ceil(box.width) + 10;
-    const rawHeight = Math.ceil(box.height) + 10;
+      const rawWidth = Math.ceil(box.width) + 10;
+      const rawHeight = Math.ceil(box.height) + 10;
 
-    const pdfBuffer = await withTimeout(
-      page.pdf({
+      logStep("withPage: calling page.pdf", { rawWidth, rawHeight });
+      const pdfBuffer = await page.pdf({
         width: `${rawWidth}px`,
         height: `${rawHeight}px`,
         printBackground: true,
         margin: { top: 0, bottom: 0, left: 0, right: 0 },
-      }),
-      PDF_RENDER_TIMEOUT_MS,
-      "Description PDF render",
-      () => page?.close(),
-    );
+      });
+      logStep("withPage: page.pdf done", { bytes: pdfBuffer.length });
 
-    const tempDoc = await PDFDocument.load(pdfBuffer);
-    const embeddedPage = await pdfDoc.embedPage(tempDoc.getPages()[0]);
+      const tempDoc = await PDFDocument.load(pdfBuffer);
+      logStep("withPage: tempDoc loaded");
 
-    const maxWidth = lastPage.getWidth() - marginLeft * 2;
-    const scale = rawWidth > maxWidth ? maxWidth / rawWidth : 1;
+      const embeddedPage = await pdfDoc.embedPage(tempDoc.getPages()[0]);
+      logStep("withPage: page embedded");
 
-    const finalWidth = rawWidth * scale;
-    const finalHeight = rawHeight * scale;
+      // ===== NEW: decide what size any OVERFLOW pages should be =====
+      const STANDARD_PAGE_WIDTH = 595.28; // A4 width in points
+      const STANDARD_PAGE_HEIGHT = 841.89; // A4 height in points
+      const MIN_USABLE_SPACE = 150; // if less than this remains after margins, the page is "too small" to be worth cloning
 
-    let targetPage = lastPage;
-    let pagesAdded = 0;
+      const lastPageWidth = lastPage.getWidth();
+      const lastPageHeight = lastPage.getHeight();
 
-    if (startY < marginTop || finalHeight > startY) {
-      targetPage = pdfDoc.addPage([lastPage.getWidth(), lastPage.getHeight()]);
-      startY = targetPage.getHeight() - marginTop;
-      pagesAdded++;
-    }
+      const lastPageTooSmall =
+        lastPageWidth - marginLeft * 2 < MIN_USABLE_SPACE ||
+        lastPageHeight - marginTop * 2 < MIN_USABLE_SPACE;
 
-    let remainingHeight = finalHeight;
+      // Overflow pages use the original page size UNLESS it's too small
+      // to be usable, in which case we fall back to standard A4 — never
+      // clone a page too tiny to ever fit anything.
+      const overflowPageWidth = lastPageTooSmall
+        ? Math.max(lastPageWidth, STANDARD_PAGE_WIDTH)
+        : lastPageWidth;
+      const overflowPageHeight = lastPageTooSmall
+        ? Math.max(lastPageHeight, STANDARD_PAGE_HEIGHT)
+        : lastPageHeight;
 
-    while (remainingHeight > 0) {
-      const availableHeight = startY - marginTop;
-      const drawHeight = Math.min(availableHeight, remainingHeight);
-
-      targetPage.drawPage(embeddedPage, {
-        x: marginLeft,
-        y: startY - drawHeight,
-        width: finalWidth,
-        height: finalHeight,
+      logStep("withPage: overflow page sizing decided", {
+        lastPageWidth,
+        lastPageHeight,
+        lastPageTooSmall,
+        overflowPageWidth,
+        overflowPageHeight,
       });
 
-      remainingHeight -= drawHeight;
+      // Scale the content against whichever width will actually host it:
+      // the original last page if it has room, otherwise the overflow
+      // page size decided above.
+      const scaleTargetWidth = lastPageTooSmall
+        ? overflowPageWidth
+        : lastPageWidth;
+      const maxWidth = scaleTargetWidth - marginLeft * 2;
+      const scale = rawWidth > maxWidth ? maxWidth / rawWidth : 1;
 
-      if (remainingHeight > 0) {
-        targetPage = pdfDoc.addPage([
-          lastPage.getWidth(),
-          lastPage.getHeight(),
-        ]);
+      const finalWidth = rawWidth * scale;
+      const finalHeight = rawHeight * scale;
+
+      let targetPage = lastPage;
+      let pagesAdded = 0;
+
+      // If the description doesn't fit on the existing last page at all,
+      // OR that page is simply too small to ever be usable, start a
+      // fresh (properly-sized) page right away instead of trying to
+      // squeeze it onto a dead-end page.
+      if (startY < marginTop || finalHeight > startY || lastPageTooSmall) {
+        targetPage = pdfDoc.addPage([overflowPageWidth, overflowPageHeight]);
         startY = targetPage.getHeight() - marginTop;
         pagesAdded++;
+        logStep("withPage: added overflow page", {
+          reason: lastPageTooSmall
+            ? "last page too small"
+            : "not enough room on last page",
+          newPageWidth: overflowPageWidth,
+          newPageHeight: overflowPageHeight,
+          startY,
+        });
       }
-    }
 
-    return {
-      x: marginLeft,
-      y: startY,
-      width: finalWidth,
-      height: finalHeight,
-      pagesAdded,
-      newlyAdded: pagesAdded > 0,
-    };
-  } finally {
-    if (page) await page.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
-  }
+      let remainingHeight = finalHeight;
+
+      const MAX_PAGES_TO_ADD = 50; // sane hard ceiling — kept as a safety net, should never actually be hit now
+      let iterations = 0;
+
+      while (remainingHeight > 0) {
+        iterations++;
+        if (iterations > MAX_PAGES_TO_ADD) {
+          throw new Error(
+            `appendDescriptionToPdf pagination exceeded ${MAX_PAGES_TO_ADD} iterations ` +
+              `(remainingHeight=${remainingHeight}, startY=${startY}, marginTop=${marginTop}) — ` +
+              `aborting instead of looping forever`,
+          );
+        }
+
+        const availableHeight = startY - marginTop;
+        const drawHeight = Math.min(availableHeight, remainingHeight);
+
+        // Safety net: should be unreachable now that overflow pages are
+        // always properly sized, but kept in case of an edge case we
+        // haven't seen yet — fail loudly instead of spinning.
+        if (drawHeight <= 0) {
+          throw new Error(
+            `appendDescriptionToPdf: no usable page space even after overflow sizing ` +
+              `(availableHeight=${availableHeight}, remainingHeight=${remainingHeight}, ` +
+              `startY=${startY}, marginTop=${marginTop}) — aborting instead of looping forever`,
+          );
+        }
+
+        targetPage.drawPage(embeddedPage, {
+          x: marginLeft,
+          y: startY - drawHeight,
+          width: finalWidth,
+          height: finalHeight,
+        });
+
+        remainingHeight -= drawHeight;
+
+        if (remainingHeight > 0) {
+          targetPage = pdfDoc.addPage([overflowPageWidth, overflowPageHeight]);
+          startY = targetPage.getHeight() - marginTop;
+          pagesAdded++;
+        }
+      }
+
+      logStep("withPage: pagination/draw complete", {
+        pagesAdded,
+        iterations,
+      });
+
+      return {
+        x: marginLeft,
+        y: startY,
+        width: finalWidth,
+        height: finalHeight,
+        pagesAdded,
+        newlyAdded: pagesAdded > 0,
+      };
+    },
+    "appendDescriptionToPdf",
+    PDF_RENDER_TIMEOUT_MS,
+  )
+    .then((result) => {
+      logStep("function complete", { result });
+      return result;
+    })
+    .catch((err) => {
+      logStep("function threw", { error: err?.message || err });
+      throw err;
+    });
 }
 
 export const initiate_process = async (req, res, next) => {
@@ -639,6 +740,8 @@ export const initiate_process = async (req, res, next) => {
       processName,
     });
 
+    logInitiateProcess("process folder creation finished");
+
     await createFolder(false, `../${workflowName}/${processName}`, userData);
 
     let documentIds = req.body.documents?.map((item) => item.documentId) || [];
@@ -655,6 +758,7 @@ export const initiate_process = async (req, res, next) => {
         const destinationPath = `../${workflowName}/${processName}`;
         const name = document.name;
 
+        console.log("file copy/delete started");
         try {
           const copyResult = await new Promise((resolve, reject) => {
             file_copy(
@@ -716,6 +820,8 @@ export const initiate_process = async (req, res, next) => {
       }
     }
 
+    console.log("file copy/delete finished");
+
     const requestedDocCount = req.body.documents?.length || 0;
     if (
       copiedDocumentIds.length === 0 ||
@@ -729,6 +835,12 @@ export const initiate_process = async (req, res, next) => {
 
     // ── Description printing — skips the auto-generated description doc ──
     if (printDescriptionPref !== "NONE") {
+      console.log("[initiate_process] Description printing started", {
+        at: new Date().toISOString(),
+        processName,
+        totalCopiedDocs: copiedDocumentIds.length,
+      });
+
       for (const docObj of copiedDocumentIds) {
         if (docObj.type.toLowerCase() === "pdf") {
           const reqDoc = req.body.documents.find(
@@ -741,7 +853,13 @@ export const initiate_process = async (req, res, next) => {
             Array.isArray(reqDoc?.tags) &&
             reqDoc.tags.includes("process-description-doc");
 
-          if (isDescriptionDoc) continue;
+          if (isDescriptionDoc) {
+            console.log(
+              "[initiate_process] skipping auto-generated description doc",
+              { documentId: docObj.newDocId },
+            );
+            continue;
+          }
 
           let descToPrint = "";
           if (printDescriptionPref === "PROCESS" && description) {
@@ -755,9 +873,21 @@ export const initiate_process = async (req, res, next) => {
           }
 
           if (descToPrint && descToPrint.trim() !== "") {
+            const docStartTime = Date.now();
+            console.log("[initiate_process] doc description start", {
+              at: new Date().toISOString(),
+              documentId: docObj.newDocId,
+              originalDocumentId: docObj.oldDocId,
+            });
+
             const physicalDocInfo = await prisma.document.findUnique({
               where: { id: parseInt(docObj.newDocId) },
               select: { path: true },
+            });
+
+            console.log("[initiate_process] step: findUnique done", {
+              documentId: docObj.newDocId,
+              elapsedMs: Date.now() - docStartTime,
             });
 
             if (physicalDocInfo) {
@@ -771,9 +901,18 @@ export const initiate_process = async (req, res, next) => {
 
               try {
                 const existingPdfBytes = await fs.readFile(absolutePath);
+                console.log("[initiate_process] step: readFile done", {
+                  documentId: docObj.newDocId,
+                  bytes: existingPdfBytes.length,
+                  elapsedMs: Date.now() - docStartTime,
+                });
 
                 const pdfDoc = await PDFDocument.load(existingPdfBytes, {
                   ignoreEncryption: true,
+                });
+                console.log("[initiate_process] step: PDFDocument.load done", {
+                  documentId: docObj.newDocId,
+                  elapsedMs: Date.now() - docStartTime,
                 });
 
                 const pages = pdfDoc.getPages();
@@ -782,6 +921,14 @@ export const initiate_process = async (req, res, next) => {
                 }
 
                 const lastPage = pages[pages.length - 1];
+
+                console.log(
+                  "[initiate_process] step: calling appendDescriptionToPdf",
+                  {
+                    documentId: docObj.newDocId,
+                    elapsedMs: Date.now() - docStartTime,
+                  },
+                );
 
                 await appendDescriptionToPdf(
                   pdfDoc,
@@ -793,8 +940,30 @@ export const initiate_process = async (req, res, next) => {
                   {},
                 );
 
+                console.log(
+                  "[initiate_process] step: appendDescriptionToPdf done",
+                  {
+                    documentId: docObj.newDocId,
+                    elapsedMs: Date.now() - docStartTime,
+                  },
+                );
+
                 const updatedPdfBytes = await pdfDoc.save();
+                console.log("[initiate_process] step: pdfDoc.save done", {
+                  documentId: docObj.newDocId,
+                  elapsedMs: Date.now() - docStartTime,
+                });
+
                 await fs.writeFile(absolutePath, updatedPdfBytes);
+                console.log("[initiate_process] step: writeFile done", {
+                  documentId: docObj.newDocId,
+                  elapsedMs: Date.now() - docStartTime,
+                });
+
+                console.log("[initiate_process] doc description complete", {
+                  documentId: docObj.newDocId,
+                  totalElapsedMs: Date.now() - docStartTime,
+                });
               } catch (pdfError) {
                 console.error(
                   "[initiate_process] description PDF append failed",
@@ -804,7 +973,9 @@ export const initiate_process = async (req, res, next) => {
                     documentId: docObj.newDocId,
                     originalDocumentId: docObj.oldDocId,
                     documentPath,
+                    elapsedMs: Date.now() - docStartTime,
                     error: pdfError?.message || pdfError,
+                    stack: pdfError?.stack,
                   },
                 );
               }
@@ -820,6 +991,10 @@ export const initiate_process = async (req, res, next) => {
           }
         }
       }
+      console.log("[initiate_process] Description printing finished", {
+        at: new Date().toISOString(),
+        processName,
+      });
     }
 
     documentIds = copiedDocumentIds.map((d) => d.newDocId);
