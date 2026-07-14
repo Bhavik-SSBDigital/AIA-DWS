@@ -19,7 +19,6 @@ const STORAGE_PATH = process.env.STORAGE_PATH || "../storage";
 
 // ======================================================================
 // 🛡️ UNIVERSAL OS LIBREOFFICE COMMAND GENERATOR
-// (UNTOUCHED — not part of this fix)
 // ======================================================================
 const getSofficeCommand = (outDir, inFile) => {
   const platform = os.platform();
@@ -60,53 +59,42 @@ const cleanupTempFiles = async (files, additionalPath) => {
 };
 
 // ======================================================================
-// EML THREAD-PARSING HELPERS
+// EML THREAD-PARSING HELPERS (IMPROVED)
 // ======================================================================
 
-// Strips nested "<mailto:...>" wrappers that some Outlook/Gmail exports
-// produce (e.g. "<dolly@x.in<mailto:dolly@x.in>>"), which previously broke
-// the header regex and caused it to fall through to "Unknown"/"Invalid Date".
 const normalizeQuoteHeaderLine = (line) => {
   let normalized = line.replace(/<mailto:[^>]*>/gi, "");
   normalized = normalized.replace(/>>+/g, ">").replace(/<<+/g, "<");
-  return normalized;
+  return normalized.replace(/\s+/g, " ").trim();
 };
 
-// Parses a Gmail-style quoted-reply header line:
-//   "On <date/time> <Name> <email> wrote:"
-// Returns { date, from } using best-effort extraction, or null if the line
-// isn't actually a quote-header at all. Never returns the literal strings
-// "Unknown" or "Invalid Date" — callers get a raw/blank fallback instead,
-// which downstream formatting turns into a readable placeholder.
 const extractQuotedHeaderMeta = (line) => {
   const normalized = normalizeQuoteHeaderLine(line);
 
+  // Catch formats like: "On Mon, Jul 13, 2026 at 5:16 PM Dolly Patel <email> wrote:"
   const wrapper = normalized.match(/^On\s+(.+?)\s+wrote:\s*$/i);
   if (!wrapper) return null;
 
   const middle = wrapper[1].trim();
 
-  // Anchor on "<optional name> <email>" at the tail of the string, since
-  // that combination is always at the end of these header lines regardless
-  // of how the date/time portion in front of it is formatted.
+  // Robust tail match mapping Name and Email
   const tailMatch = middle.match(
-    /(?:([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,3})\s*)?<?\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>?\s*$/,
+    /(?:(.*)\s+)?<?\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>?\s*$/,
   );
 
   if (tailMatch) {
     let namePart = tailMatch[1] || "";
-    let leadingAmPm = "";
-    const ampmLead = namePart.match(/^\s*(AM|PM)\s+/i);
-    if (ampmLead) {
-      leadingAmPm = ampmLead[1].toUpperCase();
-      namePart = namePart.slice(ampmLead[0].length);
-    }
-    namePart = namePart.trim();
-
-    const email = tailMatch[2];
     let datePart = middle.slice(0, middle.length - tailMatch[0].length).trim();
-    if (leadingAmPm) datePart = `${datePart} ${leadingAmPm}`.trim();
+
+    // Look for stray AM/PM appended to the name part due to slash/dash anomalies
+    const strayAmPm = namePart.match(/^\s*(\/|-)?\s*(AM|PM)\s+/i);
+    if (strayAmPm) {
+      datePart = `${datePart} ${strayAmPm[2].toUpperCase()}`.trim();
+      namePart = namePart.slice(strayAmPm[0].length).trim();
+    }
+
     datePart = datePart.replace(/[,/-]+$/, "").trim();
+    const email = tailMatch[2];
 
     return {
       date: datePart,
@@ -114,32 +102,42 @@ const extractQuotedHeaderMeta = (line) => {
     };
   }
 
-  // No email found at all — treat the whole segment as the sender label and
-  // leave date blank so formatDate() shows a graceful placeholder rather
-  // than a fabricated or literal "Unknown"/"Invalid Date".
   return { date: "", from: middle };
 };
 
-// Chronological compare that treats unparseable dates as "keep original
-// position" instead of letting NaN comparisons scatter them unpredictably.
 const compareMessageDates = (a, b) => {
   const ta = new Date(a.date).getTime();
   const tb = new Date(b.date).getTime();
-  const validA = !Number.isNaN(ta);
-  const validB = !Number.isNaN(tb);
+  const validA = !Number.isNaN(ta) && a.date;
+  const validB = !Number.isNaN(tb) && b.date;
+
   if (validA && validB) return ta - tb;
   if (validA && !validB) return -1;
   if (!validA && validB) return 1;
   return 0;
 };
 
-// ======================================================================
-// USER'S ORIGINAL EML HELPERS (thread splitting + PDF generation)
-// ======================================================================
-const parseEnterpriseThread = (bodyText, rootEmailMeta) => {
+// Stitch multiline headers that get broken by email client wrapping
+const preprocessBodyText = (bodyText) => {
+  if (!bodyText) return "";
+  let text = bodyText.replace(/\r\n/g, "\n");
+
+  // Fix broken "On ... \n ... wrote:" structures
+  text = text.replace(/^(On\s+.*?)[\n\s]+(.*?\s+wrote:\s*)$/gm, "$1 $2");
+
+  // Fix broken "From: ... \n Sent: ..." Outlook structures
+  text = text.replace(/^(From:.*?)[\n\s]+(Sent:|Date:)/gm, "$1\n$2");
+
+  return text;
+};
+
+const parseEnterpriseThread = (rawBodyText, rootEmailMeta) => {
+  const bodyText = preprocessBodyText(rawBodyText);
   if (!bodyText) return [{ ...rootEmailMeta, body_plain: "(No content)" }];
-  const lines = bodyText.split(/\r?\n/);
+
+  const lines = bodyText.split(/\n/);
   const thread = [];
+
   let currentMsg = {
     from: rootEmailMeta.from || "",
     to: rootEmailMeta.to || "",
@@ -153,19 +151,25 @@ const parseEnterpriseThread = (bodyText, rootEmailMeta) => {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const cleaned = line.replace(/^(>\s*)+/, "").trim();
+
     const isGmailStart = cleaned.match(/^On\s+.*\s+wrote:\s*$/i);
     const isOutlookStart =
       cleaned.toLowerCase().startsWith("from:") &&
-      i + 1 < lines.length &&
-      lines[i + 1].toLowerCase().includes("sent:");
-    const isHorizontalRule = cleaned.match(/^[- ]*Original Message[- ]*$/i);
+      ((i + 1 < lines.length &&
+        lines[i + 1].toLowerCase().match(/^(sent|date):/)) ||
+        (i + 2 < lines.length &&
+          lines[i + 2].toLowerCase().match(/^(sent|date):/)));
+    const isHorizontalRule = cleaned.match(/^[-_ ]*Original Message[-_ ]*$/i);
 
     if (isGmailStart || isHorizontalRule || isOutlookStart) {
       const body = currentMsg.content.join("\n").trim();
-      if (body.length > 0) {
+
+      // Prevent saving ghost blocks full of unknowns
+      if (body.length > 0 || currentMsg.from !== "") {
         currentMsg.body_plain = body;
         thread.push({ ...currentMsg });
       }
+
       currentMsg = {
         from: "",
         to: "",
@@ -175,40 +179,83 @@ const parseEnterpriseThread = (bodyText, rootEmailMeta) => {
         bcc: "",
         content: [],
       };
+
       if (isGmailStart) {
         const meta = extractQuotedHeaderMeta(cleaned);
         if (meta) {
           currentMsg.date = meta.date;
           currentMsg.from = meta.from;
         }
-        continue; // the header line itself carries no body content
+        continue;
       }
       if (isHorizontalRule) continue;
     }
+
     if (/^From:/i.test(cleaned))
-      currentMsg.from = cleaned.replace(/^From:\s*/i, "");
+      currentMsg.from = cleaned.replace(/^From:\s*/i, "").trim();
     else if (/^Sent:|^Date:/i.test(cleaned))
-      currentMsg.date = cleaned.replace(/^(Sent|Date):\s*/i, "");
+      currentMsg.date = cleaned.replace(/^(Sent|Date):\s*/i, "").trim();
     else if (/^To:/i.test(cleaned))
-      currentMsg.to = cleaned.replace(/^To:\s*/i, "");
+      currentMsg.to = cleaned.replace(/^To:\s*/i, "").trim();
     else if (/^Cc:/i.test(cleaned))
-      currentMsg.cc = cleaned.replace(/^Cc:\s*/i, "");
+      currentMsg.cc = cleaned.replace(/^Cc:\s*/i, "").trim();
     else if (/^Bcc:/i.test(cleaned))
-      currentMsg.bcc = cleaned.replace(/^Bcc:\s*/i, "");
+      currentMsg.bcc = cleaned.replace(/^Bcc:\s*/i, "").trim();
     else if (/^Subject:/i.test(cleaned))
-      currentMsg.subject = cleaned.replace(/^Subject:\s*/i, "");
-    else currentMsg.content.push(cleaned);
+      currentMsg.subject = cleaned.replace(/^Subject:\s*/i, "").trim();
+    else currentMsg.content.push(line); // Preserve original formatting/spacing where possible
   }
 
   currentMsg.body_plain = currentMsg.content.join("\n").trim();
-  thread.push(currentMsg);
-  // Only drop genuinely empty fragments (boundary lines with nothing after
-  // them) — no more arbitrary character-count thresholds that could silently
-  // discard short-but-legitimate replies.
-  const filtered = thread.filter((m) => m.body_plain.trim().length > 0);
+  if (currentMsg.body_plain.length > 0 || currentMsg.from !== "") {
+    thread.push(currentMsg);
+  }
+
+  // Filter out anomalies
+  const filtered = thread.filter((m) => {
+    const isMissingCore = m.from.toLowerCase() === "unknown" || m.from === "";
+    const isGhostContent = m.body_plain.trim().length === 0;
+    return !(isMissingCore && isGhostContent);
+  });
+
   return filtered.sort(compareMessageDates);
 };
 
+const formatDate = (dateString) => {
+  if (
+    !dateString ||
+    !String(dateString).trim() ||
+    String(dateString).toLowerCase() === "invalid date"
+  ) {
+    return "Date not available";
+  }
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) {
+    return String(dateString).trim();
+  }
+  return date.toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+};
+
+const truncateEmail = (email, length) => {
+  if (
+    !email ||
+    !String(email).trim() ||
+    String(email).toLowerCase() === "unknown"
+  )
+    return "N/A";
+  return email.length > length ? email.substring(0, length) + "..." : email;
+};
+
+// ======================================================================
+// PDF GENERATOR (IMPROVED WRAP/PAGINATION)
+// ======================================================================
 const generateThreadContextPDF = async (
   allMessages,
   pdfFullPath,
@@ -230,21 +277,12 @@ const generateThreadContextPDF = async (
         accent: "#4f46e5",
         lightBg: "#f1f5f9",
         border: "#cbd5e1",
-        success: "#10b981",
-        warning: "#f59e0b",
         text: "#0f172a",
         lightText: "#64748b",
       };
-      const fonts = {
-        bold: "Helvetica-Bold",
-        regular: "Helvetica",
-        oblique: "Helvetica-Oblique",
-      };
-      const pageWidth = doc.page.width - 90;
 
-      doc.registerFont("Helvetica", "Helvetica");
-      doc.registerFont("Helvetica-Bold", "Helvetica-Bold");
-      doc.registerFont("Helvetica-Oblique", "Helvetica-Oblique");
+      const fonts = { bold: "Helvetica-Bold", regular: "Helvetica" };
+      const pageWidth = doc.page.width - 90;
 
       const addPageHeader = () => {
         doc.fontSize(8).font(fonts.regular).fillColor(colors.lightText);
@@ -252,15 +290,13 @@ const generateThreadContextPDF = async (
           width: pageWidth,
           align: "left",
         });
+        doc.text(`Generated: ${new Date().toLocaleString()}`, 45, 25, {
+          width: pageWidth,
+          align: "right",
+        });
         doc
-          .fontSize(8)
-          .text(`Generated: ${new Date().toLocaleString()}`, 45, 40, {
-            width: pageWidth,
-            align: "right",
-          });
-        doc
-          .moveTo(45, 48)
-          .lineTo(550, 48)
+          .moveTo(45, 38)
+          .lineTo(550, 38)
           .strokeColor(colors.border)
           .lineWidth(0.5)
           .stroke();
@@ -284,42 +320,58 @@ const generateThreadContextPDF = async (
           });
       };
 
-      addPageHeader();
-
-      doc.fontSize(24).font(fonts.bold).fillColor(colors.primary);
-      doc.text("Email Thread", 45, 65);
-      doc.fontSize(14).font(fonts.bold).fillColor(colors.accent);
-      doc.text(threadSubject || "Conversation History", 45, 95, {
-        width: pageWidth,
-        height: 40,
+      // Set listener to handle auto-pagination wrapping gracefully
+      doc.on("pageAdded", () => {
+        addPageHeader();
+        doc.y = 55;
       });
 
-      const summaryY = doc.y + 15;
+      addPageHeader();
+
+      doc
+        .fontSize(24)
+        .font(fonts.bold)
+        .fillColor(colors.primary)
+        .text("Email Thread", 45, 55);
+      doc
+        .fontSize(14)
+        .font(fonts.bold)
+        .fillColor(colors.accent)
+        .text(threadSubject || "Conversation History", 45, 85, {
+          width: pageWidth,
+        });
+
+      const summaryY = doc.y + 10;
       doc
         .rect(45, summaryY, pageWidth, 45)
         .fillAndStroke(colors.lightBg, colors.border);
-      doc.fontSize(9).font(fonts.bold).fillColor(colors.primary);
-      doc.text(`Total Messages: ${allMessages.length}`, 55, summaryY + 8);
-      doc.fontSize(9).font(fonts.regular).fillColor(colors.secondary);
-      doc.text(
-        `Date Range: ${formatDate(allMessages[0]?.date)} to ${formatDate(allMessages[allMessages.length - 1]?.date)}`,
-        55,
-        summaryY + 23,
-      );
-      doc.y = summaryY + 50;
+      doc
+        .fontSize(9)
+        .font(fonts.bold)
+        .fillColor(colors.primary)
+        .text(`Total Messages: ${allMessages.length}`, 55, summaryY + 8);
+      doc
+        .fontSize(9)
+        .font(fonts.regular)
+        .fillColor(colors.secondary)
+        .text(
+          `Date Range: ${formatDate(allMessages[0]?.date)} to ${formatDate(allMessages[allMessages.length - 1]?.date)}`,
+          55,
+          summaryY + 23,
+        );
+
+      doc.y = summaryY + 60;
 
       allMessages.forEach((msg, idx) => {
-        if (doc.y > 650) {
-          addPageFooter(doc.bufferedPageRange().count);
-          doc.addPage();
-          addPageHeader();
-        }
+        if (doc.y > 650) doc.addPage();
 
-        const messageNumber = idx + 1;
         const bgColor = idx % 2 === 0 ? colors.lightBg : "#ffffff";
 
         doc.rect(45, doc.y, pageWidth, 3).fill(colors.accent);
         doc.moveDown(0.3);
+        const headerStartY = doc.y;
+
+        // Background for Header Block
         doc
           .rect(45, doc.y, pageWidth, 68)
           .fillAndStroke(bgColor, colors.border);
@@ -329,7 +381,7 @@ const generateThreadContextPDF = async (
           .fontSize(11)
           .font(fonts.bold)
           .fillColor(colors.primary)
-          .text(`Message ${messageNumber}`, 55, headerY);
+          .text(`Message ${idx + 1}`, 55, headerY);
         doc
           .fontSize(8)
           .font(fonts.regular)
@@ -345,6 +397,7 @@ const generateThreadContextPDF = async (
           .font(fonts.regular)
           .fillColor(colors.text)
           .text(truncateEmail(msg.from, 60), 90, headerY + 32, { width: 450 });
+
         doc
           .fontSize(8)
           .font(fonts.bold)
@@ -367,7 +420,7 @@ const generateThreadContextPDF = async (
             .text(truncateEmail(msg.cc, 60), 90, headerY + 56, { width: 450 });
         }
 
-        doc.y = headerY + 70;
+        doc.y = headerStartY + 76;
         doc
           .fontSize(10)
           .font(fonts.bold)
@@ -379,8 +432,8 @@ const generateThreadContextPDF = async (
           .fillColor(colors.accent)
           .text(msg.subject || "(No Subject)", 55, doc.y + 12, {
             width: pageWidth - 20,
-            height: 20,
           });
+
         doc.moveDown(0.5);
         doc
           .moveTo(45, doc.y)
@@ -388,43 +441,29 @@ const generateThreadContextPDF = async (
           .strokeColor(colors.border)
           .lineWidth(0.5)
           .stroke();
-        doc.moveDown(0.3);
+        doc.moveDown(0.5);
+
+        // Body Content Setup
         doc.fontSize(9).font(fonts.regular).fillColor(colors.text);
-
         const bodyText = (msg.body_plain || "").trim();
-        const bodyLines = bodyText.split("\n");
 
-        // Render every line. Pagination is already handled per-line below
-        // (new page whenever doc.y crosses the bottom margin), so there is
-        // no need for an artificial line cap or a "truncated" notice —
-        // long messages simply continue onto additional pages.
-        bodyLines.forEach((line) => {
-          if (doc.y > 680) {
-            addPageFooter(doc.bufferedPageRange().count);
-            doc.addPage();
-            addPageHeader();
-          }
-          doc.text(line.trim() || " ", 55, doc.y, {
-            width: pageWidth - 20,
-            align: "left",
-            lineGap: 2,
-          });
+        // Pass full text string to let PDFKit handle wrapping/pagination dynamically
+        doc.text(bodyText || " ", 55, doc.y, {
+          width: pageWidth - 20,
+          align: "left",
+          lineGap: 2,
         });
 
-        doc.moveDown(0.8);
-
-        if (idx < allMessages.length - 1) {
-          doc
-            .moveTo(45, doc.y)
-            .lineTo(550, doc.y)
-            .strokeColor(colors.border)
-            .lineWidth(1)
-            .stroke();
-          doc.moveDown(0.5);
-        }
+        doc.moveDown(1.5);
       });
 
-      addPageFooter(doc.bufferedPageRange().count);
+      // Assign footers post-generation
+      const pages = doc.bufferedPageRange();
+      for (let i = 0; i < pages.count; i++) {
+        doc.switchToPage(i);
+        addPageFooter(i + 1);
+      }
+
       doc.end();
       stream.on("finish", resolve);
       stream.on("error", reject);
@@ -434,32 +473,10 @@ const generateThreadContextPDF = async (
   });
 };
 
-const formatDate = (dateString) => {
-  if (!dateString || !String(dateString).trim()) return "Date not available";
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) {
-    // Couldn't parse it into a real Date — show the original raw text
-    // instead of the misleading literal "Invalid Date".
-    return String(dateString).trim();
-  }
-  return date.toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-};
-
-const truncateEmail = (email, length) => {
-  if (!email || !String(email).trim()) return "N/A";
-  return email.length > length ? email.substring(0, length) + "..." : email;
-};
-
 // ======================================================================
-// 1. EXTRACT EML DETAILS (FORCED PDF CONVERSION FOR IMAGES & DOCS)
+// MAIN CONTROLLERS (Unchanged functionality, merged with robust methods above)
 // ======================================================================
+
 export const extractEMLDetails = async (req, res) => {
   const accessToken =
     req.headers["authorization"]?.replace("Bearer ", "") ||
@@ -529,9 +546,6 @@ export const extractEMLDetails = async (req, res) => {
           let finalExt = originalExt;
           let finalDisplayFilename = attachment.filename;
 
-          // ------------------------------------------------------------------
-          // FORCE PDF CONVERSION FOR TARGET EXTENSIONS
-          // ------------------------------------------------------------------
           if (["jpg", "jpeg", "png"].includes(originalExt)) {
             try {
               const imgPdf = await PDFLibDocument.create();
@@ -548,14 +562,10 @@ export const extractEMLDetails = async (req, res) => {
                 width: metadata.width,
                 height: metadata.height,
               });
-
               finalBuffer = Buffer.from(await imgPdf.save());
               finalExt = "pdf";
               finalDisplayFilename = `${originalBaseName}.pdf`;
             } catch (imgErr) {
-              console.log(
-                `Fallback for fake/corrupted image ${attachment.filename}. Forcing PDF extension.`,
-              );
               const errPdf = await PDFLibDocument.create();
               const page = errPdf.addPage([595.28, 841.89]);
               page.drawText(
@@ -585,9 +595,6 @@ export const extractEMLDetails = async (req, res) => {
               finalDisplayFilename = `${originalBaseName}.pdf`;
               await fs.unlink(convertedPdfPath).catch(() => {});
             } catch (convErr) {
-              console.log(
-                `Fallback for fake/corrupted doc ${attachment.filename}. Forcing PDF extension.`,
-              );
               const errPdf = await PDFLibDocument.create();
               const page = errPdf.addPage([595.28, 841.89]);
               page.drawText("[Doc Conversion Failed or Dummy Data Provided]", {
@@ -602,8 +609,6 @@ export const extractEMLDetails = async (req, res) => {
               await fs.unlink(tempOriginal).catch(() => {});
             }
           }
-          // Any other extension (xls, xlsx, pdf, zip) ignores the above blocks completely
-          // ------------------------------------------------------------------
 
           const safeName = await generateUniqueDocumentName({
             workflowId,
@@ -628,9 +633,7 @@ export const extractEMLDetails = async (req, res) => {
           });
 
           uploadedDocumentIds.push(newDoc.id);
-
           attachment.filename = finalDisplayFilename;
-
           attachmentsWithDocumentIds.push({
             ...attachment,
             originalFilename: safeName,
@@ -725,9 +728,6 @@ export const extractEMLDetails = async (req, res) => {
   }
 };
 
-// ======================================================================
-// 2. CONVERT SINGLE IMAGE/DOC TO PDF
-// ======================================================================
 export const convertFileToPdf = async (req, res) => {
   let tempFilePath = null;
   let convertedFilePath = null;
@@ -827,9 +827,6 @@ export const convertFileToPdf = async (req, res) => {
   }
 };
 
-// ======================================================================
-// 3. MERGE FILES TO PDF
-// ======================================================================
 export const mergeFilesToPdf = async (req, res) => {
   let tempFiles = [];
   let mergedPdfPath = null;
@@ -998,9 +995,6 @@ export const mergeFilesToPdf = async (req, res) => {
   }
 };
 
-// ======================================================================
-// 4. MERGE AND SAVE PDF
-// ======================================================================
 export const mergeAndSavePdf = async (req, res) => {
   let tempFiles = [];
 
