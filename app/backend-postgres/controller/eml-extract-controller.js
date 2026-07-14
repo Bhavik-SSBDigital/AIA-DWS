@@ -1,4 +1,5 @@
-import { spawn, execSync } from "child_process";
+import { spawn, execFile } from "child_process";
+import { promisify } from "util";
 import path from "path";
 import { fileURLToPath } from "url";
 import fsSync from "fs";
@@ -17,30 +18,82 @@ const __dirname = dirname(__filename);
 import prisma from "../config/prisma-config.js";
 const STORAGE_PATH = process.env.STORAGE_PATH || "../storage";
 
+const execFileAsync = promisify(execFile);
+
+// Hard ceilings so a stuck subprocess can never hang a request (or the
+// whole Node process, in the case of the old execSync-based approach)
+// forever. Tune via env if your conversions are legitimately slower.
+const LIBREOFFICE_TIMEOUT_MS = Number(
+  process.env.LIBREOFFICE_TIMEOUT_MS || 60_000,
+);
+const PYTHON_EXTRACTOR_TIMEOUT_MS = Number(
+  process.env.PYTHON_EXTRACTOR_TIMEOUT_MS || 90_000,
+);
+
 // ======================================================================
-// 🛡️ UNIVERSAL OS LIBREOFFICE COMMAND GENERATOR
+// UNIVERSAL OS LIBREOFFICE INVOCATION (no shell, no string interpolation)
 // ======================================================================
-const getSofficeCommand = (outDir, inFile) => {
+const getSofficeInvocation = (outDir, inFile) => {
   const platform = os.platform();
+  const baseArgs = [
+    "--headless",
+    "--convert-to",
+    "pdf",
+    "--outdir",
+    outDir,
+    inFile,
+  ];
+
   if (platform === "darwin") {
-    return `PATH=$PATH:/opt/homebrew/bin:/usr/local/bin:/Applications/LibreOffice.app/Contents/MacOS soffice --headless --convert-to pdf --outdir "${outDir}" "${inFile}"`;
-  } else if (platform === "win32") {
-    return `""C:\\Program Files\\LibreOffice\\program\\soffice.exe"" --headless --convert-to pdf --outdir "${outDir}" "${inFile}"`;
-  } else {
-    return `soffice --headless --convert-to pdf --outdir "${outDir}" "${inFile}"`;
+    return {
+      file: "soffice",
+      args: baseArgs,
+      options: {
+        env: {
+          ...process.env,
+          PATH: `${process.env.PATH || ""}:/opt/homebrew/bin:/usr/local/bin:/Applications/LibreOffice.app/Contents/MacOS`,
+        },
+      },
+    };
   }
+  if (platform === "win32") {
+    return {
+      file: "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
+      args: baseArgs,
+      options: {},
+    };
+  }
+  return { file: "soffice", args: baseArgs, options: {} };
 };
 
+/**
+ * Runs LibreOffice conversion asynchronously via execFile (no shell,
+ * so no quoting/injection issues) with a hard timeout. Unlike the
+ * previous execSync call, this NEVER blocks Node's event loop — other
+ * requests keep being served while this runs — and it can never hang
+ * indefinitely: if soffice wedges, it gets killed and we throw.
+ */
 const executeLibreOfficeConversion = async (inputFilePath, outputDir) => {
+  const { file, args, options } = getSofficeInvocation(
+    outputDir,
+    inputFilePath,
+  );
   try {
-    const command = getSofficeCommand(outputDir, inputFilePath);
-    execSync(command, { stdio: "ignore" });
+    await execFileAsync(file, args, {
+      ...options,
+      timeout: LIBREOFFICE_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+      maxBuffer: 20 * 1024 * 1024,
+    });
     const parsedPath = path.parse(inputFilePath);
     return path.join(outputDir, `${parsedPath.name}.pdf`);
   } catch (error) {
+    const timedOut = error.killed || error.signal === "SIGKILL";
     console.log("LibreOffice Error:", error.message);
     throw new Error(
-      `LibreOffice conversion failed. Ensure LibreOffice is installed.`,
+      timedOut
+        ? `LibreOffice conversion timed out after ${LIBREOFFICE_TIMEOUT_MS}ms and was killed.`
+        : `LibreOffice conversion failed. Ensure LibreOffice is installed.`,
     );
   }
 };
@@ -58,12 +111,22 @@ const cleanupTempFiles = async (files, additionalPath) => {
   }
 };
 
-// ======================================================================
-// EML THREAD-PARSING HELPERS (IMPROVED)
-// ======================================================================
+// Recursively removes a directory tree and swallows errors — used to
+// guarantee temp attachment dirs never accumulate across requests,
+// which is what causes slow disk-driven memory/cache pressure over
+// time on long-running servers.
+const cleanupDir = async (dirPath) => {
+  if (!dirPath) return;
+  try {
+    await fs.rm(dirPath, { recursive: true, force: true });
+  } catch (e) {}
+};
 
+// ======================================================================
+// EML THREAD-PARSING HELPERS
+// ======================================================================
 const normalizeQuoteHeaderLine = (line) => {
-  let normalized = line.replace(/<mailto:[^>]*>/gi, "");
+  let normalized = line.replace(/mailto:[^\s>]*>/gi, "");
   normalized = normalized.replace(/>>+/g, ">").replace(/<<+/g, "<");
   return normalized.replace(/\s+/g, " ").trim();
 };
@@ -71,7 +134,8 @@ const normalizeQuoteHeaderLine = (line) => {
 const cleanMailto = (str) => {
   if (!str) return "";
   return str
-    .replace(/<mailto:[^>]*>/gi, "")
+    .replace(/mailto:[^\s>]*>/gi, "")
+    .replace(/<https?:\/\/[^>]*>/gi, "")
     .replace(/>>+/g, ">")
     .replace(/<<+/g, "<")
     .trim();
@@ -80,70 +144,63 @@ const cleanMailto = (str) => {
 const extractQuotedHeaderMeta = (line) => {
   const normalized = normalizeQuoteHeaderLine(line);
 
-  // Catch "On [Date/Time] [Name] <[email]> wrote:"
   const wrapper = normalized.match(/^On\s+(.+?)\s+wrote:\s*$/i);
   if (!wrapper) return null;
 
   const middle = wrapper[1].trim();
 
-  // 1. Extract the email address at the very end
+  // Find the FIRST email anywhere in the header
   const emailMatch = middle.match(
-    /<?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>?\s*$/,
+    /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/i,
   );
-  if (!emailMatch) return { date: "", from: middle };
 
-  const email = emailMatch[1];
-  const remainder = middle.slice(0, emailMatch.index).trim();
-
-  // 2. Find the boundary between Date/Time and Name
-  // Look for standard time endings like AM, PM, or 24-hr (e.g., 17:41)
-  const timeBoundaryRegex = /(AM|PM|\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$/i;
-  const timeMatch = remainder.match(timeBoundaryRegex);
-
-  if (timeMatch) {
-    const splitIndex = timeMatch.index + timeMatch[1].length;
-    let datePart = remainder.slice(0, splitIndex).trim();
-
-    // Clean up trailing " at" or commas
-    datePart = datePart
-      .replace(/\s+at$/i, "")
-      .replace(/,$/, "")
-      .trim();
-    const namePart = timeMatch[2].trim();
-
+  if (!emailMatch) {
     return {
-      date: datePart,
-      from: namePart ? `${namePart} <${email}>` : email,
+      date: "",
+      from: middle,
     };
   }
 
-  // Fallback if no clean time boundary exists
-  return { date: "", from: `${remainder} <${email}>` };
+  const email = emailMatch[0];
+
+  // Everything before the email
+  let beforeEmail = middle.substring(0, emailMatch.index);
+
+  beforeEmail = beforeEmail.replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
+
+  const gmailMatch = beforeEmail.match(
+    /^(.*?\d{4}\s+at\s+\d{1,2}:\d{2}\s*[AP]M)\s+(.+)$/i,
+  );
+
+  if (gmailMatch) {
+    return {
+      date: gmailMatch[1].replace(/\s+at\s+/i, " ").trim(),
+      from: `${gmailMatch[2]} <${email}>`,
+    };
+  }
+
+  const outlookMatch = beforeEmail.match(
+    /^(.*?\d{1,2}:\d{2}(?::\d{2})?\s*[AP]M)\s+(.+)$/i,
+  );
+
+  if (outlookMatch) {
+    return {
+      date: outlookMatch[1].trim(),
+      from: `${outlookMatch[2]} <${email}>`,
+    };
+  }
+
+  return {
+    date: "",
+    from: `${beforeEmail} <${email}>`,
+  };
 };
 
-const compareMessageDates = (a, b) => {
-  const ta = new Date(a.date).getTime();
-  const tb = new Date(b.date).getTime();
-  const validA = !Number.isNaN(ta) && a.date;
-  const validB = !Number.isNaN(tb) && b.date;
-
-  if (validA && validB) return ta - tb;
-  if (validA && !validB) return -1;
-  if (!validA && validB) return 1;
-  return 0;
-};
-
-// Stitch multiline headers that get broken by email client wrapping
 const preprocessBodyText = (bodyText) => {
   if (!bodyText) return "";
   let text = bodyText.replace(/\r\n/g, "\n");
-
-  // Fix broken "On ... \n ... wrote:" structures
-  text = text.replace(/^(On\s+.*?)[\n\s]+(.*?\s+wrote:\s*)$/gm, "$1 $2");
-
-  // Fix broken "From: ... \n Sent: ..." Outlook structures
+  text = text.replace(/^(On\s+.+?)[\n\s]+(.+?\s+wrote:\s*)$/gm, "$1 $2");
   text = text.replace(/^(From:.*?)[\n\s]+(Sent:|Date:)/gm, "$1\n$2");
-
   return text;
 };
 
@@ -168,7 +225,7 @@ const parseEnterpriseThread = (rawBodyText, rootEmailMeta) => {
     const line = lines[i];
     const cleaned = line.replace(/^(>\s*)+/, "").trim();
 
-    const isGmailStart = cleaned.match(/^On\s+.*\s+wrote:\s*$/i);
+    const isGmailStart = cleaned.match(/^On\s+.+\s+wrote:\s*$/i);
     const isOutlookStart =
       cleaned.toLowerCase().startsWith("from:") &&
       ((i + 1 < lines.length &&
@@ -180,7 +237,6 @@ const parseEnterpriseThread = (rawBodyText, rootEmailMeta) => {
     if (isGmailStart || isHorizontalRule || isOutlookStart) {
       const body = currentMsg.content.join("\n").trim();
 
-      // Prevent saving ghost blocks full of unknowns
       if (body.length > 0 || currentMsg.from !== "") {
         currentMsg.body_plain = body;
         thread.push({ ...currentMsg });
@@ -197,6 +253,7 @@ const parseEnterpriseThread = (rawBodyText, rootEmailMeta) => {
       };
 
       if (isGmailStart) {
+        console.log("GMAIL HEADER >>>", cleaned);
         const meta = extractQuotedHeaderMeta(cleaned);
         if (meta) {
           currentMsg.date = meta.date;
@@ -219,7 +276,7 @@ const parseEnterpriseThread = (rawBodyText, rootEmailMeta) => {
       currentMsg.bcc = cleanMailto(cleaned.replace(/^Bcc:\s*/i, ""));
     else if (/^Subject:/i.test(cleaned))
       currentMsg.subject = cleaned.replace(/^Subject:\s*/i, "").trim();
-    else currentMsg.content.push(line); // Preserve original formatting/spacing where possible
+    else currentMsg.content.push(line);
   }
 
   currentMsg.body_plain = currentMsg.content.join("\n").trim();
@@ -227,14 +284,11 @@ const parseEnterpriseThread = (rawBodyText, rootEmailMeta) => {
     thread.push(currentMsg);
   }
 
-  // Filter out anomalies
-  const filtered = thread.filter((m) => {
+  return thread.filter((m) => {
     const isMissingCore = m.from.toLowerCase() === "unknown" || m.from === "";
     const isGhostContent = m.body_plain.trim().length === 0;
     return !(isMissingCore && isGhostContent);
   });
-
-  return filtered.sort(compareMessageDates);
 };
 
 const formatDate = (dateString) => {
@@ -259,18 +313,16 @@ const formatDate = (dateString) => {
   });
 };
 
-const truncateEmail = (email, length) => {
-  if (
-    !email ||
-    !String(email).trim() ||
-    String(email).toLowerCase() === "unknown"
-  )
-    return "N/A";
-  return email.length > length ? email.substring(0, length) + "..." : email;
+// Removes literal "N/A" and "UNKNOWN" text so it leaves a clean empty string
+const sanitizeField = (str) => {
+  let cleaned = cleanMailto(str);
+  const upper = cleaned.toUpperCase();
+  if (upper === "N/A" || upper === "UNKNOWN") return "";
+  return cleaned;
 };
 
 // ======================================================================
-// PDF GENERATOR (IMPROVED WRAP/PAGINATION)
+// DYNAMIC PDF GENERATOR (NO BLEED-THROUGH, NO OVERLAPPING FIELDS)
 // ======================================================================
 const generateThreadContextPDF = async (
   allMessages,
@@ -280,7 +332,7 @@ const generateThreadContextPDF = async (
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({
-        margin: 45,
+        margins: { top: 45, bottom: 50, left: 45, right: 45 },
         size: "A4",
         bufferPages: true,
       });
@@ -295,9 +347,14 @@ const generateThreadContextPDF = async (
         border: "#cbd5e1",
         text: "#0f172a",
         lightText: "#64748b",
+        inferred: "#94a3b8",
       };
 
-      const fonts = { bold: "Helvetica-Bold", regular: "Helvetica" };
+      const fonts = {
+        bold: "Helvetica-Bold",
+        regular: "Helvetica",
+        italic: "Helvetica-Oblique",
+      };
       const pageWidth = doc.page.width - 90;
 
       const addPageHeader = () => {
@@ -336,7 +393,6 @@ const generateThreadContextPDF = async (
           });
       };
 
-      // Set listener to handle auto-pagination wrapping gracefully
       doc.on("pageAdded", () => {
         addPageHeader();
         doc.y = 55;
@@ -358,6 +414,19 @@ const generateThreadContextPDF = async (
         });
 
       const summaryY = doc.y + 10;
+
+      const validDates = allMessages
+        .map((m) => Date.parse(m.date))
+        .filter((d) => !Number.isNaN(d))
+        .sort((a, b) => a - b);
+
+      const earliestDate =
+        validDates.length > 0 ? formatDate(new Date(validDates[0])) : "Unknown";
+
+      const latestDate =
+        validDates.length > 0
+          ? formatDate(new Date(validDates[validDates.length - 1]))
+          : "Unknown";
       doc
         .rect(45, summaryY, pageWidth, 45)
         .fillAndStroke(colors.lightBg, colors.border);
@@ -371,83 +440,85 @@ const generateThreadContextPDF = async (
         .font(fonts.regular)
         .fillColor(colors.secondary)
         .text(
-          `Date Range: ${formatDate(allMessages[0]?.date)} to ${formatDate(allMessages[allMessages.length - 1]?.date)}`,
+          `Date Range: ${earliestDate} to ${latestDate}`,
           55,
           summaryY + 23,
         );
 
       doc.y = summaryY + 60;
 
-      allMessages.forEach((msg, idx) => {
-        if (doc.y > 650) doc.addPage();
+      const ensureSpace = (neededHeight = 20) => {
+        if (doc.y + neededHeight > doc.page.height - 50) {
+          doc.addPage();
+        }
+      };
 
-        const bgColor = idx % 2 === 0 ? colors.lightBg : "#ffffff";
+      allMessages.forEach((msg, idx) => {
+        ensureSpace(80);
 
         doc.rect(45, doc.y, pageWidth, 3).fill(colors.accent);
-        doc.moveDown(0.3);
-        const headerStartY = doc.y;
+        doc.moveDown(0.5);
 
-        // Background for Header Block
-        doc
-          .rect(45, doc.y, pageWidth, 68)
-          .fillAndStroke(bgColor, colors.border);
-
-        const headerY = doc.y + 8;
         doc
           .fontSize(11)
           .font(fonts.bold)
           .fillColor(colors.primary)
-          .text(`Message ${idx + 1}`, 55, headerY);
+          .text(`Message ${idx + 1}`, 55, doc.y);
         doc
           .fontSize(8)
           .font(fonts.regular)
           .fillColor(colors.lightText)
-          .text(`${formatDate(msg.date)}`, 55, headerY + 16);
+          .text(`${formatDate(msg.date)}`, 55, doc.y + 2);
+        doc.moveDown(0.5);
 
-        doc
-          .fontSize(8)
-          .font(fonts.bold)
-          .fillColor(colors.secondary)
-          .text("FROM:", 55, headerY + 32);
-        doc
-          .font(fonts.regular)
-          .fillColor(colors.text)
-          .text(truncateEmail(msg.from, 60), 90, headerY + 32, { width: 450 });
-
-        doc
-          .fontSize(8)
-          .font(fonts.bold)
-          .fillColor(colors.secondary)
-          .text("TO:", 55, headerY + 44);
-        doc
-          .font(fonts.regular)
-          .fillColor(colors.text)
-          .text(truncateEmail(msg.to, 60), 90, headerY + 44, { width: 450 });
-
-        if (msg.cc && msg.cc.trim()) {
+        // Prints a header row and, when the value was back-filled from
+        // the original message rather than found verbatim in this
+        // message's own quoted text, appends a small "(inherited)"
+        // note instead of just silently filling it in.
+        const printHeaderRow = (label, value, inferred) => {
+          if (!value) return;
+          const startY = doc.y;
           doc
             .fontSize(8)
             .font(fonts.bold)
             .fillColor(colors.secondary)
-            .text("CC:", 55, headerY + 56);
+            .text(label, 55, startY, { lineBreak: false });
           doc
             .font(fonts.regular)
             .fillColor(colors.text)
-            .text(truncateEmail(msg.cc, 60), 90, headerY + 56, { width: 450 });
-        }
+            .text(value, 90, startY, { width: 400, continued: !!inferred });
+          if (inferred) {
+            doc
+              .font(fonts.italic)
+              .fillColor(colors.inferred)
+              .text("  (from original thread, not in this reply)", {
+                width: 400,
+              });
+          }
+          doc.y = doc.y + 2;
+        };
 
-        doc.y = headerStartY + 76;
+        printHeaderRow("FROM:", msg.from || "—", false);
+        printHeaderRow(
+          "TO:",
+          msg.to || (msg.toInferred ? "" : "—"),
+          msg.toInferred,
+        );
+        printHeaderRow("CC:", msg.cc, msg.ccInferred);
+
+        doc.moveDown(0.5);
+        const subY = doc.y;
         doc
           .fontSize(10)
           .font(fonts.bold)
           .fillColor(colors.primary)
-          .text("SUBJECT:", 55, doc.y);
+          .text("SUBJECT:", 55, subY, { lineBreak: false });
         doc
           .fontSize(10)
           .font(fonts.bold)
           .fillColor(colors.accent)
-          .text(msg.subject || "(No Subject)", 55, doc.y + 12, {
-            width: pageWidth - 20,
+          .text(msg.subject || "(No Subject)", 115, subY, {
+            width: pageWidth - 70,
           });
 
         doc.moveDown(0.5);
@@ -459,21 +530,21 @@ const generateThreadContextPDF = async (
           .stroke();
         doc.moveDown(0.5);
 
-        // Body Content Setup
         doc.fontSize(9).font(fonts.regular).fillColor(colors.text);
         const bodyText = (msg.body_plain || "").trim();
-
-        // Pass full text string to let PDFKit handle wrapping/pagination dynamically
-        doc.text(bodyText || " ", 55, doc.y, {
-          width: pageWidth - 20,
-          align: "left",
-          lineGap: 2,
-        });
+        if (bodyText) {
+          doc.text(bodyText, 55, doc.y, {
+            width: pageWidth - 20,
+            align: "left",
+            lineGap: 2,
+          });
+        } else {
+          doc.text(" ", 55, doc.y);
+        }
 
         doc.moveDown(1.5);
       });
 
-      // Assign footers post-generation
       const pages = doc.bufferedPageRange();
       for (let i = 0; i < pages.count; i++) {
         doc.switchToPage(i);
@@ -490,8 +561,19 @@ const generateThreadContextPDF = async (
 };
 
 // ======================================================================
-// MAIN CONTROLLERS
+// MAIN CONTROLLER
 // ======================================================================
+// NOTE ON ATTACHMENT CLASSIFICATION:
+// There is deliberately no logo/template-asset detection logic left in
+// this file. That decision now lives entirely in eml_extractor.py,
+// which has visibility into every attachment across the WHOLE thread
+// at once (needed for its primary signal: an image whose exact bytes
+// recur across multiple messages is a template logo, not a one-off
+// upload). Node just reads the `is_likely_logo` flag the script
+// already computed off each attachment record. Do not reintroduce
+// sharp()-based dimension checks or filename regexes here — if the
+// classification needs adjusting, change it in the Python script so
+// there is exactly one place this logic lives.
 
 export const extractEMLDetails = async (req, res) => {
   const accessToken =
@@ -500,6 +582,15 @@ export const extractEMLDetails = async (req, res) => {
 
   if (!accessToken)
     return res.status(401).json({ message: "No authorization token provided" });
+
+  // Every temp resource created for this request is tracked here so
+  // the finally block can guarantee cleanup regardless of where the
+  // request succeeds or fails — this is what stops temp attachment
+  // dirs (and therefore disk/memory pressure over time) from ever
+  // accumulating.
+  let attachmentsDir = null;
+  let pythonProcess = null;
+  let pythonTimeoutHandle = null;
 
   try {
     const userData = await verifyUser(accessToken);
@@ -519,228 +610,354 @@ export const extractEMLDetails = async (req, res) => {
       __dirname,
       "../../support/eml_extractor.py",
     );
-    const pythonProcess = spawn("python3", [pythonScriptPath, emlFilePath]);
 
-    let output = "";
-    let errorOutput = "";
+    attachmentsDir = await fs.mkdtemp(path.join(os.tmpdir(), "eml_att_"));
 
-    pythonProcess.stdout.on("data", (data) => {
-      output += data.toString();
-    });
-    pythonProcess.stderr.on("data", (data) => {
-      errorOutput += data.toString();
-    });
+    const extractionResult = await new Promise((resolve, reject) => {
+      pythonProcess = spawn("python3", [
+        pythonScriptPath,
+        emlFilePath,
+        attachmentsDir,
+      ]);
 
-    pythonProcess.on("close", async (code) => {
-      try {
+      let output = "";
+      let errorOutput = "";
+
+      pythonProcess.stdout.on("data", (data) => {
+        output += data.toString();
+      });
+      pythonProcess.stderr.on("data", (data) => {
+        errorOutput += data.toString();
+      });
+
+      // Hard timeout: if the Python extractor ever hangs (malformed
+      // EML, filesystem stall, etc.) we kill it and reject instead of
+      // leaving the HTTP request — and the child process — hanging
+      // forever.
+      pythonTimeoutHandle = setTimeout(() => {
+        pythonProcess.kill("SIGKILL");
+        reject(
+          new Error(
+            `EML extraction timed out after ${PYTHON_EXTRACTOR_TIMEOUT_MS}ms`,
+          ),
+        );
+      }, PYTHON_EXTRACTOR_TIMEOUT_MS);
+
+      pythonProcess.on("error", (err) => {
+        clearTimeout(pythonTimeoutHandle);
+        reject(err);
+      });
+
+      pythonProcess.on("close", (code) => {
+        clearTimeout(pythonTimeoutHandle);
         if (code !== 0) {
-          return res
-            .status(500)
-            .json({ message: "Python extraction failed", error: errorOutput });
-        }
-
-        const extractionResult = JSON.parse(output);
-        const attachmentsWithDocumentIds = [];
-        const uploadedDocumentIds = [];
-
-        for (const attachment of extractionResult.attachments || []) {
-          const originalBuffer = Buffer.from(
-            attachment.base64_content,
-            "base64",
+          reject(
+            new Error(
+              errorOutput || `Python extractor exited with code ${code}`,
+            ),
           );
-          const originalExt = attachment.filename
-            .split(".")
-            .pop()
-            .toLowerCase();
-          const originalBaseName =
-            attachment.filename.substring(
-              0,
-              attachment.filename.lastIndexOf("."),
-            ) || attachment.filename;
-
-          let finalBuffer = originalBuffer;
-          let finalExt = originalExt;
-          let finalDisplayFilename = attachment.filename;
-
-          if (["jpg", "jpeg", "png"].includes(originalExt)) {
-            try {
-              const imgPdf = await PDFLibDocument.create();
-              let image = sharp(originalBuffer, { failOn: "none" });
-              const metadata = await image.metadata();
-              const imageObj = ["jpg", "jpeg"].includes(originalExt)
-                ? await imgPdf.embedJpg(originalBuffer)
-                : await imgPdf.embedPng(await image.png().toBuffer());
-
-              const page = imgPdf.addPage([metadata.width, metadata.height]);
-              page.drawImage(imageObj, {
-                x: 0,
-                y: 0,
-                width: metadata.width,
-                height: metadata.height,
-              });
-              finalBuffer = Buffer.from(await imgPdf.save());
-              finalExt = "pdf";
-              finalDisplayFilename = `${originalBaseName}.pdf`;
-            } catch (imgErr) {
-              const errPdf = await PDFLibDocument.create();
-              const page = errPdf.addPage([595.28, 841.89]);
-              page.drawText(
-                "[Image Conversion Failed or Dummy Data Provided]",
-                { x: 50, y: 800, size: 12 },
-              );
-              finalBuffer = Buffer.from(await errPdf.save());
-              finalExt = "pdf";
-              finalDisplayFilename = `${originalBaseName}.pdf`;
-            }
-          } else if (["doc", "docx"].includes(originalExt)) {
-            const tempDir = path.join(__dirname, STORAGE_PATH, "temp");
-            await fs.mkdir(tempDir, { recursive: true });
-            const tempOriginal = path.join(
-              tempDir,
-              `eml_att_${Date.now()}.${originalExt}`,
-            );
-
-            try {
-              await fs.writeFile(tempOriginal, originalBuffer);
-              const convertedPdfPath = await executeLibreOfficeConversion(
-                tempOriginal,
-                tempDir,
-              );
-              finalBuffer = await fs.readFile(convertedPdfPath);
-              finalExt = "pdf";
-              finalDisplayFilename = `${originalBaseName}.pdf`;
-              await fs.unlink(convertedPdfPath).catch(() => {});
-            } catch (convErr) {
-              const errPdf = await PDFLibDocument.create();
-              const page = errPdf.addPage([595.28, 841.89]);
-              page.drawText("[Doc Conversion Failed or Dummy Data Provided]", {
-                x: 50,
-                y: 800,
-                size: 12,
-              });
-              finalBuffer = Buffer.from(await errPdf.save());
-              finalExt = "pdf";
-              finalDisplayFilename = `${originalBaseName}.pdf`;
-            } finally {
-              await fs.unlink(tempOriginal).catch(() => {});
-            }
-          }
-
-          const safeName = await generateUniqueDocumentName({
-            workflowId,
-            extension: finalExt,
-          });
-          const relPath = path.join(path.dirname(emlDocument.path), safeName);
-          const fullPath = path.join(__dirname, STORAGE_PATH, relPath);
-
-          await fs.mkdir(path.dirname(fullPath), { recursive: true });
-          await fs.writeFile(fullPath, finalBuffer);
-
-          const newDoc = await prisma.document.create({
-            data: {
-              name: safeName,
-              type: finalExt,
-              path: relPath,
-              createdById: userData.id,
-              parentId: parseInt(documentId),
-              isRecord: true,
-              tags: [`extracted-from-eml:${documentId}`, "attachment"],
-            },
-          });
-
-          uploadedDocumentIds.push(newDoc.id);
-          attachment.filename = finalDisplayFilename;
-          attachmentsWithDocumentIds.push({
-            ...attachment,
-            originalFilename: safeName,
-            documentId: newDoc.id,
-            fileType: finalExt,
-          });
+          return;
         }
-
-        let allMessages = [];
-        const threadSubject =
-          extractionResult.emails?.[0]?.subject || "Email Thread";
-
-        (extractionResult.emails || []).forEach((email) => {
-          const parsed = parseEnterpriseThread(email.body_text, email);
-          allMessages.push(...parsed);
-        });
-
-        allMessages.sort(compareMessageDates);
-
-        const threadContextPdfName = await generateUniqueDocumentName({
-          workflowId,
-          extension: "pdf",
-        });
-        const threadContextRelPath = path.join(
-          path.dirname(emlDocument.path),
-          `thread_context_${threadContextPdfName}`,
-        );
-        const threadContextFullPath = path.join(
-          __dirname,
-          STORAGE_PATH,
-          threadContextRelPath,
-        );
-
-        await fs.mkdir(path.dirname(threadContextFullPath), {
-          recursive: true,
-        });
-        await generateThreadContextPDF(
-          allMessages,
-          threadContextFullPath,
-          threadSubject,
-        );
-
-        const threadContextPdf = await prisma.document.create({
-          data: {
-            name: `thread_context_${threadContextPdfName}`,
-            type: "pdf",
-            path: threadContextRelPath,
-            createdById: userData.id,
-            parentId: parseInt(documentId),
-            tags: ["email-thread-context", "timeline"],
-          },
-        });
-
-        uploadedDocumentIds.push(threadContextPdf.id);
-        attachmentsWithDocumentIds.push({
-          documentId: threadContextPdf.id,
-          originalFilename: threadContextPdf.name,
-          fileType: "pdf",
-          isThreadContext: true,
-          description:
-            "Complete email thread context with full conversation history",
-        });
-
-        res.status(200).json({
-          success: true,
-          message: `Successfully extracted email thread with ${uploadedDocumentIds.length - 1} attachment(s) and generated formatted thread context PDF`,
-          data: {
-            emails: allMessages,
-            attachmentsMapping: attachmentsWithDocumentIds,
-            extractedDocumentIds: uploadedDocumentIds,
-            threadContextPdfId: threadContextPdf.id,
-            summary: {
-              total_messages: allMessages.length,
-              total_attachments: uploadedDocumentIds.length - 1,
-              has_thread_context_pdf: true,
-              thread_subject: threadSubject,
-            },
-          },
-        });
-      } catch (e) {
-        console.error("Extraction error:", e);
-        res.status(500).json({
-          message: "Extraction failed",
-          error: e.message,
-          stack: process.env.NODE_ENV === "development" ? e.stack : undefined,
-        });
-      }
+        try {
+          resolve(JSON.parse(output));
+        } catch (e) {
+          reject(new Error(`Failed to parse extractor output: ${e.message}`));
+        }
+      });
     });
-  } catch (err) {
-    console.error("Server error:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+
+    // 1. SPLIT ATTACHMENTS ON THE FLAG THE PYTHON SCRIPT ALREADY SET.
+    //    No re-derivation here — is_likely_logo + classification_reason
+    //    were computed in eml_extractor.py, which had the whole
+    //    thread's attachment set available (needed for the duplicate-
+    //    hash check). Node just partitions on it.
+    const allAttachments = extractionResult.attachments || [];
+    const rawAttachmentCount = allAttachments.length;
+    const validAttachments = allAttachments.filter((a) => !a.is_likely_logo);
+    const droppedAsLogo = allAttachments
+      .filter((a) => a.is_likely_logo)
+      .map((a) => ({
+        filename: a.filename,
+        reason: a.classification_reason,
+      }));
+
+    // Loud and visible on purpose: if this ever mismatches what you
+    // expect (e.g. rawAttachmentCount is 0 when the EML clearly has
+    // attachments), the problem is upstream in the Python extractor's
+    // collection step, not in the filtering logic below.
+    console.log(
+      `[EML extraction] raw attachments found: ${rawAttachmentCount}, ` +
+        `kept: ${validAttachments.length}, dropped as logo: ${droppedAsLogo.length}`,
+      droppedAsLogo,
+    );
+
+    // 2. PROCESS VALID ATTACHMENTS (read from disk path, not base64)
+    const attachmentsWithDocumentIds = [];
+    const uploadedDocumentIds = [];
+
+    for (const attachment of validAttachments) {
+      const originalExt = attachment.filename.split(".").pop().toLowerCase();
+      const originalBaseName =
+        attachment.filename.substring(
+          0,
+          attachment.filename.lastIndexOf("."),
+        ) || attachment.filename;
+
+      let finalBuffer;
+      let finalExt = originalExt;
+      let finalDisplayFilename = attachment.filename;
+
+      // Read the original attachment bytes exactly once, straight
+      // from the file the Python script wrote — no base64 round trip.
+      const originalBuffer = await fs.readFile(attachment.file_path);
+
+      if (["jpg", "jpeg", "png"].includes(originalExt)) {
+        try {
+          const imgPdf = await PDFLibDocument.create();
+          const image = sharp(originalBuffer, { failOn: "none" });
+          const metadata = await image.metadata();
+          const imageObj = ["jpg", "jpeg"].includes(originalExt)
+            ? await imgPdf.embedJpg(originalBuffer)
+            : await imgPdf.embedPng(await image.png().toBuffer());
+
+          const page = imgPdf.addPage([metadata.width, metadata.height]);
+          page.drawImage(imageObj, {
+            x: 0,
+            y: 0,
+            width: metadata.width,
+            height: metadata.height,
+          });
+          finalBuffer = Buffer.from(await imgPdf.save());
+          finalExt = "pdf";
+          finalDisplayFilename = `${originalBaseName}.pdf`;
+        } catch (imgErr) {
+          // Same principle as the doc/docx case: don't destroy the real
+          // image behind a placeholder just because wrapping it in a
+          // PDF failed. Keep the original image file.
+          console.log(
+            `[EML extraction] image->pdf conversion failed for ${attachment.filename}, keeping original file:`,
+            imgErr.message,
+          );
+          finalBuffer = originalBuffer;
+          finalExt = originalExt;
+          finalDisplayFilename = attachment.filename;
+        }
+      } else if (["doc", "docx"].includes(originalExt)) {
+        try {
+          const convertedPdfPath = await executeLibreOfficeConversion(
+            attachment.file_path,
+            attachmentsDir,
+          );
+          finalBuffer = await fs.readFile(convertedPdfPath);
+          finalExt = "pdf";
+          finalDisplayFilename = `${originalBaseName}.pdf`;
+          await fs.unlink(convertedPdfPath).catch(() => {});
+        } catch (convErr) {
+          // Conversion failing is NOT a reason to throw away the real
+          // attachment. Keep the original .doc/.docx bytes as-is so the
+          // genuine content is still there and openable — just not as
+          // a PDF. Losing the source file behind a "[Conversion
+          // Failed]" placeholder page was actively destroying real
+          // attachments whenever LibreOffice wasn't available or choked
+          // on a file.
+          console.log(
+            `[EML extraction] doc->pdf conversion failed for ${attachment.filename}, keeping original file:`,
+            convErr.message,
+          );
+          finalBuffer = originalBuffer;
+          finalExt = originalExt;
+          finalDisplayFilename = attachment.filename;
+        }
+      } else {
+        finalBuffer = originalBuffer;
+      }
+
+      const safeName = await generateUniqueDocumentName({
+        workflowId,
+        extension: finalExt,
+      });
+      const relPath = path.join(path.dirname(emlDocument.path), safeName);
+      const fullPath = path.join(__dirname, STORAGE_PATH, relPath);
+
+      await fs.mkdir(path.dirname(fullPath), { recursive: true });
+      await fs.writeFile(fullPath, finalBuffer);
+      finalBuffer = null; // release reference promptly
+
+      const newDoc = await prisma.document.create({
+        data: {
+          name: safeName,
+          type: finalExt,
+          path: relPath,
+          createdById: userData.id,
+          parentId: parseInt(documentId),
+          isRecord: true,
+          tags: [`extracted-from-eml:${documentId}`, "attachment"],
+        },
+      });
+
+      uploadedDocumentIds.push(newDoc.id);
+      attachment.filename = finalDisplayFilename;
+      attachmentsWithDocumentIds.push({
+        ...attachment,
+        originalFilename: safeName,
+        documentId: newDoc.id,
+        fileType: finalExt,
+      });
+    }
+
+    // 3. PARSE EMAILS
+    let allMessages = [];
+    const threadSubject =
+      extractionResult.emails?.[0]?.subject || "Email Thread";
+    const rootTo = sanitizeField(extractionResult.emails?.[0]?.to);
+    const rootCc = sanitizeField(extractionResult.emails?.[0]?.cc);
+
+    (extractionResult.emails || []).forEach((email) => {
+      const parsed = parseEnterpriseThread(email.body_text, email);
+      allMessages.push(...parsed);
+    });
+
+    // 4. SANITIZE EMAILS (Fix N/A, Mailto, and AM/PM Dates) + inherit
+    //    To/Cc from the root message when a quoted reply's header
+    //    genuinely never contained one (e.g. Gmail-style "On ... wrote:"
+    //    quoting never includes To/Cc at all). We flag this explicitly
+    //    rather than pretending it was found, so the PDF can label it.
+    allMessages = allMessages.map((msg, idx) => {
+      let body = (msg.body_plain || "")
+        .replace(/mailto:[^\s>]*>/gi, "")
+        .replace(/<https?:\/\/[^>]*>/gi, "");
+
+      let dateStr = (msg.date || "")
+        .replace(/\s+at\s+/i, " ")
+        .replace(/,$/, "")
+        .trim();
+      let fromStr = (msg.from || "").trim();
+
+      const amPmMatch = fromStr.match(/^(AM|PM)\s+/i);
+      if (amPmMatch) {
+        fromStr = fromStr.replace(/^(AM|PM)\s+/i, "").trim();
+        if (!dateStr.match(/(AM|PM)$/i)) {
+          dateStr = `${dateStr} ${amPmMatch[1].toUpperCase()}`;
+        }
+      }
+
+      const cleanTo = sanitizeField(msg.to);
+      const cleanCc = sanitizeField(msg.cc);
+      const toInferred = idx > 0 && !cleanTo && !!rootTo;
+      const ccInferred = idx > 0 && !cleanCc && !!rootCc;
+
+      return {
+        ...msg,
+        from: sanitizeField(fromStr),
+        to: cleanTo || (toInferred ? rootTo : cleanTo),
+        cc: cleanCc || (ccInferred ? rootCc : cleanCc),
+        toInferred,
+        ccInferred,
+        date: dateStr,
+        body_plain: body,
+      };
+    });
+
+    // 5. STRICT CHRONOLOGICAL SORT
+    allMessages.sort((a, b) => {
+      const ta = Date.parse(a.date);
+      const tb = Date.parse(b.date);
+
+      const validA = !Number.isNaN(ta);
+      const validB = !Number.isNaN(tb);
+
+      if (validA && validB) {
+        return ta - tb;
+      }
+
+      if (validA) return -1;
+      if (validB) return 1;
+
+      return 0;
+    });
+
+    // Generate thread context PDF
+    const threadContextPdfName = await generateUniqueDocumentName({
+      workflowId,
+      extension: "pdf",
+    });
+    const threadContextRelPath = path.join(
+      path.dirname(emlDocument.path),
+      `thread_context_${threadContextPdfName}`,
+    );
+    const threadContextFullPath = path.join(
+      __dirname,
+      STORAGE_PATH,
+      threadContextRelPath,
+    );
+
+    await fs.mkdir(path.dirname(threadContextFullPath), { recursive: true });
+    await generateThreadContextPDF(
+      allMessages,
+      threadContextFullPath,
+      threadSubject,
+    );
+
+    const threadContextPdf = await prisma.document.create({
+      data: {
+        name: `thread_context_${threadContextPdfName}`,
+        type: "pdf",
+        path: threadContextRelPath,
+        createdById: userData.id,
+        parentId: parseInt(documentId),
+        tags: ["email-thread-context", "timeline"],
+      },
+    });
+
+    uploadedDocumentIds.push(threadContextPdf.id);
+    attachmentsWithDocumentIds.push({
+      documentId: threadContextPdf.id,
+      originalFilename: threadContextPdf.name,
+      fileType: "pdf",
+      isThreadContext: true,
+      description:
+        "Complete email thread context with full conversation history",
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully extracted email thread with ${uploadedDocumentIds.length - 1} attachment(s) and generated formatted thread context PDF`,
+      data: {
+        emails: allMessages,
+        attachmentsMapping: attachmentsWithDocumentIds,
+        extractedDocumentIds: uploadedDocumentIds,
+        threadContextPdfId: threadContextPdf.id,
+        summary: {
+          total_messages: allMessages.length,
+          total_attachments: uploadedDocumentIds.length - 1,
+          raw_attachments_found_in_eml: rawAttachmentCount,
+          attachments_dropped_as_logo: droppedAsLogo,
+          has_thread_context_pdf: true,
+          thread_subject: threadSubject,
+        },
+      },
+    });
+  } catch (e) {
+    console.error("Extraction error:", e);
+    if (!res.headersSent) {
+      res.status(500).json({
+        message: "Extraction failed",
+        error: e.message,
+        stack: process.env.NODE_ENV === "development" ? e.stack : undefined,
+      });
+    }
+  } finally {
+    // Guaranteed cleanup regardless of success/failure/timeout — this
+    // is the piece that stops attachment temp dirs (and the memory
+    // pressure that comes from an unbounded number of them) from ever
+    // building up on a busy server.
+    if (pythonTimeoutHandle) clearTimeout(pythonTimeoutHandle);
+    if (pythonProcess && !pythonProcess.killed) {
+      try {
+        pythonProcess.kill("SIGKILL");
+      } catch {}
+    }
+    await cleanupDir(attachmentsDir);
   }
 };
 
