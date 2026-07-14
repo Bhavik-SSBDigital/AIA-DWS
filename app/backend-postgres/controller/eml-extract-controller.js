@@ -68,33 +68,48 @@ const normalizeQuoteHeaderLine = (line) => {
   return normalized.replace(/\s+/g, " ").trim();
 };
 
+const cleanMailto = (str) => {
+  if (!str) return "";
+  return str
+    .replace(/<mailto:[^>]*>/gi, "")
+    .replace(/>>+/g, ">")
+    .replace(/<<+/g, "<")
+    .trim();
+};
+
 const extractQuotedHeaderMeta = (line) => {
   const normalized = normalizeQuoteHeaderLine(line);
 
-  // Catch formats like: "On Mon, Jul 13, 2026 at 5:16 PM Dolly Patel <email> wrote:"
+  // Catch "On [Date/Time] [Name] <[email]> wrote:"
   const wrapper = normalized.match(/^On\s+(.+?)\s+wrote:\s*$/i);
   if (!wrapper) return null;
 
   const middle = wrapper[1].trim();
 
-  // Robust tail match mapping Name and Email
-  const tailMatch = middle.match(
-    /(?:(.*)\s+)?<?\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>?\s*$/,
+  // 1. Extract the email address at the very end
+  const emailMatch = middle.match(
+    /<?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>?\s*$/,
   );
+  if (!emailMatch) return { date: "", from: middle };
 
-  if (tailMatch) {
-    let namePart = tailMatch[1] || "";
-    let datePart = middle.slice(0, middle.length - tailMatch[0].length).trim();
+  const email = emailMatch[1];
+  const remainder = middle.slice(0, emailMatch.index).trim();
 
-    // Look for stray AM/PM appended to the name part due to slash/dash anomalies
-    const strayAmPm = namePart.match(/^\s*(\/|-)?\s*(AM|PM)\s+/i);
-    if (strayAmPm) {
-      datePart = `${datePart} ${strayAmPm[2].toUpperCase()}`.trim();
-      namePart = namePart.slice(strayAmPm[0].length).trim();
-    }
+  // 2. Find the boundary between Date/Time and Name
+  // Look for standard time endings like AM, PM, or 24-hr (e.g., 17:41)
+  const timeBoundaryRegex = /(AM|PM|\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$/i;
+  const timeMatch = remainder.match(timeBoundaryRegex);
 
-    datePart = datePart.replace(/[,/-]+$/, "").trim();
-    const email = tailMatch[2];
+  if (timeMatch) {
+    const splitIndex = timeMatch.index + timeMatch[1].length;
+    let datePart = remainder.slice(0, splitIndex).trim();
+
+    // Clean up trailing " at" or commas
+    datePart = datePart
+      .replace(/\s+at$/i, "")
+      .replace(/,$/, "")
+      .trim();
+    const namePart = timeMatch[2].trim();
 
     return {
       date: datePart,
@@ -102,7 +117,8 @@ const extractQuotedHeaderMeta = (line) => {
     };
   }
 
-  return { date: "", from: middle };
+  // Fallback if no clean time boundary exists
+  return { date: "", from: `${remainder} <${email}>` };
 };
 
 const compareMessageDates = (a, b) => {
@@ -139,12 +155,12 @@ const parseEnterpriseThread = (rawBodyText, rootEmailMeta) => {
   const thread = [];
 
   let currentMsg = {
-    from: rootEmailMeta.from || "",
-    to: rootEmailMeta.to || "",
+    from: cleanMailto(rootEmailMeta.from),
+    to: cleanMailto(rootEmailMeta.to),
     date: rootEmailMeta.date || "",
     subject: rootEmailMeta.subject || "No Subject",
-    cc: rootEmailMeta.cc || "",
-    bcc: rootEmailMeta.bcc || "",
+    cc: cleanMailto(rootEmailMeta.cc),
+    bcc: cleanMailto(rootEmailMeta.bcc),
     content: [],
   };
 
@@ -184,7 +200,7 @@ const parseEnterpriseThread = (rawBodyText, rootEmailMeta) => {
         const meta = extractQuotedHeaderMeta(cleaned);
         if (meta) {
           currentMsg.date = meta.date;
-          currentMsg.from = meta.from;
+          currentMsg.from = cleanMailto(meta.from);
         }
         continue;
       }
@@ -192,15 +208,15 @@ const parseEnterpriseThread = (rawBodyText, rootEmailMeta) => {
     }
 
     if (/^From:/i.test(cleaned))
-      currentMsg.from = cleaned.replace(/^From:\s*/i, "").trim();
+      currentMsg.from = cleanMailto(cleaned.replace(/^From:\s*/i, ""));
     else if (/^Sent:|^Date:/i.test(cleaned))
       currentMsg.date = cleaned.replace(/^(Sent|Date):\s*/i, "").trim();
     else if (/^To:/i.test(cleaned))
-      currentMsg.to = cleaned.replace(/^To:\s*/i, "").trim();
+      currentMsg.to = cleanMailto(cleaned.replace(/^To:\s*/i, ""));
     else if (/^Cc:/i.test(cleaned))
-      currentMsg.cc = cleaned.replace(/^Cc:\s*/i, "").trim();
+      currentMsg.cc = cleanMailto(cleaned.replace(/^Cc:\s*/i, ""));
     else if (/^Bcc:/i.test(cleaned))
-      currentMsg.bcc = cleaned.replace(/^Bcc:\s*/i, "").trim();
+      currentMsg.bcc = cleanMailto(cleaned.replace(/^Bcc:\s*/i, ""));
     else if (/^Subject:/i.test(cleaned))
       currentMsg.subject = cleaned.replace(/^Subject:\s*/i, "").trim();
     else currentMsg.content.push(line); // Preserve original formatting/spacing where possible
@@ -474,7 +490,7 @@ const generateThreadContextPDF = async (
 };
 
 // ======================================================================
-// MAIN CONTROLLERS (Unchanged functionality, merged with robust methods above)
+// MAIN CONTROLLERS
 // ======================================================================
 
 export const extractEMLDetails = async (req, res) => {
