@@ -19,6 +19,7 @@ const STORAGE_PATH = process.env.STORAGE_PATH || "../storage";
 
 // ======================================================================
 // 🛡️ UNIVERSAL OS LIBREOFFICE COMMAND GENERATOR
+// (UNTOUCHED — not part of this fix)
 // ======================================================================
 const getSofficeCommand = (outDir, inFile) => {
   const platform = os.platform();
@@ -59,16 +60,90 @@ const cleanupTempFiles = async (files, additionalPath) => {
 };
 
 // ======================================================================
-// USER'S ORIGINAL EML HELPERS (UNTOUCHED)
+// EML THREAD-PARSING HELPERS
+// ======================================================================
+
+// Strips nested "<mailto:...>" wrappers that some Outlook/Gmail exports
+// produce (e.g. "<dolly@x.in<mailto:dolly@x.in>>"), which previously broke
+// the header regex and caused it to fall through to "Unknown"/"Invalid Date".
+const normalizeQuoteHeaderLine = (line) => {
+  let normalized = line.replace(/<mailto:[^>]*>/gi, "");
+  normalized = normalized.replace(/>>+/g, ">").replace(/<<+/g, "<");
+  return normalized;
+};
+
+// Parses a Gmail-style quoted-reply header line:
+//   "On <date/time> <Name> <email> wrote:"
+// Returns { date, from } using best-effort extraction, or null if the line
+// isn't actually a quote-header at all. Never returns the literal strings
+// "Unknown" or "Invalid Date" — callers get a raw/blank fallback instead,
+// which downstream formatting turns into a readable placeholder.
+const extractQuotedHeaderMeta = (line) => {
+  const normalized = normalizeQuoteHeaderLine(line);
+
+  const wrapper = normalized.match(/^On\s+(.+?)\s+wrote:\s*$/i);
+  if (!wrapper) return null;
+
+  const middle = wrapper[1].trim();
+
+  // Anchor on "<optional name> <email>" at the tail of the string, since
+  // that combination is always at the end of these header lines regardless
+  // of how the date/time portion in front of it is formatted.
+  const tailMatch = middle.match(
+    /(?:([A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,3})\s*)?<?\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>?\s*$/,
+  );
+
+  if (tailMatch) {
+    let namePart = tailMatch[1] || "";
+    let leadingAmPm = "";
+    const ampmLead = namePart.match(/^\s*(AM|PM)\s+/i);
+    if (ampmLead) {
+      leadingAmPm = ampmLead[1].toUpperCase();
+      namePart = namePart.slice(ampmLead[0].length);
+    }
+    namePart = namePart.trim();
+
+    const email = tailMatch[2];
+    let datePart = middle.slice(0, middle.length - tailMatch[0].length).trim();
+    if (leadingAmPm) datePart = `${datePart} ${leadingAmPm}`.trim();
+    datePart = datePart.replace(/[,/-]+$/, "").trim();
+
+    return {
+      date: datePart,
+      from: namePart ? `${namePart} <${email}>` : email,
+    };
+  }
+
+  // No email found at all — treat the whole segment as the sender label and
+  // leave date blank so formatDate() shows a graceful placeholder rather
+  // than a fabricated or literal "Unknown"/"Invalid Date".
+  return { date: "", from: middle };
+};
+
+// Chronological compare that treats unparseable dates as "keep original
+// position" instead of letting NaN comparisons scatter them unpredictably.
+const compareMessageDates = (a, b) => {
+  const ta = new Date(a.date).getTime();
+  const tb = new Date(b.date).getTime();
+  const validA = !Number.isNaN(ta);
+  const validB = !Number.isNaN(tb);
+  if (validA && validB) return ta - tb;
+  if (validA && !validB) return -1;
+  if (!validA && validB) return 1;
+  return 0;
+};
+
+// ======================================================================
+// USER'S ORIGINAL EML HELPERS (thread splitting + PDF generation)
 // ======================================================================
 const parseEnterpriseThread = (bodyText, rootEmailMeta) => {
   if (!bodyText) return [{ ...rootEmailMeta, body_plain: "(No content)" }];
   const lines = bodyText.split(/\r?\n/);
   const thread = [];
   let currentMsg = {
-    from: rootEmailMeta.from || "Unknown",
-    to: rootEmailMeta.to || "Unknown",
-    date: rootEmailMeta.date || "Unknown",
+    from: rootEmailMeta.from || "",
+    to: rootEmailMeta.to || "",
+    date: rootEmailMeta.date || "",
     subject: rootEmailMeta.subject || "No Subject",
     cc: rootEmailMeta.cc || "",
     bcc: rootEmailMeta.bcc || "",
@@ -87,27 +162,26 @@ const parseEnterpriseThread = (bodyText, rootEmailMeta) => {
 
     if (isGmailStart || isHorizontalRule || isOutlookStart) {
       const body = currentMsg.content.join("\n").trim();
-      if (body.length > 20) {
+      if (body.length > 0) {
         currentMsg.body_plain = body;
         thread.push({ ...currentMsg });
       }
       currentMsg = {
-        from: "Unknown",
-        to: "Unknown",
-        date: "Unknown",
+        from: "",
+        to: "",
+        date: "",
         subject: rootEmailMeta.subject,
         cc: "",
         bcc: "",
         content: [],
       };
       if (isGmailStart) {
-        const metaMatch = cleaned.match(
-          /On\s+(.*?)\s+([^<>]+<[^<>]+>|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|[a-zA-Z\s<>.@]+)\s+wrote:/i,
-        );
-        if (metaMatch) {
-          currentMsg.date = metaMatch[1].trim();
-          currentMsg.from = metaMatch[2].trim();
+        const meta = extractQuotedHeaderMeta(cleaned);
+        if (meta) {
+          currentMsg.date = meta.date;
+          currentMsg.from = meta.from;
         }
+        continue; // the header line itself carries no body content
       }
       if (isHorizontalRule) continue;
     }
@@ -128,10 +202,11 @@ const parseEnterpriseThread = (bodyText, rootEmailMeta) => {
 
   currentMsg.body_plain = currentMsg.content.join("\n").trim();
   thread.push(currentMsg);
-  const filtered = thread.filter((m) => m.body_plain.length > 30);
-  return filtered.sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
-  );
+  // Only drop genuinely empty fragments (boundary lines with nothing after
+  // them) — no more arbitrary character-count thresholds that could silently
+  // discard short-but-legitimate replies.
+  const filtered = thread.filter((m) => m.body_plain.trim().length > 0);
+  return filtered.sort(compareMessageDates);
 };
 
 const generateThreadContextPDF = async (
@@ -318,10 +393,12 @@ const generateThreadContextPDF = async (
 
         const bodyText = (msg.body_plain || "").trim();
         const bodyLines = bodyText.split("\n");
-        const maxBodyLines = 30;
-        const displayBodyLines = bodyLines.slice(0, maxBodyLines);
 
-        displayBodyLines.forEach((line) => {
+        // Render every line. Pagination is already handled per-line below
+        // (new page whenever doc.y crosses the bottom margin), so there is
+        // no need for an artificial line cap or a "truncated" notice —
+        // long messages simply continue onto additional pages.
+        bodyLines.forEach((line) => {
           if (doc.y > 680) {
             addPageFooter(doc.bufferedPageRange().count);
             doc.addPage();
@@ -334,13 +411,6 @@ const generateThreadContextPDF = async (
           });
         });
 
-        if (bodyLines.length > maxBodyLines) {
-          doc
-            .fontSize(8)
-            .font(fonts.oblique)
-            .fillColor(colors.warning)
-            .text("... [message truncated for display]", 55, doc.y);
-        }
         doc.moveDown(0.8);
 
         if (idx < allMessages.length - 1) {
@@ -365,23 +435,25 @@ const generateThreadContextPDF = async (
 };
 
 const formatDate = (dateString) => {
-  try {
-    const date = new Date(dateString);
-    return date.toLocaleString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  } catch {
-    return dateString;
+  if (!dateString || !String(dateString).trim()) return "Date not available";
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) {
+    // Couldn't parse it into a real Date — show the original raw text
+    // instead of the misleading literal "Invalid Date".
+    return String(dateString).trim();
   }
+  return date.toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 };
 
 const truncateEmail = (email, length) => {
-  if (!email) return "N/A";
+  if (!email || !String(email).trim()) return "N/A";
   return email.length > length ? email.substring(0, length) + "..." : email;
 };
 
@@ -576,11 +648,7 @@ export const extractEMLDetails = async (req, res) => {
           allMessages.push(...parsed);
         });
 
-        allMessages.sort((a, b) => {
-          const dateA = new Date(a.date).getTime();
-          const dateB = new Date(b.date).getTime();
-          return dateA - dateB;
-        });
+        allMessages.sort(compareMessageDates);
 
         const threadContextPdfName = await generateUniqueDocumentName({
           workflowId,
