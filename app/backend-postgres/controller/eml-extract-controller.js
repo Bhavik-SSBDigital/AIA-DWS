@@ -375,8 +375,30 @@ const generateThreadContextPDF = async (
           .stroke();
       };
 
+      // FIX (blank trailing pages): footerY (and the text drawn below it)
+      // sits BELOW doc.page.maxY() because the footer is deliberately
+      // placed inside the bottom margin whitespace. PDFKit's .text()
+      // always checks the target y against page.maxY() for auto-pagination
+      // purposes, even when you pass explicit x/y coordinates — it has no
+      // concept of "this is a footer, drawing outside the margin box is
+      // intentional." So without the margin override below, every single
+      // call to addPageFooter() silently triggered doc.addPage() (because
+      // footerY + text height overflowed maxY), appended a brand new page
+      // to the END of the document, and drew the "Page N" label on that
+      // new page instead of the one we'd just switchToPage()'d to. That's
+      // exactly what produced one (or, for longer threads with more
+      // footer calls, more than one) near-empty page appended after the
+      // real content — each new blank page only had the header bar drawn
+      // on it via the `pageAdded` listener.
+      //
+      // Temporarily zeroing the bottom margin while we draw the footer
+      // stops PDFKit's bounds check from firing, so the footer is drawn
+      // in place on the correct page and no extra page is ever created.
       const addPageFooter = (pageNumber) => {
         const footerY = doc.page.height - 35;
+        const originalBottomMargin = doc.page.margins.bottom;
+        doc.page.margins.bottom = 0;
+
         doc
           .moveTo(45, footerY)
           .lineTo(550, footerY)
@@ -391,6 +413,8 @@ const generateThreadContextPDF = async (
             width: pageWidth,
             align: "center",
           });
+
+        doc.page.margins.bottom = originalBottomMargin;
       };
 
       doc.on("pageAdded", () => {
