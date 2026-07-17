@@ -358,14 +358,20 @@ const generateThreadContextPDF = async (
       const pageWidth = doc.page.width - 90;
 
       const addPageHeader = () => {
+        // Temporarily disable margins and line-breaks so PDFKit doesn't panic and spawn empty pages
+        const originalTopMargin = doc.page.margins.top;
+        doc.page.margins.top = 0;
+
         doc.fontSize(8).font(fonts.regular).fillColor(colors.lightText);
         doc.text("Email Thread Context Document", 45, 25, {
           width: pageWidth,
           align: "left",
+          lineBreak: false,
         });
         doc.text(`Generated: ${new Date().toLocaleString()}`, 45, 25, {
           width: pageWidth,
           align: "right",
+          lineBreak: false,
         });
         doc
           .moveTo(45, 38)
@@ -373,9 +379,15 @@ const generateThreadContextPDF = async (
           .strokeColor(colors.border)
           .lineWidth(0.5)
           .stroke();
+
+        doc.page.margins.top = originalTopMargin; // Restore margin
       };
 
       const addPageFooter = (pageNumber) => {
+        // Temporarily disable the bottom margin while drawing the footer to prevent "infinite blank pages" glitch
+        const originalBottomMargin = doc.page.margins.bottom;
+        doc.page.margins.bottom = 0;
+
         const footerY = doc.page.height - 35;
         doc
           .moveTo(45, footerY)
@@ -390,7 +402,10 @@ const generateThreadContextPDF = async (
           .text(`Page ${pageNumber}`, 45, footerY + 10, {
             width: pageWidth,
             align: "center",
+            lineBreak: false,
           });
+
+        doc.page.margins.bottom = originalBottomMargin; // Restore margin
       };
 
       doc.on("pageAdded", () => {
@@ -540,8 +555,7 @@ const generateThreadContextPDF = async (
           });
         }
 
-        // Fix: Only push the cursor down if there is another message coming.
-        // This prevents triggering an automatic empty page at the very end of the document.
+        // Only push the cursor down if there is another message coming.
         if (idx < allMessages.length - 1) {
           doc.moveDown(1.5);
         }
