@@ -59,7 +59,19 @@ import EmailThreadModal from './EmailThreadModal';
 import CustomModal from '../../CustomComponents/CustomModal';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Enhanced Rich Text Editor (unchanged from original)
+// Enhanced Rich Text Editor
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// FIX (table-paste discrepancy): when a copied table has merged cells
+// (rowspan/colspan — extremely common in Outlook/Excel quote-comparison
+// tables, e.g. a value that visually spans two rows, or a header spanning
+// several sub-columns), the OLD code stripped *every* attribute off every
+// <td>/<th>, including rowspan/colspan. Once those are gone, the browser
+// lays every cell out as a plain 1x1 cell, and every following cell shifts
+// into the wrong row/column — which is exactly the "table doesn't match
+// what was copied" bug. The fix below preserves rowspan/colspan (and only
+// those) while still stripping mso-*, inline styles, classes, and any other
+// junk Outlook/Excel/Sheets inject.
 // ─────────────────────────────────────────────────────────────────────────────
 const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = false }) => {
   const editorRef = useRef(null);
@@ -121,8 +133,17 @@ const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = fals
         cells.forEach((cell) => {
           let text = cell.innerText.trim();
           text = normalizeNumber(text);
+
+          // ── FIX: capture rowspan/colspan BEFORE wiping all attributes ──
+          const rowspan = cell.getAttribute("rowspan");
+          const colspan = cell.getAttribute("colspan");
+
           cell.innerText = text;
           while (cell.attributes.length > 0) cell.removeAttribute(cell.attributes[0].name);
+
+          // ── FIX: restore ONLY structural merge attributes, nothing else ──
+          if (rowspan && parseInt(rowspan, 10) > 1) cell.setAttribute("rowspan", rowspan);
+          if (colspan && parseInt(colspan, 10) > 1) cell.setAttribute("colspan", colspan);
         });
         cleanHtml += table.outerHTML + "<p><br></p>";
       });
