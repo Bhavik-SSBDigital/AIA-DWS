@@ -61,18 +61,6 @@ import CustomModal from '../../CustomComponents/CustomModal';
 // ─────────────────────────────────────────────────────────────────────────────
 // Enhanced Rich Text Editor
 // ─────────────────────────────────────────────────────────────────────────────
-//
-// FIX (table-paste discrepancy): when a copied table has merged cells
-// (rowspan/colspan — extremely common in Outlook/Excel quote-comparison
-// tables, e.g. a value that visually spans two rows, or a header spanning
-// several sub-columns), the OLD code stripped *every* attribute off every
-// <td>/<th>, including rowspan/colspan. Once those are gone, the browser
-// lays every cell out as a plain 1x1 cell, and every following cell shifts
-// into the wrong row/column — which is exactly the "table doesn't match
-// what was copied" bug. The fix below preserves rowspan/colspan (and only
-// those) while still stripping mso-*, inline styles, classes, and any other
-// junk Outlook/Excel/Sheets inject.
-// ─────────────────────────────────────────────────────────────────────────────
 const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = false }) => {
   const editorRef = useRef(null);
   const [isFocused, setIsFocused] = useState(false);
@@ -134,14 +122,12 @@ const RichTextEditor = ({ value, onChange, placeholder, disabled, compact = fals
           let text = cell.innerText.trim();
           text = normalizeNumber(text);
 
-          // ── FIX: capture rowspan/colspan BEFORE wiping all attributes ──
           const rowspan = cell.getAttribute("rowspan");
           const colspan = cell.getAttribute("colspan");
 
           cell.innerText = text;
           while (cell.attributes.length > 0) cell.removeAttribute(cell.attributes[0].name);
 
-          // ── FIX: restore ONLY structural merge attributes, nothing else ──
           if (rowspan && parseInt(rowspan, 10) > 1) cell.setAttribute("rowspan", rowspan);
           if (colspan && parseInt(colspan, 10) > 1) cell.setAttribute("colspan", colspan);
         });
@@ -281,14 +267,16 @@ export default function InitiateProcess() {
   const [tagEmails, setTagEmails] = useState([]);
   const [fetchingEmails, setFetchingEmails] = useState(false);
 
-  // ── NEW: Description doc state ──────────────────────────────────────────
   const [isSavingDescription, setIsSavingDescription] = useState(false);
-  const [descriptionDocId, setDescriptionDocId] = useState(null);   // DB id of the saved description doc
+  const [descriptionDocId, setDescriptionDocId] = useState(null);   
   const [descriptionDocName, setDescriptionDocName] = useState(null);
-  const [isDescriptionSaved, setIsDescriptionSaved] = useState(false); // tracks if current text has been saved
+  const [isDescriptionSaved, setIsDescriptionSaved] = useState(false); 
   const [showUnsavedWarningModal, setShowUnsavedWarningModal] = useState(false);
 
-  // Track last saved description text to detect dirty state
+  // NEW STATES: Workflow Change Confirmation
+  const [showWorkflowConfirmModal, setShowWorkflowConfirmModal] = useState(false);
+  const [pendingWorkflowSelection, setPendingWorkflowSelection] = useState(null);
+
   const lastSavedDescriptionRef = useRef('');
 
   const defaultvalues = {
@@ -312,7 +300,6 @@ export default function InitiateProcess() {
 
   const [workflowId, processTagId, formDescription] = watch(['workflowId', 'processTagId', 'description']);
 
-  // Whenever description changes, mark as unsaved (if it differs from last saved)
   useEffect(() => {
     if (formDescription !== lastSavedDescriptionRef.current) {
       setIsDescriptionSaved(false);
@@ -536,7 +523,6 @@ export default function InitiateProcess() {
     setCurrentUploadingIndex(-1);
   };
 
-  // ── NEW: Save description document ────────────────────────────────────────
   const handleSaveDescription = async () => {
     if (!workflowId) {
       toast.error('Please select a Target Workflow before saving the description.');
@@ -559,26 +545,23 @@ export default function InitiateProcess() {
 
       const { documentId, documentName, documentPath } = res.data;
 
-      // Update/replace in the documents field array
       const allDocs = getValues('documents');
       const existingIdx = allDocs.findIndex(d => d.isDescriptionDoc === true);
 
       if (existingIdx !== -1) {
-        // Remove old entry
         removeDocument(existingIdx);
       }
 
-      // Add new description doc
       addDocument({
         documentId,
         name: documentName,
         tags: ['process-description-doc'],
-        description: '',          // No description printed on the description doc itself
+        description: '',         
         partNumber: '',
         preApproved: false,
         issueNo: '',
         fromEmail: false,
-        isDescriptionDoc: true,   // ← marker used to exclude from printing
+        isDescriptionDoc: true,  
         documentPath,
       });
 
@@ -595,7 +578,6 @@ export default function InitiateProcess() {
     }
   };
 
-  // ── NEW: Intercept submit to warn about unsaved description ──────────────
   const handleInitialSubmit = (data) => {
     if (data?.documents?.length === 0) {
       toast.info('Please upload documents for process');
@@ -606,7 +588,6 @@ export default function InitiateProcess() {
       return;
     }
 
-    // Check if description has content but is not saved
     const desc = getValues('description');
     const hasDescContent = desc && desc.trim() !== '' && desc !== '<br>';
     if (hasDescContent && !isDescriptionSaved) {
@@ -618,7 +599,6 @@ export default function InitiateProcess() {
     setShowConfirmModal(true);
   };
 
-  // Called from unsaved warning modal — save first then continue
   const handleSaveAndContinue = async () => {
     setShowUnsavedWarningModal(false);
     await handleSaveDescription();
@@ -627,7 +607,6 @@ export default function InitiateProcess() {
     setShowConfirmModal(true);
   };
 
-  // Called from unsaved warning modal — skip saving and continue
   const handleContinueWithoutSaving = () => {
     setShowUnsavedWarningModal(false);
     const data = getValues();
@@ -640,7 +619,6 @@ export default function InitiateProcess() {
     const data = pendingSubmitData;
     const selectedTagObj = allTags.find((t) => t.id === parseInt(data.processTagId));
 
-    // Build documents array, but skip the description doc from printing logic by tagging it
     const submitData = {
       ...data,
       tag: selectedTagObj ? selectedTagObj.name : '',
@@ -725,8 +703,70 @@ export default function InitiateProcess() {
     return emailDate.toLocaleDateString();
   };
 
+  // Triggered when user selects a workflow from dropdown
+  const handleWorkflowSelectionClick = (e) => {
+    const selected = workflowData.find((wf) => wf.name === e.target.value);
+    if (selected) {
+      setPendingWorkflowSelection(selected);
+      setShowWorkflowConfirmModal(true);
+    }
+  };
+
+  // When user confirms the workflow change
+  const confirmWorkflowSelection = () => {
+    if (pendingWorkflowSelection) {
+      setSelectedWorkflow(pendingWorkflowSelection);
+      if (pendingWorkflowSelection.versions?.length > 0) {
+        setValue('workflowId', pendingWorkflowSelection.versions[0].id, { shouldValidate: true });
+      }
+    }
+    setShowWorkflowConfirmModal(false);
+    setPendingWorkflowSelection(null);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-10 font-sans text-slate-900">
+
+      {/* ── Workflow Confirmation Modal ─────────────────────────────────────────── */}
+      <CustomModal isOpen={showWorkflowConfirmModal} onClose={() => { setShowWorkflowConfirmModal(false); setPendingWorkflowSelection(null); }} size="md">
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-200">
+              <IconSettings size={28} stroke={1.5} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Confirm Target Workflow</h2>
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
+            <p className="text-sm text-slate-700 font-medium mb-3">
+              Are you sure you want to select <strong>{pendingWorkflowSelection?.name}</strong> as your target workflow?
+            </p>
+            <div className="flex items-start gap-2 text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
+              <IconAlertCircle size={18} className="shrink-0 mt-0.5" />
+              <p className="text-xs font-medium">
+                <strong>Important:</strong> Once any document is generated or added to this process, the workflow gets locked and cannot be changed.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-end gap-3">
+            <button
+              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors"
+              onClick={() => { setShowWorkflowConfirmModal(false); setPendingWorkflowSelection(null); }}
+            >
+              Cancel
+            </button>
+            <button
+              className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm flex items-center gap-2"
+              onClick={confirmWorkflowSelection}
+            >
+              <IconCheck size={16} /> Yes, Select Workflow
+            </button>
+          </div>
+        </div>
+      </CustomModal>
 
       {/* ── Remove Email Thread Modal ───────────────────────────────────────── */}
       <CustomModal isOpen={!!removeEmailThredModel} onClose={() => setRemoveEmailThredModel('')} size="md">
@@ -743,7 +783,7 @@ export default function InitiateProcess() {
         </div>
       </CustomModal>
 
-      {/* ── Unsaved Description Warning Modal (NEW) ─────────────────────────── */}
+      {/* ── Unsaved Description Warning Modal ─────────────────────────── */}
       <CustomModal isOpen={showUnsavedWarningModal} onClose={() => setShowUnsavedWarningModal(false)} size="md">
         <div className="p-6">
           <div className="flex items-center gap-3 mb-4">
@@ -853,20 +893,29 @@ export default function InitiateProcess() {
                 <div className="p-6 flex flex-col gap-6 flex-grow">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Target Workflow</label>
+                      <label className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                        Target Workflow
+                        {/* Note: Disables and adds a badge if any document exists */}
+                        {documentFields.length > 0 && (
+                          <span className="text-[10px] bg-slate-100 text-slate-500 border border-slate-200 px-2 py-0.5 rounded-full font-medium" title="Remove all documents to change the workflow">
+                            Locked
+                          </span>
+                        )}
+                      </label>
                       <select
-                        className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm px-4 py-2.5 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                        className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm px-4 py-2.5 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all disabled:opacity-60 disabled:bg-slate-100 disabled:cursor-not-allowed"
                         value={selectedWorkflow?.name || ''}
-                        onChange={(e) => {
-                          const selected = workflowData.find((wf) => wf.name === e.target.value);
-                          setSelectedWorkflow(selected);
-                        }}
+                        onChange={handleWorkflowSelectionClick}
+                        disabled={documentFields.length > 0}
                       >
                         <option value="">Select a Workflow</option>
                         {workflowData.map((wf) => (
                           <option key={wf.name} value={wf.name}>{wf.name}</option>
                         ))}
                       </select>
+                      {documentFields.length > 0 && (
+                          <p className="text-[11px] text-slate-500 mt-1">Remove all committed documents to change the workflow.</p>
+                      )}
                     </div>
 
                     <div>
