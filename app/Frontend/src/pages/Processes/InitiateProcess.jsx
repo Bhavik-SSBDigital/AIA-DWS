@@ -48,6 +48,7 @@ import {
   IconCalendarEvent,
   IconDeviceFloppy,
   IconAlertTriangle,
+  IconPencil
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import CustomButton from '../../CustomComponents/CustomButton';
@@ -272,6 +273,9 @@ export default function InitiateProcess() {
   const [descriptionDocName, setDescriptionDocName] = useState(null);
   const [isDescriptionSaved, setIsDescriptionSaved] = useState(false); 
   const [showUnsavedWarningModal, setShowUnsavedWarningModal] = useState(false);
+
+  // STATE: Workflow Change Unlock Warning
+  const [showUnlockWorkflowModal, setShowUnlockWorkflowModal] = useState(false);
 
   const lastSavedDescriptionRef = useRef('');
 
@@ -699,8 +703,62 @@ export default function InitiateProcess() {
     return emailDate.toLocaleDateString();
   };
 
+  // Handler to proceed with workflow change (removes all docs)
+  const handleProceedWithWorkflowChange = () => {
+    // 1. Empty array of documents
+    setValue('documents', []);
+    
+    // 2. Clear related tracking states for generated docs/files
+    setDescriptionDocId(null);
+    setDescriptionDocName(null);
+    setIsDescriptionSaved(false);
+    setEmailThreads([]);
+    
+    // Close modal and show notification
+    setShowUnlockWorkflowModal(false);
+    toast.info("All documents have been removed. You may now select a new workflow.");
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-10 font-sans text-slate-900">
+
+      {/* ── Workflow Edit Confirmation Modal ────────────────────────────────────── */}
+      <CustomModal isOpen={showUnlockWorkflowModal} onClose={() => setShowUnlockWorkflowModal(false)} size="md">
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-3 bg-red-50 text-red-600 rounded-full border border-red-200">
+              <IconAlertTriangle size={28} stroke={1.5} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Change Target Workflow</h2>
+            </div>
+          </div>
+          
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+            <p className="text-sm text-red-800 font-medium">
+              If you change the workflow, <strong>all the submitted documents will be removed</strong> and you will have to reupload them.
+            </p>
+            <p className="text-sm text-red-700 mt-2">
+              Do you want to proceed?
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-end gap-3">
+            <button
+              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors"
+              onClick={() => setShowUnlockWorkflowModal(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="px-5 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-sm flex items-center gap-2"
+              onClick={handleProceedWithWorkflowChange}
+            >
+              <IconCheck size={16} /> Yes, Proceed
+            </button>
+          </div>
+        </div>
+      </CustomModal>
 
       {/* ── Remove Email Thread Modal ───────────────────────────────────────── */}
       <CustomModal isOpen={!!removeEmailThredModel} onClose={() => setRemoveEmailThredModel('')} size="md">
@@ -717,7 +775,7 @@ export default function InitiateProcess() {
         </div>
       </CustomModal>
 
-      {/* ── Unsaved Description Warning Modal (NEW) ─────────────────────────── */}
+      {/* ── Unsaved Description Warning Modal ─────────────────────────── */}
       <CustomModal isOpen={showUnsavedWarningModal} onClose={() => setShowUnsavedWarningModal(false)} size="md">
         <div className="p-6">
           <div className="flex items-center gap-3 mb-4">
@@ -827,31 +885,38 @@ export default function InitiateProcess() {
                 <div className="p-6 flex flex-col gap-6 flex-grow">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <label className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                      <label className="text-sm font-semibold text-slate-700 mb-2 flex items-center justify-between">
                         Target Workflow
-                        {/* Note: Disables and adds a badge if any document exists */}
-                        {documentFields.length > 0 && (
-                          <span className="text-[10px] bg-slate-100 text-slate-500 border border-slate-200 px-2 py-0.5 rounded-full font-medium" title="Remove all documents to change the workflow">
-                            Locked
-                          </span>
-                        )}
                       </label>
-                      <select
-                        className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm px-4 py-2.5 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all disabled:opacity-60 disabled:bg-slate-100 disabled:cursor-not-allowed"
-                        value={selectedWorkflow?.name || ''}
-                        onChange={(e) => {
-                          const selected = workflowData.find((wf) => wf.name === e.target.value);
-                          setSelectedWorkflow(selected);
-                        }}
-                        disabled={documentFields.length > 0}
-                      >
-                        <option value="">Select a Workflow</option>
-                        {workflowData.map((wf) => (
-                          <option key={wf.name} value={wf.name}>{wf.name}</option>
-                        ))}
-                      </select>
-                      {documentFields.length > 0 && (
-                          <p className="text-[11px] text-slate-500 mt-1">Remove all committed documents to change the workflow.</p>
+                      {/* Conditionally render locked visual state with edit button if documents exist */}
+                      {documentFields.length > 0 ? (
+                        <div className="flex items-center justify-between w-full bg-slate-50 border border-slate-300 px-4 py-2.5 rounded-lg shadow-sm">
+                          <span className="text-sm text-slate-900 font-medium truncate pr-4">
+                            {selectedWorkflow?.name || 'No Workflow Selected'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowUnlockWorkflowModal(true)}
+                            className="flex items-center gap-1.5 px-3 py-1 text-xs font-bold text-indigo-700 bg-indigo-100 hover:bg-indigo-200 border border-indigo-200 rounded transition-colors shrink-0"
+                            title="Change Workflow"
+                          >
+                            <IconPencil size={14} stroke={2} /> Edit
+                          </button>
+                        </div>
+                      ) : (
+                        <select
+                          className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm px-4 py-2.5 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                          value={selectedWorkflow?.name || ''}
+                          onChange={(e) => {
+                            const selected = workflowData.find((wf) => wf.name === e.target.value);
+                            setSelectedWorkflow(selected);
+                          }}
+                        >
+                          <option value="">Select a Workflow</option>
+                          {workflowData.map((wf) => (
+                            <option key={wf.name} value={wf.name}>{wf.name}</option>
+                          ))}
+                        </select>
                       )}
                     </div>
 
