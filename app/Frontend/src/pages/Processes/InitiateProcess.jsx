@@ -273,10 +273,6 @@ export default function InitiateProcess() {
   const [isDescriptionSaved, setIsDescriptionSaved] = useState(false); 
   const [showUnsavedWarningModal, setShowUnsavedWarningModal] = useState(false);
 
-  // NEW STATES: Workflow Change Confirmation
-  const [showWorkflowConfirmModal, setShowWorkflowConfirmModal] = useState(false);
-  const [pendingWorkflowSelection, setPendingWorkflowSelection] = useState(null);
-
   const lastSavedDescriptionRef = useRef('');
 
   const defaultvalues = {
@@ -703,70 +699,8 @@ export default function InitiateProcess() {
     return emailDate.toLocaleDateString();
   };
 
-  // Triggered when user selects a workflow from dropdown
-  const handleWorkflowSelectionClick = (e) => {
-    const selected = workflowData.find((wf) => wf.name === e.target.value);
-    if (selected) {
-      setPendingWorkflowSelection(selected);
-      setShowWorkflowConfirmModal(true);
-    }
-  };
-
-  // When user confirms the workflow change
-  const confirmWorkflowSelection = () => {
-    if (pendingWorkflowSelection) {
-      setSelectedWorkflow(pendingWorkflowSelection);
-      if (pendingWorkflowSelection.versions?.length > 0) {
-        setValue('workflowId', pendingWorkflowSelection.versions[0].id, { shouldValidate: true });
-      }
-    }
-    setShowWorkflowConfirmModal(false);
-    setPendingWorkflowSelection(null);
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-10 font-sans text-slate-900">
-
-      {/* ── Workflow Confirmation Modal ─────────────────────────────────────────── */}
-      <CustomModal isOpen={showWorkflowConfirmModal} onClose={() => { setShowWorkflowConfirmModal(false); setPendingWorkflowSelection(null); }} size="md">
-        <div className="p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-200">
-              <IconSettings size={28} stroke={1.5} />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-slate-900">Confirm Target Workflow</h2>
-            </div>
-          </div>
-
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
-            <p className="text-sm text-slate-700 font-medium mb-3">
-              Are you sure you want to select <strong>{pendingWorkflowSelection?.name}</strong> as your target workflow?
-            </p>
-            <div className="flex items-start gap-2 text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
-              <IconAlertCircle size={18} className="shrink-0 mt-0.5" />
-              <p className="text-xs font-medium">
-                <strong>Important:</strong> Once any document is generated or added to this process, the workflow gets locked and cannot be changed.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row justify-end gap-3">
-            <button
-              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors"
-              onClick={() => { setShowWorkflowConfirmModal(false); setPendingWorkflowSelection(null); }}
-            >
-              Cancel
-            </button>
-            <button
-              className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors shadow-sm flex items-center gap-2"
-              onClick={confirmWorkflowSelection}
-            >
-              <IconCheck size={16} /> Yes, Select Workflow
-            </button>
-          </div>
-        </div>
-      </CustomModal>
 
       {/* ── Remove Email Thread Modal ───────────────────────────────────────── */}
       <CustomModal isOpen={!!removeEmailThredModel} onClose={() => setRemoveEmailThredModel('')} size="md">
@@ -783,7 +717,7 @@ export default function InitiateProcess() {
         </div>
       </CustomModal>
 
-      {/* ── Unsaved Description Warning Modal ─────────────────────────── */}
+      {/* ── Unsaved Description Warning Modal (NEW) ─────────────────────────── */}
       <CustomModal isOpen={showUnsavedWarningModal} onClose={() => setShowUnsavedWarningModal(false)} size="md">
         <div className="p-6">
           <div className="flex items-center gap-3 mb-4">
@@ -905,7 +839,10 @@ export default function InitiateProcess() {
                       <select
                         className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-sm px-4 py-2.5 rounded-lg focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all disabled:opacity-60 disabled:bg-slate-100 disabled:cursor-not-allowed"
                         value={selectedWorkflow?.name || ''}
-                        onChange={handleWorkflowSelectionClick}
+                        onChange={(e) => {
+                          const selected = workflowData.find((wf) => wf.name === e.target.value);
+                          setSelectedWorkflow(selected);
+                        }}
                         disabled={documentFields.length > 0}
                       >
                         <option value="">Select a Workflow</option>
