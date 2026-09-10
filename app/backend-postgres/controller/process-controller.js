@@ -689,6 +689,184 @@ async function appendDescriptionToPdf(
     });
 }
 
+/**
+ * Admin-only: return full audit view of processes by tag / PO number.
+ * Unlike /viewProcess, this does NOT filter step instances by the
+ * logged-in user, so the audit pipeline can see every step's approver.
+ */
+export const get_process_audit_data = async (req, res) => {
+  try {
+    if (!req.user || (!req.user.isAdmin && !req.user.isRootLevel)) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden. Admin privileges required.",
+      });
+    }
+
+    const { tag, poNumber, limit = 500 } = req.query;
+
+    const where = {};
+    if (tag) where.tags = { has: tag };
+    if (poNumber) where.poNumbers = { has: poNumber };
+
+    const processes = await prisma.processInstance.findMany({
+      where,
+      take: Math.min(parseInt(limit, 10) || 500, 2000),
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        tags: true,
+        poNumbers: true,
+        createdAt: true,
+        updatedAt: true,
+        workflow: { select: { name: true, version: true } },
+        stepInstances: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            status: true,
+            decisionAt: true,
+            decisionComment: true,
+            claimedAt: true,
+            createdAt: true,
+            isRecirculated: true,
+            assignedTo: true,
+            pickedById: true,
+            roleId: true,
+            departmentId: true,
+            workflowStep: {
+              select: { stepNumber: true, stepName: true, stepType: true },
+            },
+          },
+        },
+      },
+    });
+
+    // Batch-fetch users / roles / departments referenced by any step
+    const userIds = new Set();
+    const roleIds = new Set();
+    const deptIds = new Set();
+    for (const p of processes) {
+      for (const s of p.stepInstances) {
+        if (s.assignedTo) userIds.add(s.assignedTo);
+        if (s.pickedById) userIds.add(s.pickedById);
+        if (s.roleId) roleIds.add(s.roleId);
+        if (s.departmentId) deptIds.add(s.departmentId);
+      }
+    }
+
+    const [users, roles, departments] = await Promise.all([
+      userIds.size
+        ? prisma.user.findMany({
+            where: { id: { in: [...userIds] } },
+            select: { id: true, username: true, name: true, email: true },
+          })
+        : [],
+      roleIds.size
+        ? prisma.role.findMany({
+            where: { id: { in: [...roleIds] } },
+            select: {
+              id: true,
+              role: true,
+              isAdmin: true,
+              isRootLevel: true,
+              isDepartmentHead: true,
+            },
+          })
+        : [],
+      deptIds.size
+        ? prisma.department.findMany({
+            where: { id: { in: [...deptIds] } },
+            select: { id: true, name: true },
+          })
+        : [],
+    ]);
+
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const roleMap = new Map(roles.map((r) => [r.id, r]));
+    const deptMap = new Map(departments.map((d) => [d.id, d]));
+
+    const data = processes.map((p) => ({
+      processId: p.id,
+      processName: p.name,
+      status: p.status,
+      tags: p.tags || [],
+      poNumbers: p.poNumbers || [],
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+      workflowName: p.workflow?.name || null,
+      steps: p.stepInstances.map((s) => {
+        const assignee = userMap.get(s.assignedTo) || null;
+        const picker = s.pickedById ? userMap.get(s.pickedById) || null : null;
+        const role = s.roleId ? roleMap.get(s.roleId) || null : null;
+        const dept = s.departmentId
+          ? deptMap.get(s.departmentId) || null
+          : null;
+
+        const roleName = role?.role || "";
+        const isManagerOrAbove =
+          !!role?.isAdmin ||
+          !!role?.isRootLevel ||
+          !!role?.isDepartmentHead ||
+          roleName.toLowerCase().includes("manager");
+
+        return {
+          stepInstanceId: s.id,
+          stepNumber: s.workflowStep?.stepNumber ?? null,
+          stepName: s.workflowStep?.stepName ?? null,
+          stepType: s.workflowStep?.stepType ?? null,
+          status: s.status,
+          decisionAt: s.decisionAt,
+          decisionComment: s.decisionComment || "",
+          claimedAt: s.claimedAt,
+          createdAt: s.createdAt,
+          isRecirculated: s.isRecirculated,
+          assignedTo: assignee
+            ? {
+                id: assignee.id,
+                username: assignee.username,
+                name: assignee.name,
+                email: assignee.email,
+              }
+            : null,
+          pickedBy: picker
+            ? {
+                id: picker.id,
+                username: picker.username,
+                name: picker.name,
+                email: picker.email,
+              }
+            : null,
+          role: role
+            ? {
+                id: role.id,
+                name: role.role,
+                isAdmin: role.isAdmin,
+                isRootLevel: role.isRootLevel,
+                isDepartmentHead: role.isDepartmentHead,
+                isManagerOrAbove,
+              }
+            : null,
+          department: dept ? { id: dept.id, name: dept.name } : null,
+        };
+      }),
+    }));
+
+    return res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error("get_process_audit_data error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch audit data" });
+  }
+};
+
 export const initiate_process = async (req, res, next) => {
   try {
     const pythonScriptPath = path.join(

@@ -151,6 +151,7 @@ import {
   get_po_inspection_data,
   sync_missing_po_data,
   mass_sync_po_data,
+  get_process_audit_data,
 } from "../controller/process-controller.js";
 import { pick_process_step } from "../controller/process-step-claim.js";
 import { upload_signature } from "../controller/image-controller.js";
@@ -316,6 +317,12 @@ router.get("/exportFileLogs", requireAdmin, export_file_logs);
 router.post("/createPermissions", requireAdmin, create_permissions);
 
 router.post("/getAllDocuments", requireAdmin, getDocumentDetailsForAdmin);
+
+router.get(
+  "/api/admin/process-audit-data",
+  requireAdmin,
+  get_process_audit_data,
+);
 
 // ==========================================
 // 🛡️ AUTHENTICATED USER ROUTES
