@@ -121,6 +121,8 @@ export const login = async (req, res) => {
       include: { tokens: true, roles: true },
     });
 
+    console.log("user", user);
+
     if (!user) {
       return res.status(401).json({ message: "Invalid username or password" });
     }

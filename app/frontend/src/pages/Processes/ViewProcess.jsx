@@ -78,6 +78,8 @@ const ViewProcess = () => {
   const username = sessionStorage.getItem('username');
   const [showActions, setShowActions] = useState(false);
   const menuRef = useRef();
+  // NEW: hard guard against double-click / double-submit of "Approve"
+  const signingInFlight = useRef(false);
   const { id } = useParams();
   const [actionsLoading, setActionsLoading] = useState(false);
   const [process, setProcess] = useState(null);
@@ -330,6 +332,10 @@ const ViewProcess = () => {
   };
 
   const handleSignAllDocuments = async () => {
+    // NEW: ignore a second click / second call while one is already running
+    if (signingInFlight.current) return;
+    signingInFlight.current = true;
+
     setActionsLoading(true);
     try {
       const res = await SignDocumentAll(
@@ -364,6 +370,7 @@ const ViewProcess = () => {
     } catch (error) {
       toast.error(error?.response?.data?.message || error?.message);
     } finally {
+      signingInFlight.current = false; // NEW
       setActionsLoading(false);
     }
   };
@@ -2202,6 +2209,7 @@ const ViewProcess = () => {
             variant="secondary"
             text="Cancel"
             className="bg-white border-slate-300 hover:bg-slate-50 text-slate-700"
+            disabled={actionsLoading}
             click={() => {
               setSignAllModalOpen({
                 open: false,
@@ -2210,17 +2218,15 @@ const ViewProcess = () => {
               });
             }}
           />
+          {/* CHANGED: disabled while a request is running; no extra modal-close
+              call (handleSignAllDocuments already closes the modal) */}
           <CustomButton
             variant="primary"
             text="Confirm & Approve"
             className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+            disabled={actionsLoading}
             click={async () => {
               await handleSignAllDocuments();
-              setSignAllModalOpen({
-                open: false,
-                withRemarks: false,
-                listOfDocuments: [],
-              });
             }}
           />
         </div>

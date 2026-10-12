@@ -24,6 +24,43 @@ const execPromise = promisify(exec);
 
 const envVariables = process.env;
 
+// ─────────────────────────────────────────────────────────────────────────
+// Duplicate-signature protection
+// ─────────────────────────────────────────────────────────────────────────
+
+// Serialises signing per (process, user, document) so retries / double-clicks queue up
+const signingLocks = new Map();
+const acquireSigningLock = async (key) => {
+  const previous = signingLocks.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => (release = resolve));
+  const tail = previous.then(() => current);
+  signingLocks.set(key, tail);
+  await previous;
+  return () => {
+    release();
+    if (signingLocks.get(key) === tail) signingLocks.delete(key);
+  };
+};
+
+// Same user already signed this document for this step (or within the last 2 min)?
+const findDuplicateSignature = (
+  processDocumentId,
+  userId,
+  processStepInstanceId,
+) =>
+  prisma.documentSignature.findFirst({
+    where: {
+      processDocumentId,
+      userId,
+      OR: [
+        ...(processStepInstanceId ? [{ processStepInstanceId }] : []),
+        { signedAt: { gte: new Date(Date.now() - 2 * 60 * 1000) } },
+      ],
+    },
+    select: { id: true },
+  });
+
 // --- FIX: ULTIMATE FAIL-SAFE PDF LOADER (Leveraging PyMuPDF for broken XREFs) ---
 const loadPdfSafely = async (pdfBytes, absDocumentPath, pythonEnvPath) => {
   // Attempt 1: Standard Load
@@ -62,24 +99,19 @@ const loadPdfSafely = async (pdfBytes, absDocumentPath, pythonEnvPath) => {
   } catch (err) {}
 
   // Attempt 3: Ultimate PyMuPDF Healing Strategy
-  // If we hit "Invalid object ref: 4 0 R", the PDF structure is broken. We use your
-  // existing python environment to rapidly rebuild the file structure.
   console.warn(
     "PDF-lib cannot parse the file. Using PyMuPDF to heal the structure...",
   );
   try {
     const tempHealedPath = absDocumentPath + ".healed.pdf";
 
-    // Command line python execution to instantly heal missing objects
     const command = `"${pythonEnvPath}" -c "import fitz, sys; doc = fitz.open(sys.argv[1]); doc.save(sys.argv[2]); doc.close()" "${absDocumentPath}" "${tempHealedPath}"`;
     await execPromise(command);
 
-    // Read the perfectly healed file
     const healedBytes = await fs.readFile(tempHealedPath);
     const doc = await PDFDocument.load(healedBytes, { ignoreEncryption: true });
     doc.getPageIndices(); // Verify
 
-    // Overwrite the original broken file with the healed version
     await fs.writeFile(absDocumentPath, healedBytes);
     await fs.unlink(tempHealedPath).catch(() => {});
 
@@ -208,131 +240,159 @@ export const sign_document = async (req, res, next) => {
       remarks = "N/A",
     } = req.body;
 
-    const document = await prisma.document.findUnique({
-      where: { id: documentId },
-    });
-    const process = await prisma.processInstance.findUnique({
-      where: { id: processId },
-    });
-    const processDocument = await prisma.processDocument.findFirst({
-      where: { processId, documentId },
-    });
-
-    if (!document || !process || !processDocument) {
-      return res.status(404).json({ message: "Document or process not found" });
-    }
-
-    const currentStep = await prisma.workflowStep.findUnique({
-      where: { id: process.currentStepId },
-    });
-    const absDocumentPath = path.join(
-      __dirname,
-      "../../../../",
-      "storage",
-      document.path,
+    // ▼ NEW: serialise concurrent / repeated sign requests for this doc+user
+    const releaseLock = await acquireSigningLock(
+      `${processId}:${userData.id}:${documentId}`,
     );
-    const existingPdfBytes = await fs.readFile(absDocumentPath);
+    try {
+      const document = await prisma.document.findUnique({
+        where: { id: documentId },
+      });
+      const process = await prisma.processInstance.findUnique({
+        where: { id: processId },
+      });
+      const processDocument = await prisma.processDocument.findFirst({
+        where: { processId, documentId },
+      });
 
-    const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
-    const pythonScriptPath = path.join(
-      __dirname,
-      "../../support/getFileSpace.py",
-    );
+      if (!document || !process || !processDocument) {
+        return res
+          .status(404)
+          .json({ message: "Document or process not found" });
+      }
 
-    const pdfDoc = await loadPdfSafely(
-      existingPdfBytes,
-      absDocumentPath,
-      pythonEnvPath,
-    );
-    const pages = pdfDoc.getPages();
-    const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const coordinates = await get_sign_coordinates_for_specific_step_in_process(
-      documentId,
-      currentStep?.id,
-    );
-
-    let finalPdfBytes;
-    let signatureCoordinates;
-
-    // STEP 1: Generate PDF Bytes in memory (Atomic boundary)
-    if (coordinates.length > 0) {
-      finalPdfBytes = await print_signature_at_coordinates(
-        pdfDoc,
-        coordinates,
-        jpegImagePath,
-        userData.username,
-        remarks,
-        formatDate(Date.now()),
-        helveticaFont,
-        dscPath,
-        p12password,
+      // ▼ NEW: already signed by this user for this step / within 2 minutes
+      const duplicate = await findDuplicateSignature(
+        processDocument.id,
+        userData.id,
+        processStepInstanceId,
       );
-    } else {
-      const result = await print_signature_after_content_on_the_last_page(
-        pdfDoc,
-        pages[pages.length - 1],
-        document.path,
-        jpegImagePath,
-        userData.username,
-        formatDate(Date.now()),
-        remarks,
-        helveticaFont,
-        pythonEnvPath,
-        pythonScriptPath,
-        dscPath,
-        p12password,
-      );
-      finalPdfBytes = result.pdfBytes;
-      signatureCoordinates = result.coords;
-    }
-
-    // STEP 2: Database updates via Transaction
-    await prisma.$transaction(async (tx) => {
-      if (coordinates.length > 0) {
-        await tx.signCoordinate.updateMany({
-          where: {
-            processDocumentId: documentId.toString(),
-            page: { in: coordinates.map((c) => c.page) },
-          },
-          data: { isSigned: true, signedById: userData.id },
-        });
-      } else if (signatureCoordinates) {
-        await tx.signCoordinate.create({
-          data: {
-            processDocumentId: processDocument.id,
-            page: signatureCoordinates.newlyAdded
-              ? pages.length + 1
-              : pages.length,
-            x: signatureCoordinates.x,
-            y: signatureCoordinates.y,
-            width: signatureCoordinates.width,
-            height: signatureCoordinates.height,
-            stepId: currentStep?.id,
-            isSigned: true,
-            signedById: userData.id,
-          },
+      if (duplicate) {
+        return res.status(200).json({
+          message: "Document already signed",
+          isForwardable: true,
+          isRevertable: false,
         });
       }
 
-      await tx.documentSignature.create({
-        data: {
-          processDocumentId: processDocument.id,
-          userId: userData.id,
-          processStepInstanceId: processStepInstanceId,
-          reason: remarks,
-        },
+      const currentStep = await prisma.workflowStep.findUnique({
+        where: { id: process.currentStepId },
       });
-    });
+      const absDocumentPath = path.join(
+        __dirname,
+        "../../../../",
+        "storage",
+        document.path,
+      );
+      const existingPdfBytes = await fs.readFile(absDocumentPath);
 
-    // STEP 3: Write File (Only reached if memory generation and DB succeed)
-    await fs.writeFile(absDocumentPath, finalPdfBytes);
+      const pythonEnvPath = path.join(
+        __dirname,
+        "../../support/venv/bin/python",
+      );
+      const pythonScriptPath = path.join(
+        __dirname,
+        "../../support/getFileSpace.py",
+      );
 
-    const processResult = await is_process_forwardable(process, userData.id);
-    return res.status(200).json({
-      message: "Document signed successfully",
-      isForwardable: processResult.isForwardable,
-      isRevertable: processResult.isRevertable,
-    });
+      const pdfDoc = await loadPdfSafely(
+        existingPdfBytes,
+        absDocumentPath,
+        pythonEnvPath,
+      );
+      const pages = pdfDoc.getPages();
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const coordinates =
+        await get_sign_coordinates_for_specific_step_in_process(
+          documentId,
+          currentStep?.id,
+        );
+
+      let finalPdfBytes;
+      let signatureCoordinates;
+
+      // STEP 1: Generate PDF Bytes in memory (Atomic boundary)
+      if (coordinates.length > 0) {
+        finalPdfBytes = await print_signature_at_coordinates(
+          pdfDoc,
+          coordinates,
+          jpegImagePath,
+          userData.username,
+          remarks,
+          formatDate(Date.now()),
+          helveticaFont,
+          dscPath,
+          p12password,
+        );
+      } else {
+        const result = await print_signature_after_content_on_the_last_page(
+          pdfDoc,
+          pages[pages.length - 1],
+          document.path,
+          jpegImagePath,
+          userData.username,
+          formatDate(Date.now()),
+          remarks,
+          helveticaFont,
+          pythonEnvPath,
+          pythonScriptPath,
+          dscPath,
+          p12password,
+        );
+        finalPdfBytes = result.pdfBytes;
+        signatureCoordinates = result.coords;
+      }
+
+      // STEP 2: Database updates via Transaction
+      await prisma.$transaction(async (tx) => {
+        if (coordinates.length > 0) {
+          await tx.signCoordinate.updateMany({
+            where: {
+              processDocumentId: documentId.toString(),
+              page: { in: coordinates.map((c) => c.page) },
+            },
+            data: { isSigned: true, signedById: userData.id },
+          });
+        } else if (signatureCoordinates) {
+          await tx.signCoordinate.create({
+            data: {
+              processDocumentId: processDocument.id,
+              page: signatureCoordinates.newlyAdded
+                ? pages.length + 1
+                : pages.length,
+              x: signatureCoordinates.x,
+              y: signatureCoordinates.y,
+              width: signatureCoordinates.width,
+              height: signatureCoordinates.height,
+              stepId: currentStep?.id,
+              isSigned: true,
+              signedById: userData.id,
+            },
+          });
+        }
+
+        await tx.documentSignature.create({
+          data: {
+            processDocumentId: processDocument.id,
+            userId: userData.id,
+            processStepInstanceId: processStepInstanceId,
+            reason: remarks,
+          },
+        });
+      });
+
+      // STEP 3: Write File (Only reached if memory generation and DB succeed)
+      await fs.writeFile(absDocumentPath, finalPdfBytes);
+
+      const processResult = await is_process_forwardable(process, userData.id);
+      return res.status(200).json({
+        message: "Document signed successfully",
+        isForwardable: processResult.isForwardable,
+        isRevertable: processResult.isRevertable,
+      });
+    } finally {
+      releaseLock(); // ▼ NEW
+    }
   } catch (error) {
     console.error(error);
     res
@@ -407,6 +467,10 @@ export const sign_documents = async (req, res, next) => {
     const pythonEnvPath = path.join(__dirname, "../../support/venv/bin/python");
 
     for (const doc of documents) {
+      // ▼ NEW: one signer at a time per (process, user, document)
+      const releaseLock = await acquireSigningLock(
+        `${processId}:${userData.id}:${doc.documentId}`,
+      );
       try {
         const { documentId, processStepInstanceId, remarks = "N/A" } = doc;
         const document = await prisma.document.findUnique({
@@ -418,6 +482,22 @@ export const sign_documents = async (req, res, next) => {
           where: { processId, documentId },
         });
         if (!processDocument) throw new Error("Document not found in process");
+
+        // ▼ NEW: skip if this user already signed (same step, or within 2 min)
+        const duplicate = await findDuplicateSignature(
+          processDocument.id,
+          userData.id,
+          processStepInstanceId,
+        );
+        if (duplicate) {
+          results.push({
+            documentId,
+            documentName: document.name,
+            success: true,
+            message: "Already signed - skipped",
+          });
+          continue; // finally{} below still releases the lock
+        }
 
         const extension = document.name?.split(".").pop()?.toLowerCase();
         const isPdf = extension === "pdf";
@@ -546,6 +626,8 @@ export const sign_documents = async (req, res, next) => {
           error: error.message,
           success: false,
         });
+      } finally {
+        releaseLock(); // ▼ NEW
       }
     }
 
@@ -1054,7 +1136,8 @@ async function print_signature_after_content_on_the_last_page(
     absDocumentPath,
   );
 
-  const rotationAngle = lastPage.getRotation().angle;
+  // ▼ CHANGED: normalised (handles 360 / -90 etc.)
+  const rotationAngle = ((lastPage.getRotation().angle % 360) + 360) % 360;
   const isLandscape = rotationAngle === 90 || rotationAngle === 270;
 
   // Normalize dimensions to represent the visual layout
@@ -1078,8 +1161,13 @@ async function print_signature_after_content_on_the_last_page(
 
   let currentPage = lastPage;
   let rotation = rotationAngle;
+
+  // ▼ CHANGED: rotated pages ALWAYS get a fresh upright page (avoids
+  //   upside-down / overlapping signatures on rotated scans)
   let startY =
-    availableSpaceAtBottom > 150 ? availableSpaceAtBottom - SAFETY_MARGIN : -1;
+    rotationAngle === 0 && availableSpaceAtBottom > 150
+      ? availableSpaceAtBottom - SAFETY_MARGIN
+      : -1;
 
   // If there's no room, create a natively correctly-oriented page
   if (startY < 150) {
