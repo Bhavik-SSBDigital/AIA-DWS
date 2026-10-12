@@ -56,7 +56,11 @@ app.use(
 // 🌐 STRICT CORS CONFIGURATION
 // ==========================================
 const corsOptions = {
-  origin: ["http://localhost:3000", "https://ai-audit.aia.local"],
+  origin: [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://ai-audit.aia.local",
+  ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
   allowedHeaders: [
