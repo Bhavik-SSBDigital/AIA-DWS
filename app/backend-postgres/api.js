@@ -60,6 +60,7 @@ const corsOptions = {
     "http://localhost:3000",
     "http://localhost:3001",
     "https://ai-audit.aia.local",
+    "https://dws.ssbi.tech",
   ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
