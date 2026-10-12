@@ -93,6 +93,79 @@ const getContentTypeFromExtension = (extension) => {
   return mimeTypes[ext] || mimeTypes.default;
 };
 
+// ======================================================================
+// PDF ROTATION NORMALIZATION
+// Many scanned PDFs store their orientation as a /Rotate flag on the page.
+// Viewers honour it, but pdf-lib (page.getSize(), drawText, etc.) does not,
+// so stamping / watermarking breaks. This bakes /Rotate into the page so
+// every page ends up with /Rotate = 0 and the correct visual orientation.
+// ======================================================================
+export const normalizePdfRotation = async (inputBytes) => {
+  const src = await PDFDocument.load(inputBytes, { ignoreEncryption: true });
+  const srcPages = src.getPages();
+  const needs = srcPages.some(
+    (p) => ((p.getRotation().angle % 360) + 360) % 360 !== 0,
+  );
+  if (!needs) return { bytes: inputBytes, changed: false };
+
+  const out = await PDFDocument.create();
+  for (const page of srcPages) {
+    const rot = ((page.getRotation().angle % 360) + 360) % 360;
+    const embedded = await out.embedPage(page);
+    const w = embedded.width;
+    const h = embedded.height;
+
+    if (rot === 90) {
+      out.addPage([h, w]).drawPage(embedded, {
+        x: 0,
+        y: w,
+        width: w,
+        height: h,
+        rotate: degrees(-90),
+      });
+    } else if (rot === 180) {
+      out.addPage([w, h]).drawPage(embedded, {
+        x: w,
+        y: h,
+        width: w,
+        height: h,
+        rotate: degrees(180),
+      });
+    } else if (rot === 270) {
+      out.addPage([h, w]).drawPage(embedded, {
+        x: h,
+        y: 0,
+        width: w,
+        height: h,
+        rotate: degrees(90),
+      });
+    } else {
+      out.addPage([w, h]).drawPage(embedded, {
+        x: 0,
+        y: 0,
+        width: w,
+        height: h,
+      });
+    }
+  }
+  return { bytes: await out.save(), changed: true };
+};
+
+export const normalizePdfFileOnDisk = async (absolutePath) => {
+  try {
+    const original = await fs.readFile(absolutePath);
+    const { bytes, changed } = await normalizePdfRotation(original);
+    if (changed) await fs.writeFile(absolutePath, bytes);
+    return changed;
+  } catch (err) {
+    logger.warn({
+      action: "PDF_NORMALIZE_ROTATION_FAILED",
+      details: { path: absolutePath, error: err.message },
+    });
+    return false; // never block an upload because of this
+  }
+};
+
 const STORAGE_PATH = process.env.STORAGE_PATH;
 
 async function executeTextExtractionScript(filePath) {
@@ -310,6 +383,12 @@ export const file_upload = async (req, res) => {
     writableStream.on("finish", async () => {
       if (chunkNumber === totalChunks - 1) {
         try {
+          // ✅ ROTATION FIX: bake /Rotate into scanned PDFs before the
+          // DB update / indexing / stamping steps use the file.
+          if (fileExtension === "pdf") {
+            await normalizePdfFileOnDisk(saveTo);
+          }
+
           // ==========================================
           // 2. EXPLICIT REPLACEMENT COMPLETION
           // ==========================================
@@ -2599,7 +2678,9 @@ export const downloadWatermarkedFile = async (req, res) => {
 
     if (allowedExtensions.includes(ext)) {
       if (ext === ".pdf") {
-        const pdfBytes = await fs.readFile(absoluteFilePath);
+        // ✅ ROTATION FIX: normalize /Rotate so the watermark is centred correctly
+        const rawPdfBytes = await fs.readFile(absoluteFilePath);
+        const { bytes: pdfBytes } = await normalizePdfRotation(rawPdfBytes);
         const pdfDoc = await PDFDocument.load(pdfBytes);
         const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
         const pages = pdfDoc.getPages();
