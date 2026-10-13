@@ -2188,12 +2188,15 @@ const ViewProcess = () => {
                         </h4>
                       </div>
                       
+                      {/* DISPLAY-ONLY CHANGE: larger, darker text for readability.
+                          value / onChange / data sent to backend are unchanged. */}
                       <textarea
                         placeholder="Enter professional remarks here..."
                         value={doc.remarks || ''}
                         onChange={(e) => handleRemarkChange(index, e.target.value)}
-                        rows={3}
-                        className="w-full p-3 text-sm text-slate-700 bg-slate-50 border border-slate-300 rounded-md outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all resize-y min-h-[100px]"
+                        rows={4}
+                        style={{ fontSize: '18px', color: '#0f172a', lineHeight: 1.6 }}
+                        className="w-full p-3 text-lg font-medium text-slate-900 placeholder:text-slate-500 placeholder:font-normal bg-white border border-slate-400 rounded-md outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all resize-y min-h-[120px]"
                       />
                     </div>
                   ))}
