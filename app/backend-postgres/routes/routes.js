@@ -251,7 +251,6 @@ router.post("/login", login);
 router.get("/auto-login", autoLogin);
 router.post("/validate-auto-login", validateAutoLogin);
 router.post("/forgetPassword", forget_password);
-router.post("/changePassword", change_password);
 router.get("/files/:filePath(*)", file_though_url);
 
 // WOPI endpoints
@@ -287,6 +286,7 @@ router.use((req, res, next) => {
 // ==========================================
 router.post("/createAdmin", create_admin);
 router.use(requireAuth);
+router.post("/changePassword", change_password);
 
 // ==========================================
 // 👑 ADMIN-ONLY ROUTES
@@ -348,7 +348,7 @@ router.get(
 );
 
 router.get("/getUsers", requireAdmin, get_users);
-router.get("/getUsersWithDetails", get_users_with_details);
+router.get("/getUsersWithDetails", requireAdmin, get_users_with_details);
 
 router.get("/getUser/:userId", requireAdmin, get_user);
 router.put("/editUser/:userId", requireAdmin, edit_user);

@@ -12,7 +12,6 @@ import {
 } from '@mui/material';
 import { toast } from 'react-toastify';
 import { changePassword } from '../../common/Apis';
-import CryptoJS from 'crypto-js';
 
 const SignUp: React.FC = () => {
   const navigate = useNavigate();
@@ -76,13 +75,11 @@ const SignUp: React.FC = () => {
       setLoading(true);
 
       // VAPT FIX: Hash passwords before sending over network
-      const securePayload = {
-  username: data.username,
-  currentPassword: CryptoJS.AES.encrypt(data.currentPassword, import.meta.env.VITE_ENCRYPTION_KEY).toString(),
-  newPassword: CryptoJS.AES.encrypt(data.newPassword, import.meta.env.VITE_ENCRYPTION_KEY).toString(),
-};
-
-      const res = await changePassword(securePayload);
+      const payload = {
+        currentPassword: data.currentPassword,
+        newPassword: data.newPassword,
+      };
+      const res = await changePassword(payload);
       if (res.status === 200) {
         toast.success('Password Changed');
         navigate('/auth/signin');

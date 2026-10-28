@@ -16,7 +16,6 @@ import { IconEyeOff } from '@tabler/icons-react';
 import sessionData from '../../Store';
 import userSocket from '../Socket_Connection';
 import { signIn } from '../../common/Apis';
-import CryptoJS from 'crypto-js';
 
 const SignIn: React.FC = () => {
   const { setShow } = sessionData();
@@ -44,13 +43,7 @@ const SignIn: React.FC = () => {
     setLoading(true);
     e.preventDefault();
     try {
-      // VAPT FIX: Hash password before network transmission
-      const securePayload = {
-  ...data,
-  password: CryptoJS.AES.encrypt(data.password, import.meta.env.VITE_ENCRYPTION_KEY).toString(),
-};
-
-      const res = await signIn(securePayload);
+      const res = await signIn(data);
       if (res.status === 200) {
         // VAPT FIX #20: Use proper role checks instead of hardcoded username
         if (res.data.isAdmin || res.data.isRootUser) {

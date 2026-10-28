@@ -14,7 +14,6 @@ import {
 import { IconEye, IconEyeOff } from '@tabler/icons-react';
 import { toast } from 'react-toastify';
 import { changePassword } from '../../common/Apis'; 
-import CryptoJS from 'crypto-js';
 
 const ChangePassword: React.FC = () => {
   const navigate = useNavigate();
@@ -82,14 +81,11 @@ const ChangePassword: React.FC = () => {
 
     setLoading(true);
     try {
-      // VAPT FIX: Encrypt passwords using AES before network transmission
-      const securePayload = {
-        username: formData.username,
-        currentPassword: CryptoJS.AES.encrypt(formData.currentPassword, import.meta.env.VITE_ENCRYPTION_KEY).toString(),
-        newPassword: CryptoJS.AES.encrypt(formData.newPassword, import.meta.env.VITE_ENCRYPTION_KEY).toString(),
+      const payload = {
+        currentPassword: formData.currentPassword,
+        newPassword: formData.newPassword,
       };
-      
-      const response = await changePassword(securePayload);
+      const response = await changePassword(payload);
       toast.success(response?.data?.message || 'Password changed successfully');
       // Optionally logout or stay logged in
       setTimeout(() => navigate('/profile'), 1500);

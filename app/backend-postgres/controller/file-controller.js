@@ -1585,13 +1585,26 @@ export const file_though_url = async (req, res) => {
         .json({ message: "Unauthorized request: Missing token" });
     }
 
-    const STATIC_TOKEN =
-      process.env.STATIC_FILE_TOKEN || "SHARED_SECRET_STATIC_TOKEN_123";
+    const STATIC_TOKEN = process.env.STATIC_FILE_TOKEN;
+    if (!STATIC_TOKEN) {
+      return res
+        .status(503)
+        .json({ message: "File service is not configured" });
+    }
 
-    // ✅ STATIC TOKEN PATH: full absolute path, skip DB entirely
+    // Service token access remains limited to this dedicated file route.
     if (accessToken === STATIC_TOKEN) {
       const rawFilePathParam = req.params.filePath;
-      const absoluteFilePath = "/" + rawFilePathParam;
+      const storageRoot = path.resolve(__dirname, STORAGE_PATH || "../storage");
+      const absoluteFilePath = path.resolve("/", rawFilePathParam || "");
+      const relativeToStorage = path.relative(storageRoot, absoluteFilePath);
+      if (
+        !relativeToStorage ||
+        relativeToStorage.startsWith("..") ||
+        path.isAbsolute(relativeToStorage)
+      ) {
+        return res.status(404).json({ message: "File not found in storage" });
+      }
 
       try {
         await fs.access(absoluteFilePath);

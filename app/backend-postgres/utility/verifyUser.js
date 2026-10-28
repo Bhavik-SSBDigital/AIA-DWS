@@ -71,25 +71,13 @@ export const verifyUser = async (accessToken) => {
 // ✅ VAPT FIX #2: Middleware for Unauthorized API Endpoints Access
 // ✅ VAPT FIX #2: Middleware for Unauthorized API Endpoints Access
 export const requireAuth = async (req, res, next) => {
-  const token =
-    req.headers["authorization"]?.substring(7) ||
-    req.headers["x-authorization"]?.substring(7) ||
-    req.query.token;
+  const authorization = req.headers.authorization;
+  const token = authorization?.startsWith("Bearer ")
+    ? authorization.slice(7).trim()
+    : null;
 
   if (!token) {
     return res.status(401).json({ message: "Unauthorized request" });
-  }
-
-  // ✅ Static token bypass (for server-to-server calls e.g. audit server)
-  const STATIC_TOKEN = process.env.STATIC_FILE_TOKEN;
-  if (STATIC_TOKEN && token === STATIC_TOKEN) {
-    req.user = {
-      id: -1,
-      isAdmin: true,
-      isRootLevel: true,
-      username: "system_bypass",
-    };
-    return next();
   }
 
   // Normal JWT flow
@@ -109,7 +97,6 @@ export const requireAdmin = async (req, res, next) => {
     req.headers["x-authorization"]?.substring(7);
   const userData = await verifyUser(token);
 
-  console.log("user data", userData);
   if (
     userData === "Unauthorized" ||
     (!userData.isAdmin && !userData.isRootLevel)

@@ -4,7 +4,6 @@ import jwt from "jsonwebtoken";
 import { verifyUser } from "../utility/verifyUser.js";
 import ExcelJS from "exceljs";
 import { sendUserEmail } from "../services/emailService.js";
-import CryptoJS from "crypto-js"; // ✅ Added CryptoJS for decryption
 
 import prisma from "../config/prisma-config.js";
 
@@ -121,30 +120,13 @@ export const login = async (req, res) => {
       include: { tokens: true, roles: true },
     });
 
-    console.log("user", user);
-
     if (!user) {
       return res.status(401).json({ message: "Invalid username or password" });
     }
 
-    // ✅ VAPT FIX: Decrypt the AES encrypted password from frontend
-    let plainTextPassword;
-    try {
-      const bytes = CryptoJS.AES.decrypt(
-        password,
-        process.env.FRONTEND_ENCRYPTION_KEY,
-      );
-      plainTextPassword = bytes.toString(CryptoJS.enc.Utf8);
-      if (!plainTextPassword)
-        throw new Error("Decryption resulted in empty string");
-    } catch (err) {
-      return res
-        .status(400)
-        .json({ message: "Invalid encrypted password payload" });
-    }
-
-    // Pass the decrypted text to bcrypt
-    const match = await bcrypt.compare(plainTextPassword, user.password);
+    // The browser sends the password over HTTPS. It is never encrypted with
+    // a key shipped in the frontend bundle; bcrypt comparison stays server-side.
+    const match = await bcrypt.compare(password, user.password);
 
     if (!match) {
       await prisma.loginLog.create({
@@ -475,58 +457,41 @@ export const forget_password = async (req, res) => {
 
 export const change_password = async (req, res) => {
   try {
-    const { username, currentPassword, newPassword } = req.body;
+    const { currentPassword, newPassword } = req.body || {};
+    const userId = req.user?.id;
 
-    // ✅ VAPT FIX: Serverside Validation & Decryption
     if (
-      !username ||
-      typeof username !== "string" ||
-      !currentPassword ||
-      !newPassword
+      !userId ||
+      typeof currentPassword !== "string" ||
+      typeof newPassword !== "string"
     ) {
       return res.status(400).json({ message: "Invalid input." });
     }
-
-    let plainCurrent, plainNew;
-    try {
-      plainCurrent = CryptoJS.AES.decrypt(
-        currentPassword,
-        process.env.FRONTEND_ENCRYPTION_KEY,
-      ).toString(CryptoJS.enc.Utf8);
-      plainNew = CryptoJS.AES.decrypt(
-        newPassword,
-        process.env.FRONTEND_ENCRYPTION_KEY,
-      ).toString(CryptoJS.enc.Utf8);
-
-      if (!plainCurrent || !plainNew) throw new Error("Decryption failed");
-    } catch (err) {
-      console.log("error changing password", err);
+    if (newPassword.length < 8 || newPassword.length > 128) {
       return res
         .status(400)
-        .json({ message: "Invalid encrypted password payload" });
+        .json({ message: "New password must be 8 to 128 characters long." });
     }
 
-    if (plainNew.length < 8) {
-      return res
-        .status(400)
-        .json({ message: "New password must be at least 8 characters long." });
+    const user = await prisma.user.findUnique({
+      where: { id: Number(userId) },
+    });
+    if (!user) return res.status(401).json({ message: "Unauthorized request" });
+
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password,
+    );
+    if (!isPasswordValid) {
+      return res.status(400).json({ message: "Current password is incorrect" });
     }
-
-    const user = await prisma.user.findUnique({ where: { username } });
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    const isPasswordValid = await bcrypt.compare(plainCurrent, user.password);
-    if (!isPasswordValid)
-      return res.status(401).json({ message: "Current password is incorrect" });
-
-    if (plainCurrent === plainNew) {
+    if (currentPassword === newPassword) {
       return res.status(400).json({
         message: "New password must be different from current password",
       });
     }
 
-    const hashedPassword = await bcrypt.hash(plainNew, 10);
-
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
     await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: user.id },
@@ -535,7 +500,7 @@ export const change_password = async (req, res) => {
       await tx.token.deleteMany({ where: { userId: user.id } });
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       message:
         "Password changed successfully. You have been logged out of all other sessions.",
     });

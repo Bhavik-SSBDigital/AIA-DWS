@@ -3162,6 +3162,7 @@ export const attach_po_numbers = async (req, res) => {
         syncPayload,
         {
           timeout: 15000,
+          headers: { "X-DWS-Sync-Token": process.env.DWS_SYNC_TOKEN || "" },
           httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         },
       );
@@ -3330,6 +3331,7 @@ export const sync_missing_po_data = async (req, res) => {
         syncPayload,
         {
           timeout: 15000,
+          headers: { "X-DWS-Sync-Token": process.env.DWS_SYNC_TOKEN || "" },
           httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         },
       );
@@ -3511,6 +3513,7 @@ export const mass_sync_po_data = async (req, res) => {
           syncPayload,
           {
             timeout: 15000,
+            headers: { "X-DWS-Sync-Token": process.env.DWS_SYNC_TOKEN || "" },
             httpsAgent: new https.Agent({ rejectUnauthorized: false }),
           },
         );
@@ -3689,6 +3692,7 @@ export const get_po_inspection_data = async (req, res) => {
         { poNumbers: allPoNumbers },
         {
           timeout: 10000,
+          headers: { "X-DWS-Sync-Token": process.env.DWS_SYNC_TOKEN || "" },
           httpsAgent: new https.Agent({ rejectUnauthorized: false }),
         },
       );
