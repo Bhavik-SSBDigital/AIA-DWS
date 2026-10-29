@@ -2,6 +2,19 @@ import jwt from "jsonwebtoken";
 
 import prisma from "../config/prisma-config.js";
 
+// Reads the Bearer token from either "authorization" or "x-authorization".
+// The frontend upload / file-data / WOPI calls send "x-authorization",
+// while most other calls send "authorization". Both must be accepted,
+// otherwise requireAuth rejects valid requests with 401.
+export const extractBearerToken = (req) => {
+  const header = req.headers["authorization"] || req.headers["x-authorization"];
+  if (!header || typeof header !== "string" || !header.startsWith("Bearer ")) {
+    return null;
+  }
+  const token = header.slice(7).trim();
+  return token || null;
+};
+
 // Verify User Function
 export const verifyUser = async (accessToken) => {
   try {
@@ -69,59 +82,67 @@ export const verifyUser = async (accessToken) => {
 };
 
 // ✅ VAPT FIX #2: Middleware for Unauthorized API Endpoints Access
-// ✅ VAPT FIX #2: Middleware for Unauthorized API Endpoints Access
+// Accepts both "authorization" and "x-authorization" headers.
 export const requireAuth = async (req, res, next) => {
-  const authorization = req.headers.authorization;
-  const token = authorization?.startsWith("Bearer ")
-    ? authorization.slice(7).trim()
-    : null;
+  try {
+    const token = extractBearerToken(req);
 
-  if (!token) {
+    if (!token) {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    const userData = await verifyUser(token);
+    if (userData === "Unauthorized") {
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
+    req.user = userData;
+    next();
+  } catch (error) {
     return res.status(401).json({ message: "Unauthorized request" });
   }
-
-  // Normal JWT flow
-  const userData = await verifyUser(token);
-  if (userData === "Unauthorized") {
-    return res.status(401).json({ message: "Unauthorized request" });
-  }
-
-  req.user = userData;
-  next();
 };
 
 // ✅ VAPT FIX #5: Middleware for Unauthorized access of File Logs
 export const requireAdmin = async (req, res, next) => {
-  const token =
-    req.headers["authorization"]?.substring(7) ||
-    req.headers["x-authorization"]?.substring(7);
-  const userData = await verifyUser(token);
+  try {
+    const token = extractBearerToken(req);
+    const userData = await verifyUser(token);
 
-  if (
-    userData === "Unauthorized" ||
-    (!userData.isAdmin && !userData.isRootLevel)
-  ) {
+    if (
+      userData === "Unauthorized" ||
+      (!userData.isAdmin && !userData.isRootLevel)
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Forbidden: Admin access required" });
+    }
+
+    req.user = userData;
+    next();
+  } catch (error) {
     return res
       .status(403)
       .json({ message: "Forbidden: Admin access required" });
   }
-
-  req.user = userData;
-  next();
 };
 
 export const requireStrictAdmin = async (req, res, next) => {
-  const token =
-    req.headers["authorization"]?.substring(7) ||
-    req.headers["x-authorization"]?.substring(7);
-  const userData = await verifyUser(token);
+  try {
+    const token = extractBearerToken(req);
+    const userData = await verifyUser(token);
 
-  if (userData === "Unauthorized" || !userData.isAdmin) {
+    if (userData === "Unauthorized" || !userData.isAdmin) {
+      return res
+        .status(403)
+        .json({ message: "Forbidden: Admin access required" });
+    }
+
+    req.user = userData;
+    next();
+  } catch (error) {
     return res
       .status(403)
       .json({ message: "Forbidden: Admin access required" });
   }
-
-  req.user = userData;
-  next();
 };

@@ -198,10 +198,22 @@ async function executeTextExtractionScript(filePath) {
 }
 
 export const file_upload = async (req, res) => {
-  const accessToken = req.headers["x-authorization"]?.substring(7);
-  const userData = await verifyUser(accessToken);
+  // requireAuth (global gateway) already verified the token and set req.user.
+  let userData = req.user;
 
   try {
+    if (!userData) {
+      const authHeader =
+        req.headers["authorization"] || req.headers["x-authorization"];
+      userData = await verifyUser(authHeader?.substring(7));
+    }
+
+    if (!userData || userData === "Unauthorized") {
+      logger.warn({ action: "FILE_UPLOAD_UNAUTHORIZED" });
+      req.resume(); // drain body so the client does not hang
+      return res.status(401).json({ message: "Unauthorized request" });
+    }
+
     // ✅ VAPT FIX #15: Path Traversal Prevention
     // Sanitize the incoming file name so it cannot navigate directories
     const rawUploadedFileName = decodeURIComponent(req.headers["x-file-name"]);
@@ -220,14 +232,6 @@ export const file_upload = async (req, res) => {
         totalChunks,
       },
     });
-
-    if (userData === "Unauthorized") {
-      logger.warn({
-        action: "FILE_UPLOAD_UNAUTHORIZED",
-        details: { accessToken },
-      });
-      return res.status(401).json({ message: "Unauthorized request" });
-    }
 
     // ✅ VAPT FIX #7 & #14: Unrestricted File Upload / XSS Prevention
     const ALLOWED_EXTENSIONS = new Set([
@@ -263,7 +267,7 @@ export const file_upload = async (req, res) => {
     }
 
     const chunkSize = parseInt(req.headers["x-chunk-size"]);
-    let isInvolvedInProcess = Boolean(req.headers["x-involved-in-process"]);
+    let isInvolvedInProcess = req.headers["x-involved-in-process"] === "true";
     let tags = req.headers["x-tags"] ? req.headers["x-tags"].split(",") : [];
     let departmentName = req.headers["x-department-name"];
     let documentId = req.headers["x-file-id"];
