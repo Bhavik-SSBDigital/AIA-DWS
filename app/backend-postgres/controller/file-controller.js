@@ -197,7 +197,12 @@ async function executeTextExtractionScript(filePath) {
   }
 }
 
+const dbgUp = (...args) => {
+  if (process.env.DEBUG_AUTH === "true") console.log("[DBG][UPLOAD]", ...args);
+};
+
 export const file_upload = async (req, res) => {
+  const __dbgStart = Date.now();
   // requireAuth (global gateway) already verified the token and set req.user.
   let userData = req.user;
 
@@ -207,6 +212,17 @@ export const file_upload = async (req, res) => {
         req.headers["authorization"] || req.headers["x-authorization"];
       userData = await verifyUser(authHeader?.substring(7));
     }
+
+    dbgUp("handler entered", {
+      userFromMiddleware: !!req.user,
+      user: userData && userData.username,
+      fileName: req.headers["x-file-name"],
+      chunk: `${req.headers["x-current-chunk"]}/${req.headers["x-total-chunks"]}`,
+      chunkSize: req.headers["x-chunk-size"],
+      filePath: req.headers["x-file-path"],
+      fileId: req.headers["x-file-id"],
+      contentLength: req.headers["content-length"],
+    });
 
     if (!userData || userData === "Unauthorized") {
       logger.warn({ action: "FILE_UPLOAD_UNAUTHORIZED" });
@@ -377,6 +393,22 @@ export const file_upload = async (req, res) => {
       }
     }
 
+    dbgUp("about to write", {
+      saveTo,
+      targetPath,
+      STORAGE_PATH,
+      dirExists: fsCB.existsSync(path.dirname(saveTo)),
+      replaced: fileReplaced,
+      chunkNumber,
+    });
+    req.on("aborted", () =>
+      dbgUp("req ABORTED by client/proxy after", Date.now() - __dbgStart, "ms"),
+    );
+    req.on("error", (e) => dbgUp("req stream ERROR", e.message));
+    req.on("end", () =>
+      dbgUp("req body fully received", Date.now() - __dbgStart, "ms"),
+    );
+
     const writableStream = fsCB.createWriteStream(saveTo, {
       flags: fileReplaced && chunkNumber === 0 ? "w" : "a+",
       start: chunkNumber * chunkSize,
@@ -385,6 +417,11 @@ export const file_upload = async (req, res) => {
     req.pipe(writableStream);
 
     writableStream.on("finish", async () => {
+      dbgUp("disk write finished", {
+        chunkNumber,
+        totalChunks,
+        ms: Date.now() - __dbgStart,
+      });
       if (chunkNumber === totalChunks - 1) {
         try {
           // ✅ ROTATION FIX: bake /Rotate into scanned PDFs before the
@@ -551,6 +588,7 @@ export const file_upload = async (req, res) => {
             replaced: fileReplaced,
           });
         } catch (err) {
+          dbgUp("FINALISE ERROR (db/pdf/permissions):", err.message, err.stack);
           logger.error({
             action: "FILE_UPLOAD_DB_ERROR",
             userId: userData.id,
@@ -573,6 +611,7 @@ export const file_upload = async (req, res) => {
     });
 
     writableStream.on("error", (err) => {
+      dbgUp("WRITE STREAM ERROR:", err.code, err.message);
       logger.error({
         action: "FILE_UPLOAD_WRITE_ERROR",
         userId: userData.id,
@@ -581,6 +620,7 @@ export const file_upload = async (req, res) => {
       res.status(500).send("Error writing the file.");
     });
   } catch (error) {
+    dbgUp("OUTER CATCH ERROR:", error.message, error.stack);
     logger.error({
       action: "FILE_UPLOAD_ERROR",
       userId: userData?.id,

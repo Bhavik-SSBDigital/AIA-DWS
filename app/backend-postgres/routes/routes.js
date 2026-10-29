@@ -204,6 +204,36 @@ import { saveDescriptionDocument } from "../controller/description-controller.js
 const router = express.Router();
 
 // ==========================================
+// DEBUG REQUEST TRACER (remove or set DEBUG_AUTH=false when done)
+// Logs every request that reaches Express, and its final status.
+// If /upload returns 401 but NO "[DBG][REQ] -> POST /upload" line appears,
+// the 401 is coming from nginx / load balancer / WAF, not this app.
+// ==========================================
+router.use((req, res, next) => {
+  if (process.env.DEBUG_AUTH !== "true") return next();
+  const start = Date.now();
+  const h = req.headers;
+  console.log(
+    `[DBG][REQ] -> ${req.method} ${req.originalUrl} ip=${h["x-forwarded-for"] || req.ip}` +
+      ` auth=${h["authorization"] ? "yes(" + String(h["authorization"]).slice(0, 7) + "...)" : "no"}` +
+      ` x-auth=${h["x-authorization"] ? "yes(" + String(h["x-authorization"]).slice(0, 7) + "...)" : "no"}` +
+      ` content-length=${h["content-length"] || "-"} content-type=${h["content-type"] || "-"}`,
+  );
+  res.on("finish", () =>
+    console.log(
+      `[DBG][REQ] <- ${req.method} ${req.originalUrl} status=${res.statusCode} ${Date.now() - start}ms`,
+    ),
+  );
+  res.on("close", () => {
+    if (!res.writableEnded)
+      console.log(
+        `[DBG][REQ] !! ${req.method} ${req.originalUrl} connection CLOSED before response (client aborted / proxy timeout) ${Date.now() - start}ms`,
+      );
+  });
+  next();
+});
+
+// ==========================================
 // 🚀 SPA BROWSER RELOAD HANDLER (THE FIX)
 // ==========================================
 // This checks if the request is a browser navigating to a URL (requesting HTML).

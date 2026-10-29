@@ -2,6 +2,11 @@ import jwt from "jsonwebtoken";
 
 import prisma from "../config/prisma-config.js";
 
+// ---- DEBUG helper: enable with DEBUG_AUTH=true in .env, then restart ----
+const dbg = (...args) => {
+  if (process.env.DEBUG_AUTH === "true") console.log("[DBG][AUTH]", ...args);
+};
+
 // Reads the Bearer token from either "authorization" or "x-authorization".
 // The frontend upload / file-data / WOPI calls send "x-authorization",
 // while most other calls send "authorization". Both must be accepted,
@@ -18,9 +23,18 @@ export const extractBearerToken = (req) => {
 // Verify User Function
 export const verifyUser = async (accessToken) => {
   try {
-    if (!accessToken) return "Unauthorized";
+    if (!accessToken) {
+      dbg("verifyUser: REJECT -> no token passed in");
+      return "Unauthorized";
+    }
 
     const decodedData = jwt.verify(accessToken, process.env.SECRET_ACCESS_KEY);
+    dbg("verifyUser: jwt ok", {
+      id: decodedData.id,
+      userId: decodedData.userId,
+      iat: decodedData.iat && new Date(decodedData.iat * 1000).toISOString(),
+      exp: decodedData.exp && new Date(decodedData.exp * 1000).toISOString(),
+    });
 
     // Fetch full user details from the database
     const user = decodedData.id
@@ -32,6 +46,10 @@ export const verifyUser = async (accessToken) => {
         });
 
     if (!user) {
+      dbg("verifyUser: REJECT -> user not found in DB for token", {
+        id: decodedData.id,
+        userId: decodedData.userId,
+      });
       throw new Error("User not found");
     }
 
@@ -45,12 +63,17 @@ export const verifyUser = async (accessToken) => {
         console.warn(
           "Token invalidated: Issued before recent password change.",
         );
+        dbg("verifyUser: REJECT -> token issued before passwordChangedAt", {
+          tokenIssuedAt: new Date(tokenIssuedAt).toISOString(),
+          passwordChangedAt: new Date(passwordChangedTime).toISOString(),
+        });
         return "Unauthorized";
       }
     }
 
     // Prevent deactivated users from accessing the system
     if (user.status === "Inactive") {
+      dbg("verifyUser: REJECT -> user is Inactive", user.username);
       return "Unauthorized";
     }
 
@@ -76,7 +99,10 @@ export const verifyUser = async (accessToken) => {
       ...decodedData, // Include additional token properties, if needed
     };
   } catch (error) {
-    console.log("Error verifying user:", error);
+    // error.name tells you why: TokenExpiredError, JsonWebTokenError (bad signature /
+    // wrong SECRET_ACCESS_KEY / malformed), NotBeforeError, or a Prisma/DB error.
+    console.log("Error verifying user:", error.name, "-", error.message);
+    dbg("verifyUser: REJECT -> exception", error.name, error.message);
     return "Unauthorized";
   }
 };
@@ -86,19 +112,31 @@ export const verifyUser = async (accessToken) => {
 export const requireAuth = async (req, res, next) => {
   try {
     const token = extractBearerToken(req);
+    dbg(`requireAuth ${req.method} ${req.originalUrl}`, {
+      hasAuthorization: !!req.headers["authorization"],
+      hasXAuthorization: !!req.headers["x-authorization"],
+      tokenFound: !!token,
+      tokenLength: token ? token.length : 0,
+    });
 
     if (!token) {
+      dbg(
+        "requireAuth: 401 -> no Bearer token in authorization / x-authorization",
+      );
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
     const userData = await verifyUser(token);
     if (userData === "Unauthorized") {
+      dbg("requireAuth: 401 -> verifyUser rejected (see reason line above)");
       return res.status(401).json({ message: "Unauthorized request" });
     }
 
+    dbg("requireAuth: OK", userData.username, "admin=" + userData.isAdmin);
     req.user = userData;
     next();
   } catch (error) {
+    dbg("requireAuth: 401 -> exception", error.name, error.message);
     return res.status(401).json({ message: "Unauthorized request" });
   }
 };
