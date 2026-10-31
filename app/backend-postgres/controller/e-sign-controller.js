@@ -1264,7 +1264,9 @@ export async function print_signature_after_content_on_the_last_page(
   const startingYFromTop = lastContentCoordinates.last_y || pageHeight;
   const availableSpaceAtBottom = Math.max(0, pageHeight - startingYFromTop);
 
-  const signatureImageBytes = await fs.readFile(jpegImagePath);
+  // CHANGED: copy into a fresh Uint8Array. Small files read into a pooled Buffer make
+  // pdf-lib fail with "SOI not found in JPEG".
+  const signatureImageBytes = new Uint8Array(await fs.readFile(jpegImagePath));
   const signatureImage = await pdfDoc.embedJpg(signatureImageBytes);
 
   const signatureImageWidth = 200;
@@ -1438,7 +1440,8 @@ export async function print_signature_at_coordinates(
   p12Path,
   p12password,
 ) {
-  const signatureImageBytes = await readFileSync(jpegImagePath); // Use sync or await fs.readFile
+  // CHANGED: readFileSync returned a pooled Buffer for small images -> "SOI not found in JPEG".
+  const signatureImageBytes = new Uint8Array(await fs.readFile(jpegImagePath));
   const signatureImage = await pdfDoc.embedJpg(signatureImageBytes);
 
   for (const coord of coordinates) {
