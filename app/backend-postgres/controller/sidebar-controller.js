@@ -1,5 +1,3 @@
-import { verifyUser } from "../utility/verifyUser.js";
-
 // Note: If you have a centralized prisma client instance (e.g., in utility/prisma.js),
 // import that instead of instantiating a new one here.
 import prisma from "../config/prisma-config.js";
@@ -55,10 +53,9 @@ const DEFAULT_CONFIG = {
 
 export const get_sidebar_config = async (req, res) => {
   try {
-    const accessToken = req.headers["authorization"]?.substring(7);
-    const userData = await verifyUser(accessToken);
-
-    if (userData === "Unauthorized") {
+    // The route's requireAuth middleware verifies both Authorization and
+    // x-authorization bearer headers and attaches the authenticated user.
+    if (!req.user) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
@@ -79,17 +76,10 @@ export const get_sidebar_config = async (req, res) => {
 
 export const save_sidebar_config = async (req, res) => {
   try {
-    const accessToken = req.headers["authorization"]?.substring(7);
-    const userData = await verifyUser(accessToken);
-
-    if (userData === "Unauthorized") {
+    // requireAdmin verifies the bearer token and the admin/root role.
+    const userData = req.user;
+    if (!userData) {
       return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    if (!userData.isAdmin && !userData.isRootLevel) {
-      return res
-        .status(403)
-        .json({ message: "Forbidden: Admin privileges required" });
     }
 
     const { config } = req.body;

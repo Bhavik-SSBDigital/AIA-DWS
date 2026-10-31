@@ -527,8 +527,10 @@ router.post("/addRequestMessage/:id", add_request_message);
 router.post("/getProjects", getRootDocumentsWithAccess);
 router.post("/getRootDocumentsForEdit", requireAdmin, getRootDocumentsForEdit);
 
-router.get("/sidebar-config", get_sidebar_config);
-router.post("/sidebar-config", save_sidebar_config);
+// Keep explicit route-level checks as defense in depth even though the
+// authenticated-user section above is already behind router.use(requireAuth).
+router.get("/sidebar-config", requireAuth, get_sidebar_config);
+router.post("/sidebar-config", requireAdmin, save_sidebar_config);
 
 router.get("/getNumbers", getNumbers);
 router.get("/getDetails", getDetails);

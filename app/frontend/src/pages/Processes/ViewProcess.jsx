@@ -346,6 +346,37 @@ const ViewProcess = () => {
           return signAllModalOpen.withRemarks ? { ...rest, remarks } : rest;
         }),
       );
+      // CHANGED: a partial failure (HTTP 207) must never look like success.
+      // Do NOT complete the step; mark only the documents that really signed.
+      const failedIds = res?.data?.failedDocumentIds || [];
+      if (failedIds.length > 0) {
+        const failedNames = signAllModalOpen.listOfDocuments
+          .filter((d) => failedIds.includes(d.documentId))
+          .map((d) => d.name || d.documentId)
+          .join(', ');
+        toast.error(
+          `Signing failed for ${failedIds.length} document(s): ${failedNames}. ` +
+            'The step was NOT completed. Please retry or contact support.',
+          { autoClose: false },
+        );
+        setProcess((prev) => ({
+          ...prev,
+          documents: prev.documents.map((doc) =>
+            signAllModalOpen.listOfDocuments.some(
+              (y) => y.documentId === doc.id,
+            ) && !failedIds.includes(doc.id)
+              ? {
+                  ...doc,
+                  signedBy: [
+                    ...doc?.signedBy,
+                    { signedBy: username, remarks: '' },
+                  ],
+                }
+              : doc,
+          ),
+        }));
+        return;
+      }
       toast.success(res?.data?.message);
       await handleCompleteProcess(signAllModalOpen.stepId);
       setProcess((prev) => ({
