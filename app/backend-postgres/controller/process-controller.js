@@ -3,7 +3,7 @@ import axios from "axios";
 import { appendDescriptionToPdf } from "../utility/pdf-description.js";
 import FTPClient from "ftp";
 import pkg from "@prisma/client";
-import { executePythonScript } from "./e-sign-controller.js";
+import { executePythonScript, loadPdfSafely } from "./e-sign-controller.js";
 import { file_copy, delete_file } from "./file-controller.js";
 import { createFolder } from "./file-controller.js";
 import { fileURLToPath } from "url";
@@ -790,9 +790,13 @@ export const initiate_process = async (req, res, next) => {
                   elapsedMs: Date.now() - docStartTime,
                 });
 
-                const pdfDoc = await PDFDocument.load(existingPdfBytes, {
-                  ignoreEncryption: true,
-                });
+                // CHANGED: loadPdfSafely heals linearized/hybrid PDFs (e.g. TallyPrime)
+                // that plain PDFDocument.load reads as 0 pages.
+                const pdfDoc = await loadPdfSafely(
+                  existingPdfBytes,
+                  absolutePath,
+                  pythonEnvPath,
+                );
                 console.log("[initiate_process] step: PDFDocument.load done", {
                   documentId: docObj.newDocId,
                   elapsedMs: Date.now() - docStartTime,
