@@ -301,22 +301,33 @@ router.post("/wopi/token/:fileId", getWopiToken);
 // ==========================================
 router.use((req, res, next) => {
   res.removeHeader("X-Powered-By");
-  res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("X-XSS-Protection", "1; mode=block");
-  res.setHeader(
-    "Strict-Transport-Security",
-    "max-age=31536000; includeSubDomains",
-  );
   next();
 });
 
 // ==========================================
 // 🔒 GLOBAL AUTHENTICATION GATEWAY
 // ==========================================
+const changePasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.user.id),
+  handler: (req, res) => {
+    console.warn("[changePassword] rate limit exceeded", {
+      requestId: req.requestId || "unknown",
+      userId: req.user.id,
+    });
+    res.status(429).json({
+      message: "Too many password-change attempts. Please try again later.",
+    });
+  },
+});
+
 router.post("/createAdmin", create_admin);
 router.use(requireAuth);
-router.post("/changePassword", change_password);
+router.post("/changePassword", changePasswordLimiter, change_password);
 
 // ==========================================
 // 👑 ADMIN-ONLY ROUTES

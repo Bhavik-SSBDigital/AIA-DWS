@@ -45,6 +45,10 @@ app.disable("x-powered-by");
 app.use(
   helmet({
     contentSecurityPolicy: false,
+    hsts: false,
+    referrerPolicy: false,
+    noSniff: false,
+    xssFilter: false,
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
     crossOriginOpenerPolicy: false,
@@ -60,7 +64,7 @@ const corsOptions = {
     "http://localhost:3000",
     "http://localhost:3001",
     "https://ai-audit.aia.local",
-    "https://dws.ssbi.tech",
+    "https://dwsauditprd.aia-engineering.com",
   ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],

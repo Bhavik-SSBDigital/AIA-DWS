@@ -476,14 +476,30 @@ export const change_password = async (req, res) => {
     const user = await prisma.user.findUnique({
       where: { id: Number(userId) },
     });
-    if (!user) return res.status(401).json({ message: "Unauthorized request" });
+    if (!user) {
+      console.warn("[changePassword] account lookup failed", {
+        requestId: req.requestId || "unknown",
+        userId,
+      });
+      return res.status(400).json({
+        message:
+          "Unable to change password. Verify your current credentials and try again.",
+      });
+    }
 
     const isPasswordValid = await bcrypt.compare(
       currentPassword,
       user.password,
     );
     if (!isPasswordValid) {
-      return res.status(400).json({ message: "Current password is incorrect" });
+      console.warn("[changePassword] rejected", {
+        requestId: req.requestId || "unknown",
+        userId,
+      });
+      return res.status(400).json({
+        message:
+          "Unable to change password. Verify your current credentials and try again.",
+      });
     }
     if (currentPassword === newPassword) {
       return res.status(400).json({

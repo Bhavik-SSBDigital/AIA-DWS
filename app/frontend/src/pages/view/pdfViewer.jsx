@@ -2,8 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import 'react-pdf/dist/esm/Page/TextLayer.css';
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
 
 import {
   IconZoomIn,
@@ -17,7 +17,10 @@ import { toast } from 'react-toastify';
 import CustomCard from '../../CustomComponents/CustomCard';
 
 // Setup PDF worker
-pdfjs.GlobalWorkerOptions.workerSrc = '/worker.js';
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
 
 export default function PdfContainer({ url, contentHigh, refPage, onClose }) {
   const [numPages, setNumPages] = useState(null);
@@ -203,6 +206,7 @@ export default function PdfContainer({ url, contentHigh, refPage, onClose }) {
       >
         <Document
           file={url}
+          options={{ isEvalSupported: false }}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={(e) => {
             console.error(e);
