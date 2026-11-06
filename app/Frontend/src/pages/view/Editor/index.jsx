@@ -64,19 +64,24 @@ const Editor = ({
 
         // Fetch Collabora discovery XML
 
-        const discoveryResponse = await axios.get(
-          `${backend_url}/hosting/discovery`,
-          {
-            headers: {
-              Origin: `${backend_url}`,
-              'Access-Control-Request-Method': 'GET',
-              'Access-Control-Request-Headers': 'content-type',
-            },
-            withCredentials: false,
-          },
-        );
+        // const discoveryResponse = await axios.get(
+        //   `${backend_url}/hosting/discovery`,
+        //   {
+        //     headers: {
+        //       Origin: `${backend_url}`,
+        //       'Access-Control-Request-Method': 'GET',
+        //       'Access-Control-Request-Headers': 'content-type',
+        //     },
+        //     withCredentials: false,
+        //   },
+        // );
 
-        console.log("discovery response", discoveryResponse)
+        const discoveryResponse = await axios.get(
+  `${backend_url}/hosting/discovery`,
+  { withCredentials: false },
+);
+
+
 
         // Parse the XML string
         const parser = new DOMParser();
