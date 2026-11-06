@@ -2,30 +2,51 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 
-const Editor = ({ documentId, fileType, accessToken, onError, readOnly = false }) => {
+const Editor = ({
+  documentId,
+  fileType,
+  accessToken,
+  onError,
+  readOnly = false,
+}) => {
   const [editorUrl, setEditorUrl] = useState('');
+  const backendUrl = import.meta.env.VITE_BACKEND_URL?.replace(/\/+$/, '');
 
   useEffect(() => {
     const fetchEditorUrl = async () => {
       try {
-        const tokenResponse = await axios.get(`http://localhost:8000/wopi/token/${documentId}`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
+        if (!backendUrl) {
+          throw new Error('VITE_BACKEND_URL is not configured');
+        }
+
+        const tokenResponse = await axios.get(
+          `${backendUrl}/wopi/token/${documentId}`,
+          {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          },
+        );
         const wopiToken = tokenResponse.data.access_token;
 
-
-        const discoveryResponse = await axios.get(`http://localhost:8000/wopi/discovery`);
+        const discoveryResponse = await axios.get(
+          `${backendUrl}/wopi/discovery`,
+        );
 
         const action = discoveryResponse.data.actions.find(
-          action => action.name === (readOnly ? 'view' : 'edit') && action.ext === fileType.toLowerCase()
+          (item) =>
+            item.name === (readOnly ? 'view' : 'edit') &&
+            item.ext === fileType.toLowerCase(),
         );
 
         if (!action) {
-          throw new Error(`No ${readOnly ? 'view' : 'edit'} action found for file type: ${fileType}`);
+          throw new Error(
+            `No ${readOnly ? 'view' : 'edit'} action found for file type: ${fileType}`,
+          );
         }
 
-        const wopiSrc = `http://localhost:8000/wopi/files/${documentId}`;
-        const url = `${action.url}WOPISrc=${encodeURIComponent(wopiSrc)}&access_token=${encodeURIComponent(wopiToken)}`;
+        const wopiSrc = `${backendUrl}/wopi/files/${documentId}`;
+        const url =
+          `${action.url}WOPISrc=${encodeURIComponent(wopiSrc)}` +
+          `&access_token=${encodeURIComponent(wopiToken)}`;
 
         setEditorUrl(url);
       } catch (err) {
@@ -36,13 +57,16 @@ const Editor = ({ documentId, fileType, accessToken, onError, readOnly = false }
     };
 
     if (documentId && accessToken && fileType) {
-      // console.log('Editor.jsx: Starting editor fetch:', { documentId, fileType, readOnly });
       fetchEditorUrl();
     } else {
-      console.error('Editor.jsx: Missing required props:', { documentId, accessToken, fileType });
+      console.error('Editor.jsx: Missing required props:', {
+        documentId,
+        accessToken,
+        fileType,
+      });
       toast.error('Editor configuration error');
     }
-  }, [documentId, accessToken, fileType, onError, readOnly]);
+  }, [documentId, accessToken, fileType, onError, readOnly, backendUrl]);
 
   if (!editorUrl) {
     return <div>Loading Collabora Online editor...</div>;

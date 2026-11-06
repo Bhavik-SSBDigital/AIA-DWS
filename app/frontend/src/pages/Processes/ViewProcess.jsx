@@ -219,7 +219,7 @@ const ViewProcess = () => {
         response?.data?.process?.documents.map(async (doc) => {
           try {
             await axios.get(
-              `http://localhost:${process.env.REACT_APP_API_PORT || 8000}/wopi/token/${doc.id}`,
+              `${import.meta.env.VITE_BACKEND_URL.replace(/\/+$/, '')}/wopi/token/${doc.id}`,
               {
                 headers: {
                   Authorization: `Bearer ${localStorage.getItem('token')}`,
