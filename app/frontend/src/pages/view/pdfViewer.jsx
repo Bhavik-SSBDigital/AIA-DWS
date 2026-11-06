@@ -22,6 +22,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString();
 
+
+const PDF_OPTIONS = Object.freeze({ isEvalSupported: false });
 export default function PdfContainer({ url, contentHigh, refPage, onClose }) {
   const [numPages, setNumPages] = useState(null);
   const [scale, setScale] = useState(1);
@@ -206,7 +208,7 @@ export default function PdfContainer({ url, contentHigh, refPage, onClose }) {
       >
         <Document
           file={url}
-          options={{ isEvalSupported: false }}
+          options={PDF_OPTIONS}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={(e) => {
             console.error(e);
